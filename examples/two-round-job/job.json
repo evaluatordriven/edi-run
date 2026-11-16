@@ -1,0 +1,124 @@
+{
+  "job": "q3-vendor-memo",
+  "levelClaimed": "CL1",
+  "specVersion": "0.9.8",
+  "bounds": {
+    "max_rounds": 3,
+    "max_cost_usd": 1.0,
+    "max_wall_seconds": 60
+  },
+  "subjectFiles": [
+    "memo.md"
+  ],
+  "bar": {
+    "file": "bar.md",
+    "digest": {
+      "sha256": "d572545a4dfb3f63d1a104930e96e53d01b8c7015ec78c42ba978fcb26e1117e"
+    },
+    "frozenAt": "2026-10-05T09:00:00Z",
+    "author": "Jordan Blake",
+    "dimensions": [
+      {
+        "id": "D1",
+        "criterion": "Includes top-level Markdown header",
+        "scale": {
+          "anchors": {
+            "1": "missing required element",
+            "5": "element present and verified"
+          },
+          "floor": 0.0,
+          "threshold": 4.0
+        }
+      },
+      {
+        "id": "D2",
+        "criterion": "Cites figure with named Source and date",
+        "scale": {
+          "anchors": {
+            "1": "missing required element",
+            "5": "element present and verified"
+          },
+          "floor": 0.0,
+          "threshold": 4.0
+        }
+      }
+    ],
+    "approvals": [
+      {
+        "role": "buyer",
+        "by": "Casey Park",
+        "barDigest": {
+          "sha256": "d572545a4dfb3f63d1a104930e96e53d01b8c7015ec78c42ba978fcb26e1117e"
+        },
+        "at": "2026-10-05T08:40:00Z",
+        "adopted": null
+      },
+      {
+        "role": "specialist",
+        "by": "Riley Moss",
+        "barDigest": {
+          "sha256": "d572545a4dfb3f63d1a104930e96e53d01b8c7015ec78c42ba978fcb26e1117e"
+        },
+        "at": "2026-10-05T08:50:00Z",
+        "adopted": null
+      }
+    ],
+    "publishedAt": null,
+    "groundTruth": [],
+    "dissent": []
+  },
+  "maker": {
+    "name": "Alex Kim",
+    "kind": "script",
+    "version": "1.0.0",
+    "method": {
+      "file": "method.md"
+    },
+    "model": null,
+    "command": [
+      "python3",
+      "scripts/maker.py"
+    ]
+  },
+  "instrument": {
+    "rubric": {
+      "file": "rubric.md"
+    },
+    "runner": {
+      "file": "runner.md"
+    }
+  },
+  "evaluators": [
+    {
+      "id": "E1",
+      "name": "Taylor Grant",
+      "kind": "script",
+      "model": null,
+      "script": {
+        "name": "eval_e1.py",
+        "author": "Morgan Lee",
+        "digest": {
+          "sha256": "119a98dc9b6ee86ca28f4eea6d42f0c45a86f001fd76059929c6fe263359bfec"
+        }
+      },
+      "command": [
+        "python3",
+        "scripts/eval_e1.py"
+      ],
+      "runs": 1
+    }
+  ],
+  "controls": {
+    "clean": "held_out/controls/clean.md",
+    "planted": "held_out/controls/planted.md"
+  },
+  "retention": {
+    "location": "examples/two-round-job",
+    "public": true
+  },
+  "disposition": {
+    "state": "given",
+    "by": "Casey Park",
+    "acknowledgesUnobserved": []
+  }
+}

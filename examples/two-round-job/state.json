@@ -1,0 +1,175 @@
+{
+  "status": "frozen",
+  "startedAt": "2026-11-16T23:35:19.401145Z",
+  "incumbent_round": 2,
+  "incumbent_digest": "71e397e2e28c523b0dea5442c69b3a5ed0a09c3c4ac2f16b63e7dc080ecf9f4f",
+  "incumbent_scores": {
+    "D1": 5.0,
+    "D2": 5.0
+  },
+  "last_candidate_digest": "71e397e2e28c523b0dea5442c69b3a5ed0a09c3c4ac2f16b63e7dc080ecf9f4f",
+  "defects": [],
+  "solutions": [],
+  "rounds": {
+    "1": {
+      "producedAt": "2026-11-16T23:35:20.401145Z",
+      "digest": "1423eda209fcca1162b0f95ea117baa1c33078a7c4e677f70b226eb23d4b9524",
+      "checks": [
+        {
+          "dimension": "D1",
+          "evaluator": "E1",
+          "run": 1,
+          "batch": "B1",
+          "at": "2026-11-16T23:35:20.411145Z",
+          "outcome": "conforms",
+          "score": 5.0,
+          "failureCondition": "score < 4.0",
+          "evidence": {
+            "name": "reading-D1-E1-r1-run1.json",
+            "sha256": "037faa87bcb896ab7bc30832baf29b4f305a78d3ac59e98010b11032762ad0ed"
+          },
+          "unobserved": null
+        },
+        {
+          "dimension": "D2",
+          "evaluator": "E1",
+          "run": 1,
+          "batch": "B1",
+          "at": "2026-11-16T23:35:20.421145Z",
+          "outcome": "does_not_conform",
+          "score": 1.0,
+          "failureCondition": "score < 4.0",
+          "evidence": {
+            "name": "reading-D2-E1-r1-run1.json",
+            "sha256": "2f4fb1a105d27d8d0a9697c6b8e604ec22769b2d5910bb65647380fb2cb1ae2f"
+          },
+          "unobserved": null
+        }
+      ],
+      "controls": [
+        {
+          "id": "K-B1-E1-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "case": {
+            "sha256": "32484219eeb870f4ba52ae95dac8391f4d8bb53df6c56ead94976598844e2793"
+          },
+          "expected": "conforms",
+          "outcome": "conforms"
+        },
+        {
+          "id": "K-B1-E1-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "case": {
+            "sha256": "840b7e2cbc05439388b23cabec87bbd485e279b391365509afee154e534d40b2"
+          },
+          "expected": "does_not_conform",
+          "outcome": "does_not_conform"
+        }
+      ],
+      "scores": [
+        {
+          "id": "K-B1-E1-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "conforms",
+          "outcome": "conforms"
+        },
+        {
+          "id": "K-B1-E1-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "does_not_conform",
+          "outcome": "does_not_conform"
+        }
+      ],
+      "external": [],
+      "dim_scores": {
+        "D1": 5.0,
+        "D2": 1.0
+      }
+    },
+    "2": {
+      "producedAt": "2026-11-16T23:35:21.421145Z",
+      "digest": "71e397e2e28c523b0dea5442c69b3a5ed0a09c3c4ac2f16b63e7dc080ecf9f4f",
+      "checks": [
+        {
+          "dimension": "D1",
+          "evaluator": "E1",
+          "run": 1,
+          "batch": "B2",
+          "at": "2026-11-16T23:35:21.431145Z",
+          "outcome": "conforms",
+          "score": 5.0,
+          "failureCondition": "score < 4.0",
+          "evidence": {
+            "name": "reading-D1-E1-r2-run1.json",
+            "sha256": "52d506e1aa0d45e75385abc0e290419d8d78ee9fc936a0975ec7b9f967e073d9"
+          },
+          "unobserved": null
+        },
+        {
+          "dimension": "D2",
+          "evaluator": "E1",
+          "run": 1,
+          "batch": "B2",
+          "at": "2026-11-16T23:35:21.441145Z",
+          "outcome": "conforms",
+          "score": 5.0,
+          "failureCondition": "score < 4.0",
+          "evidence": {
+            "name": "reading-D2-E1-r2-run1.json",
+            "sha256": "52d506e1aa0d45e75385abc0e290419d8d78ee9fc936a0975ec7b9f967e073d9"
+          },
+          "unobserved": null
+        }
+      ],
+      "controls": [
+        {
+          "id": "K-B2-E1-clean",
+          "batch": "B2",
+          "evaluator": "E1",
+          "case": {
+            "sha256": "32484219eeb870f4ba52ae95dac8391f4d8bb53df6c56ead94976598844e2793"
+          },
+          "expected": "conforms",
+          "outcome": "conforms"
+        },
+        {
+          "id": "K-B2-E1-planted",
+          "batch": "B2",
+          "evaluator": "E1",
+          "case": {
+            "sha256": "840b7e2cbc05439388b23cabec87bbd485e279b391365509afee154e534d40b2"
+          },
+          "expected": "does_not_conform",
+          "outcome": "does_not_conform"
+        }
+      ],
+      "scores": [
+        {
+          "id": "K-B2-E1-clean",
+          "batch": "B2",
+          "evaluator": "E1",
+          "expected": "conforms",
+          "outcome": "conforms"
+        },
+        {
+          "id": "K-B2-E1-planted",
+          "batch": "B2",
+          "evaluator": "E1",
+          "expected": "does_not_conform",
+          "outcome": "does_not_conform"
+        }
+      ],
+      "external": [],
+      "dim_scores": {
+        "D1": 5.0,
+        "D2": 5.0
+      }
+    }
+  },
+  "terminal_state": "accepted",
+  "reason": "all_conform"
+}

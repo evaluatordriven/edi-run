@@ -1,0 +1,14 @@
+{
+  "round": 2,
+  "mode": "pass_r2",
+  "best_artifact_digest": "1423eda209fcca1162b0f95ea117baa1c33078a7c4e677f70b226eb23d4b9524",
+  "defects": [
+    {
+      "dimension": "D2",
+      "score": 1.0,
+      "observation": "# Q3 Vendor Memo\nRenewal savings: 18% without citation.",
+      "remedy": "Add Source: citation"
+    }
+  ],
+  "workable_solutions": []
+}

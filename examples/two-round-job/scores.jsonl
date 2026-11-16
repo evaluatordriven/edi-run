@@ -1,0 +1,2 @@
+{"id": "K-B2-E1-clean", "batch": "B2", "evaluator": "E1", "expected": "conforms", "outcome": "conforms"}
+{"id": "K-B2-E1-planted", "batch": "B2", "evaluator": "E1", "expected": "does_not_conform", "outcome": "does_not_conform"}

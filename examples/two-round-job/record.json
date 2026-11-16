@@ -1,0 +1,174 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "memo.md",
+      "digest": {
+        "sha256": "32484219eeb870f4ba52ae95dac8391f4d8bb53df6c56ead94976598844e2793"
+      }
+    }
+  ],
+  "predicateType": "https://evaluatordriven.com/custody/v1",
+  "predicate": {
+    "specVersion": "0.9.8",
+    "levelClaimed": "CL1",
+    "bar": {
+      "digest": {
+        "sha256": "d572545a4dfb3f63d1a104930e96e53d01b8c7015ec78c42ba978fcb26e1117e"
+      },
+      "frozenAt": "2026-10-05T09:00:00Z",
+      "author": "Jordan Blake",
+      "dimensions": [
+        {
+          "id": "D1",
+          "criterion": "Includes top-level Markdown header",
+          "scale": {
+            "anchors": {
+              "1": "missing required element",
+              "5": "element present and verified"
+            },
+            "floor": 0.0,
+            "threshold": 4.0
+          }
+        },
+        {
+          "id": "D2",
+          "criterion": "Cites figure with named Source and date",
+          "scale": {
+            "anchors": {
+              "1": "missing required element",
+              "5": "element present and verified"
+            },
+            "floor": 0.0,
+            "threshold": 4.0
+          }
+        }
+      ],
+      "approvals": [
+        {
+          "role": "buyer",
+          "by": "Casey Park",
+          "at": "2026-10-05T09:00:00.001000Z",
+          "barDigest": {
+            "sha256": "d572545a4dfb3f63d1a104930e96e53d01b8c7015ec78c42ba978fcb26e1117e"
+          },
+          "adopted": null
+        },
+        {
+          "role": "specialist",
+          "by": "Riley Moss",
+          "at": "2026-10-05T09:00:00.002000Z",
+          "barDigest": {
+            "sha256": "d572545a4dfb3f63d1a104930e96e53d01b8c7015ec78c42ba978fcb26e1117e"
+          },
+          "adopted": null
+        }
+      ],
+      "publishedAt": null,
+      "groundTruth": [],
+      "dissent": []
+    },
+    "maker": {
+      "name": "Alex Kim",
+      "kind": "script",
+      "version": "1.0.0",
+      "method": {
+        "sha256": "de40e6acbc453b1930a21b59e20abf4f0647dd2d6263d45179b0a6c97fb5cd0f"
+      },
+      "model": null
+    },
+    "startedAt": "2026-11-16T23:35:19.401145Z",
+    "producedAt": "2026-11-16T23:35:21.421145Z",
+    "instrument": {
+      "rubric": {
+        "sha256": "cc53dfc9ebe9dc704fbf781dae33383e1cdcf2d40d3a289c21ee9e658ac854c0"
+      },
+      "runner": {
+        "sha256": "afb1c8553cd023331888911faa008a864fa5bce49792de62bd9803b068692b7c"
+      }
+    },
+    "evaluators": [
+      {
+        "id": "E1",
+        "name": "Taylor Grant",
+        "kind": "script",
+        "model": null,
+        "script": {
+          "name": "eval_e1.py",
+          "author": "Morgan Lee",
+          "digest": {
+            "sha256": "119a98dc9b6ee86ca28f4eea6d42f0c45a86f001fd76059929c6fe263359bfec"
+          }
+        }
+      }
+    ],
+    "checks": [
+      {
+        "at": "2026-11-16T23:35:21.431145Z",
+        "batch": "B2",
+        "dimension": "D1",
+        "evaluator": "E1",
+        "evidence": {
+          "name": "reading-D1-E1-r2-run1.json",
+          "sha256": "52d506e1aa0d45e75385abc0e290419d8d78ee9fc936a0975ec7b9f967e073d9"
+        },
+        "failureCondition": "score < 4.0",
+        "outcome": "conforms",
+        "run": 1,
+        "score": 5.0,
+        "unobserved": null
+      },
+      {
+        "at": "2026-11-16T23:35:21.441145Z",
+        "batch": "B2",
+        "dimension": "D2",
+        "evaluator": "E1",
+        "evidence": {
+          "name": "reading-D2-E1-r2-run1.json",
+          "sha256": "52d506e1aa0d45e75385abc0e290419d8d78ee9fc936a0975ec7b9f967e073d9"
+        },
+        "failureCondition": "score < 4.0",
+        "outcome": "conforms",
+        "run": 1,
+        "score": 5.0,
+        "unobserved": null
+      }
+    ],
+    "controls": [
+      {
+        "batch": "B2",
+        "case": {
+          "sha256": "32484219eeb870f4ba52ae95dac8391f4d8bb53df6c56ead94976598844e2793"
+        },
+        "evaluator": "E1",
+        "expected": "conforms",
+        "id": "K-B2-E1-clean",
+        "outcome": "conforms"
+      },
+      {
+        "batch": "B2",
+        "case": {
+          "sha256": "840b7e2cbc05439388b23cabec87bbd485e279b391365509afee154e534d40b2"
+        },
+        "evaluator": "E1",
+        "expected": "does_not_conform",
+        "id": "K-B2-E1-planted",
+        "outcome": "does_not_conform"
+      }
+    ],
+    "disagreements": [],
+    "violations": [],
+    "separationGaps": [],
+    "retention": {
+      "location": "examples/two-round-job",
+      "public": true
+    },
+    "external": [],
+    "disposition": {
+      "acknowledgesUnobserved": [],
+      "state": "given",
+      "by": "Casey Park",
+      "at": "2026-11-16T23:35:22.446145Z"
+    }
+  }
+}
