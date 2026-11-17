@@ -34,6 +34,7 @@ def _chat_json(url, model_id, sys_prompt, user_prompt, key_env="OPENROUTER_API_K
 
 
 def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: float = 60):
+    mk_usage = None
     out_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="edi_maker_") as sb:
         sb_p, sb_art = pathlib.Path(sb), pathlib.Path(sb) / "artifact"
@@ -54,11 +55,12 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
             cur_files = {sf: gates.safe_rel(sf, sb_art).read_text(encoding="utf-8") for sf in subject_files if gates.safe_rel(sf, sb_art).is_file()}
             sys_p = "You are the E-DI Maker seat. Return ONLY a JSON object mapping each filename to its full updated text: {\"files\": {\"<name>\": \"<content>\"}}. Address every reported defect without regressing passing dimensions."
             usr_p = f"METHOD:\n{method_txt}\n\nROUND PACKET:\n{json.dumps(pkt, indent=2)}\n\nINCUMBENT FILES:\n{json.dumps(cur_files, indent=2)}\n\nTARGET FILES: {subject_files}"
-            res, _, _ = _chat_json(maker_cfg["url"], maker_cfg["model"]["identifier"], sys_p, usr_p, maker_cfg.get("apiKeyEnv", "OPENROUTER_API_KEY"), timeout)
+            res, _, raw = _chat_json(maker_cfg["url"], maker_cfg["model"]["identifier"], sys_p, usr_p, maker_cfg.get("apiKeyEnv", "OPENROUTER_API_KEY"), timeout)
             for sf, content in (res.get("files") or {}).items():
                 dst = gates.safe_rel(sf, sb_art)
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 dst.write_text(str(content), encoding="utf-8")
+            mk_usage = raw.get("usage")
         for sf in subject_files:
             cand = gates.safe_rel(sf, sb_art)
             if cand.is_symlink():
@@ -67,17 +69,26 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 dst = gates.safe_rel(sf, out_dir)
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(cand, dst)
+    return {"usage": mk_usage} if mk_usage else None
 
 
 def run_evaluator(eval_cfg, target_path, dimension_id, job_dir=None, harness_out=None, timeout: float = 60, dim_cfg=None, rubric_txt=""):
     if "command" in eval_cfg:
         cmd = _resolve_cmd(list(eval_cfg["command"]), job_dir)
-        with tempfile.TemporaryDirectory(prefix="edi_eval_") as sb:
-            sb_t = pathlib.Path(sb) / "target"
-            (shutil.copytree if target_path.is_dir() else shutil.copy2)(target_path, sb_t)
-            env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": sb, "LANG": os.environ.get("LANG", "en_US.UTF-8")}
-            proc = subprocess.run(cmd + [str(sb_t), str(dimension_id)], cwd=sb, env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
-        return {"unobserved": {"channel": eval_cfg["id"], "reason": proc.stderr.strip() or "nonzero exit"}} if proc.returncode != 0 else json.loads(proc.stdout.strip())
+        try:
+            with tempfile.TemporaryDirectory(prefix="edi_eval_") as sb:
+                sb_t = pathlib.Path(sb) / "target"
+                (shutil.copytree if target_path.is_dir() else shutil.copy2)(target_path, sb_t)
+                env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": sb, "LANG": os.environ.get("LANG", "en_US.UTF-8")}
+                proc = subprocess.run(cmd + [str(sb_t), str(dimension_id)], cwd=sb, env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
+                if proc.returncode != 0:
+                    return {"unobserved": {"channel": eval_cfg["id"], "reason": proc.stderr.strip() or "nonzero exit"}}
+                try:
+                    return json.loads(proc.stdout.strip())
+                except (json.JSONDecodeError, ValueError):
+                    return {"unobserved": {"channel": eval_cfg["id"], "reason": "evaluator printed non-JSON output"}}
+        except subprocess.TimeoutExpired:
+            return {"unobserved": {"channel": eval_cfg["id"], "reason": "evaluator timed out"}}
     txt = "\n---\n".join(f"FILE {p.name}:\n{p.read_text(encoding='utf-8')}" for p in sorted(target_path.rglob("*")) if p.is_file()) if target_path.is_dir() else target_path.read_text(encoding="utf-8")
     sys_p = "You are an independent E-DI Evaluator seat. Judge the artifact strictly against the dimension criterion and scale anchors. Return ONLY JSON: {\"score\": <number>, \"observation\": \"<exact quote from artifact>\", \"remedy\": \"<concise fix if below threshold, else empty>\"}"
     usr_p = f"RUBRIC:\n{rubric_txt}\n\nDIMENSION: {json.dumps(dim_cfg or {'id': dimension_id})}\n\nARTIFACT:\n{txt}"
