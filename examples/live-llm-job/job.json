@@ -107,7 +107,7 @@
         "python3",
         "scripts/eval_struct.py"
       ],
-      "runs": 2
+      "runs": 1
     },
     {
       "id": "E2",
@@ -121,7 +121,7 @@
         "readOnly": true
       },
       "script": null,
-      "runs": 2
+      "runs": 1
     }
   ],
   "controls": {

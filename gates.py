@@ -128,57 +128,100 @@ def _canon(s):
     return " ".join(s.casefold().split())
 
 
+WINDOW = 32  # characters, after case/whitespace canonicalization
+
+
 def held_out_needles(job_dir):
-    """D4.9 needle set: full-file digests plus every >=16-char sliding window of every
-    held-out line, whitespace-canonicalized. Whitespace/case obfuscation cannot slip a
-    contiguous fragment past this set; paraphrase remains a disclosed tripwire limit."""
+    """D4.9 needle set: full-file digests plus every WINDOW-character window of every held-out
+    line (case/whitespace-canonicalized), minus any window that also occurs in bar.md or
+    method.md -- wording the Maker is already given is not held-out (D3.held-out). Disclosed
+    limits: paraphrase, and held-out lines shorter than WINDOW, are not matched."""
     held_dir, needles = job_dir / "held_out", set()
-    pub = _canon("".join((job_dir / f).read_text(encoding="utf-8", errors="ignore") for f in ("bar.md", "method.md") if (job_dir / f).is_file()))
+    pub = _canon("\n".join((job_dir / f).read_text(encoding="utf-8", errors="ignore") for f in ("bar.md", "method.md") if (job_dir / f).is_file()))
     marker = _canon(WITHHELD)
     for p in (p for p in (held_dir.rglob("*") if held_dir.is_dir() else []) if p.is_file()):
         needles.add(sha256_file(p).casefold())
         for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines():
             c = _canon(ln)
-            if len(c) < 16 or c in pub:
-                continue
-            for i in range(0, max(1, len(c) - 15)):
-                w = c[i:i + 16]
-                if w not in marker:
+            for i in range(0, len(c) - WINDOW + 1):
+                w = c[i:i + WINDOW]
+                if w not in pub and w not in marker:
                     needles.add(w)
-    return {n for n in needles if not (len(n) >= 16 and n in marker)}
+    return needles
 
 
 WITHHELD = "[withheld: matches held-out material]"
 
 
-def _scrub_value(v, needles):
-    return isinstance(v, str) and v and any(nd in _canon(v) for nd in needles if len(nd) >= 16)
+def _canon_map(s):
+    """_canon(s), plus the source index of every canonical character (for span redaction)."""
+    out, idx, gap = [], [], False
+    for i, ch in enumerate(s):
+        if ch.isspace():
+            gap = bool(out)
+            continue
+        if gap:
+            out.append(" ")
+            idx.append(i - 1)
+            gap = False
+        for c in ch.casefold():
+            out.append(c)
+            idx.append(i)
+    return "".join(out), idx
 
 
-def _scrub_walk(v, needles):
+def _redact(s, needles, digests):
+    """Replace only the spans of s that match held-out material; everything else survives."""
+    c, idx = _canon_map(s)
+    cover = [False] * len(c)
+    for i in range(0, len(c) - WINDOW + 1):
+        if c[i:i + WINDOW] in needles:
+            cover[i:i + WINDOW] = [True] * WINDOW
+    for d in digests:
+        at = c.find(d)
+        while at != -1:
+            cover[at:at + len(d)] = [True] * len(d)
+            at = c.find(d, at + 1)
+    spans, j = [], 0
+    while j < len(c):
+        if cover[j]:
+            k = j
+            while k < len(c) and cover[k]:
+                k += 1
+            spans.append((idx[j], idx[k - 1] + 1))
+            j = k
+        else:
+            j += 1
+    for a, b in reversed(spans):
+        s = s[:a] + WITHHELD + s[b:]
+    return s, len(spans)
+
+
+def _scrub_walk(v, needles, digests):
     if isinstance(v, str):
-        return (WITHHELD, 1) if _scrub_value(v, needles) else (v, 0)
+        return _redact(v, needles, digests) if v else (v, 0)
     if isinstance(v, dict):
-        n = 0
-        out = {}
+        out, n = {}, 0
         for k, sv in v.items():
-            out[k], w = _scrub_walk(sv, needles)
+            out[k], w = _scrub_walk(sv, needles, digests)
             n += w
         return out, n
     if isinstance(v, list):
         out, n = [], 0
         for sv in v:
-            nv, w = _scrub_walk(sv, needles)
-            out.append(nv); n += w
+            nv, w = _scrub_walk(sv, needles, digests)
+            out.append(nv)
+            n += w
         return out, n
     return v, 0
 
 
 def scrub_held_out(items, needles):
-    """Return (items with matching text replaced anywhere in the structure, count withheld) — D4.9 filters, never forwards."""
+    """Return (items with held-out spans replaced anywhere in the structure, spans withheld) -- D4.9 filters, never forwards."""
+    digests = [n for n in needles if len(n) != WINDOW]
     out, n = [], 0
     for it in items:
-        it, w = _scrub_walk(it, needles)
+        it, w = _scrub_walk(it, needles, digests)
         n += w
         out.append(it)
     return out, n
@@ -188,8 +231,11 @@ def gate_packet(packet, job_dir, expected_incumbent_digest):
     if packet.get("best_artifact_digest") != expected_incumbent_digest:
         raise GateError("Maker packet best_artifact_digest does not match Pareto-best incumbent (I-04/I-06)")
     low, held_dir = _canon(json.dumps(packet, sort_keys=True)), job_dir / "held_out"
-    if any(k in low for k in ("held_out", "scores.jsonl", "job.jsonl")):
-        raise GateError("held-out path marker leaked into Maker packet (I-04)")
+    pub_words = _canon("\n".join((job_dir / f).read_text(encoding="utf-8", errors="ignore") for f in ("bar.md", "method.md") if (job_dir / f).is_file()))
+    for k in ("held_out", "scores.jsonl", "job.jsonl"):
+        # wording the Maker is already given (bar/method) is not a leak (D3.held-out)
+        if k in low and (k not in pub_words or k == "scores.jsonl" or k == "job.jsonl"):
+            raise GateError("held-out path marker leaked into Maker packet (I-04)")
     for nd in held_out_needles(job_dir):
         if nd in low:
             raise GateError("held-out content or digest leaked into Maker packet (I-04)")

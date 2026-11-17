@@ -1,5 +1,5 @@
 """Seat execution adapters (script subprocess + stdlib OpenAI-compatible HTTP client). Standard library only."""
-import http.server, json, os, pathlib, re, shutil, subprocess, tempfile, threading, urllib.error, urllib.parse, urllib.request
+import http.server, json, os, pathlib, re, shutil, socketserver, subprocess, sys, tempfile, threading, urllib.error, urllib.parse, urllib.request
 import gates
 
 
@@ -35,19 +35,31 @@ def _chat_json(url, model_id, sys_prompt, user_prompt, key_env="OPENROUTER_API_K
 
 def sandbox_prefix(stype, jd, sb_p):
     """The sandbox argv prefix for one launch, shared by the launcher and the
-    capability probe so the probe exercises the exact flag shape used at runtime."""
+    capability probe so the probe exercises the exact flag shape used at runtime.
+    Masks are applied ONLY to paths that already exist: bwrap creates missing mount
+    points on the host, and a freeze check must never write anything."""
     if stype == "sandbox-exec":
         profile = sb_p / "agent.sb"
         return ["sandbox-exec", "-f", str(profile)]
     if stype == "bwrap":
-        cmd = ["bwrap", "--die-with-parent", "--unshare-pid", "--dev-bind", "/", "/",
+        # Read-only host (round-2 A): only the agent workspace is writable, and nothing
+        # is ever created on the host. Own network namespace (round-2 E): the only way
+        # out is the relay to the proxy's Unix socket. Every job's controls are masked
+        # (round-2 B): control sets are reused across jobs under one jobs root.
+        home = pathlib.Path.home()
+        cmd = ["bwrap", "--die-with-parent", "--unshare-pid", "--unshare-net",
+               "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
                "--tmpfs", str(jd)]
+        for ho in sorted(set(jd.parent.glob("*/held_out")) | set(jd.parent.rglob("held_out"))):  # every job's controls, any depth
+            if ho.is_dir() and ho.parent != jd:
+                cmd += ["--tmpfs", str(ho)]
         if (jd / "scripts").is_dir():
             cmd += ["--ro-bind", str(jd / "scripts"), str(jd / "scripts")]
-        cmd += ["--tmpfs", str(pathlib.Path.home() / ".ssh"),
-                "--ro-bind", "/dev/null", str(pathlib.Path.home() / ".hermes" / ".env"),
-                "--bind", str(sb_p), str(sb_p)]
-        return cmd
+        if (home / ".ssh").is_dir():
+            cmd += ["--tmpfs", str(home / ".ssh")]
+        if (home / ".hermes" / ".env").is_file():
+            cmd += ["--ro-bind", "/dev/null", str(home / ".hermes" / ".env")]
+        return cmd + ["--bind", str(sb_p), str(sb_p)]
     return None
 
 
@@ -63,10 +75,63 @@ def sandbox_usable(stype, jd=None, sb_p=None):
         with tempfile.TemporaryDirectory(prefix="edi_bwrap_probe_") as pd:
             probe_jd, probe_sb = pathlib.Path(pd) / "job", pathlib.Path(pd) / "sb"
             probe_jd.mkdir(), probe_sb.mkdir()
-            probe = subprocess.run(sandbox_prefix(stype, probe_jd, probe_sb) + ["true"],
-                                   capture_output=True, timeout=30)
+            probe_cmd = sandbox_prefix(stype, probe_jd, probe_sb)
+            assert probe_cmd is not None  # stype is checked above
+            if stype == "bwrap":  # the probe must exercise the relay too
+                probe_cmd = probe_cmd + [sys.executable, "-I", "-c", _RELAY, str(probe_sb / "proxy.sock"), str(_INNER_PROXY_PORT_BASE), "true"]
+            else:
+                probe_cmd = probe_cmd + ["true"]
+            probe = subprocess.run(probe_cmd, capture_output=True, timeout=30)
             return probe.returncode == 0
     return False
+
+
+_INNER_PROXY_PORT_BASE = 18080  # agent's view of the proxy inside its own netns (bwrap); offset per launch
+_RELAY = (
+    "import socket, subprocess, sys, threading\n"
+    "sock_path, port, cmd = sys.argv[1], int(sys.argv[2]), sys.argv[3:]\n"
+    "srv = socket.socket()\n"
+    "srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
+    "srv.bind(('127.0.0.1', port))\n"
+    "srv.listen(16)\n"
+    "def pipe(a, b):\n"
+    "    try:\n"
+    "        while True:\n"
+    "            d = a.recv(65536)\n"
+    "            if not d:\n"
+    "                break\n"
+    "            b.sendall(d)\n"
+    "    except OSError:\n"
+    "        pass\n"
+    "    finally:\n"
+    "        for s in (a, b):\n"
+    "            try:\n"
+    "                s.shutdown(socket.SHUT_RDWR)\n"
+    "            except OSError:\n"
+    "                pass\n"
+    "def serve():\n"
+    "    while True:\n"
+    "        c, _ = srv.accept()\n"
+    "        u = socket.socket(socket.AF_UNIX)\n"
+    "        u.connect(sock_path)\n"
+    "        threading.Thread(target=pipe, args=(c, u), daemon=True).start()\n"
+    "        threading.Thread(target=pipe, args=(u, c), daemon=True).start()\n"
+    "threading.Thread(target=serve, daemon=True).start()\n"
+    "sys.exit(subprocess.call(cmd))\n"
+)
+
+
+class _NoCrossHostRedirect(urllib.request.HTTPRedirectHandler):
+    """The proxy holds the API key; a redirect to a different host must not receive it."""
+
+    def __init__(self, upstream_host):
+        self.upstream_host = upstream_host
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        parts = urllib.parse.urlparse(newurl)
+        if parts.hostname != self.upstream_host or parts.scheme != urllib.parse.urlparse(req.full_url).scheme:
+            raise urllib.error.HTTPError(req.full_url, code, f"redirect to {newurl} refused (cross-host or scheme downgrade)", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: float = 60):
@@ -75,6 +140,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
     with tempfile.TemporaryDirectory(prefix="edi_maker_") as sb:
         sb_p, sb_art = pathlib.Path(sb).resolve(), pathlib.Path(sb).resolve() / "artifact"
         sb_art.mkdir()
+        (sb_p / "tmp").mkdir()  # the agent's only writable temp root (writes are workspace-confined)
         for sf in (sf for sf in subject_files if gates.safe_rel(sf, out_dir).is_file()):
             dst = gates.safe_rel(sf, sb_art)
             dst.parent.mkdir(parents=True, exist_ok=True)
@@ -104,28 +170,43 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         self.end_headers()
                         return
                     headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})}
+                    host, status, err = urllib.parse.urlparse(upstream).hostname or "", 200, None
+                    upstream_host = urllib.parse.urlparse(upstream).hostname or ""
+                    opener = urllib.request.build_opener(_NoCrossHostRedirect(upstream_host))
                     try:
-                        with urllib.request.urlopen(urllib.request.Request(upstream, data=body, headers=headers, method="POST"), timeout=max(1.0, float(timeout))) as resp:
+                        with opener.open(urllib.request.Request(upstream, data=body, headers=headers, method="POST"), timeout=max(1.0, float(timeout))) as resp:
                             out, host = resp.read(), urllib.parse.urlparse(resp.geturl()).hostname or ""
                     except urllib.error.HTTPError as e:
-                        calls.append({"host": urllib.parse.urlparse(upstream).hostname, "model": req.get("model"), "usage": None, "upstream_error": e.code})
-                        out = json.dumps({"error": {"code": e.code}}).encode("utf-8")
+                        status, err = e.code, e.code
+                        out = e.read() or json.dumps({"error": {"code": e.code}}).encode("utf-8")
+                    except (urllib.error.URLError, OSError):
+                        status, err = 502, "unreachable"
+                        out = json.dumps({"error": {"code": 502, "message": "upstream unreachable"}}).encode("utf-8")
                     try:
-                        resp_json = json.loads(out.decode("utf-8"))
-                        calls.append({"host": host, "model": req.get("model"), "usage": resp_json.get("usage")})
-                    except (ValueError, json.JSONDecodeError):
-                        calls.append({"host": host, "model": req.get("model"), "usage": None})
-                    self.send_response(200)
+                        usage = json.loads(out.decode("utf-8")).get("usage") if status == 200 else None
+                    except (ValueError, AttributeError):
+                        usage = None
+                    calls.append({"host": host, "model": req.get("model"), "usage": usage, **({"upstream_error": err} if err else {})})
+                    self.send_response(status)
                     self.send_header("Content-Type", "application/json")
                     self.send_header("Content-Length", str(len(out)))
                     self.end_headers()
                     self.wfile.write(out)
 
-            srv = http.server.HTTPServer(("127.0.0.1", 0), _Proxy)
+            inner_port = _INNER_PROXY_PORT_BASE + (os.getpid() % 2000)  # per-launch offset; concurrent jobs must not collide
+            if (maker_cfg.get("sandbox") or {}).get("type") == "bwrap":
+                class _UnixProxy(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+                    daemon_threads = True
+                srv = _UnixProxy(str(sb_p / "proxy.sock"), _Proxy)
+                proxy_url = f"http://127.0.0.1:{inner_port}/v1/chat/completions"
+            else:
+                srv = http.server.HTTPServer(("127.0.0.1", 0), _Proxy)
+                proxy_url = f"http://127.0.0.1:{srv.server_port}/v1/chat/completions"
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             try:
                 env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(sb_p), "LANG": os.environ.get("LANG", "en_US.UTF-8"),
-                       "AGENT_PROXY_URL": f"http://127.0.0.1:{srv.server_port}/v1/chat/completions", "AGENT_MODEL": maker_cfg.get("model", {}).get("identifier", "")}
+                       "TMPDIR": str(sb_p / "tmp"),
+                       "AGENT_PROXY_URL": proxy_url, "AGENT_MODEL": maker_cfg.get("model", {}).get("identifier", "")}
                 cmd = _resolve_cmd(list(maker_cfg["command"]), job_dir)
                 stype = (maker_cfg.get("sandbox") or {}).get("type")
                 jd = pathlib.Path(job_dir).resolve()  # seatbelt matches canonical paths only
@@ -149,13 +230,27 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         f"(deny file-read* (literal {q}{jd / 'scores.jsonl'}{q}))\n"
                         f"(deny file-read* (literal {q}{jd / 'job.json'}{q}))\n"
                         f"(deny file-read* (subpath {q}{home / '.ssh'}{q}))\n"
-                        f"(deny file-read* (literal {q}{home / '.hermes' / '.env'}{q}))\n",
+                        f"(deny file-read* (literal {q}{home / '.hermes' / '.env'}{q}))\n"
+                        # credential-bearing home dotfiles beyond .ssh: the agent must not
+                        # read what the deny list does not name (round-2 adversarial #7)
+                        + "".join(
+                            f"(deny file-read* (subpath {q}{home / ('.' + n)}{q}))\n"
+                            for n in ("config", "aws", "netrc", "git-credentials", "gnupg", "kube", "docker", "config/gcloud")
+                        )
+                        + "".join(
+                            f"(deny file-read* (literal {q}{home / ('.' + n)}{q}))\n"
+                            for n in ("zsh_history", "bash_history", "netrc", "wget-hsts", "npmrc", "pypirc")
+                        )
+                        + "(deny file-read* (regex #\"/held_out(\\.|/|$)\"))\n"
+                        "(deny network*)\n"
+                        f"(allow network-outbound (remote ip {q}localhost:{srv.server_port}{q}))\n",
                         encoding="utf-8")
                 # bwrap: keep the network namespace (the agent must reach the loop-local
                 # proxy); the whole job dir is masked with a tmpfs -- held_out, evidence,
                 # and the custody files live inside it -- then the agent's own scripts
                 # subtree is bound back read-only. The packet is read from the workspace copy.
-                cmd = (sandbox_prefix(stype, jd, sb_p) or []) + cmd
+                relay = [sys.executable, "-I", "-c", _RELAY, str(sb_p / "proxy.sock"), str(inner_port)] if stype == "bwrap" else []
+                cmd = (sandbox_prefix(stype, jd, sb_p) or []) + relay + cmd
                 proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
                 if proc.returncode != 0:
                     raise RuntimeError(f"Agent Maker failed ({proc.returncode}): {proc.stderr.strip()} | cmd[0:4]={cmd[:4]}")

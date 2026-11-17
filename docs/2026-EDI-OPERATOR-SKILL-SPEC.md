@@ -136,7 +136,7 @@ deletes anything without the Owner's explicit ruling naming the action.
 1. Jobs root location and name (proposal: `~/edi-jobs/`).
 2. Whether `AUTHORSHIP.md` should also capture a human "sponsor" line (who asked for
    the job), for auditability beyond seat separation.
-3. Whether `preflight.py` should live in `gates.py` (shared with the runtime) instead
-   of duplicated in the skill — trade-off: duplication vs keeping the skill decoupled
-   from runtime internals. Proposal: skill owns a thin re-implementation that asserts
-   parity by running `freeze --dry-run` when the runtime gains that flag.
+3. RESOLVED (2026-11-17, round-2 briefing): build `edi.py freeze --dry-run` in the
+   runtime rather than a second preflight inside the skill; `preflight.py` stays a thin
+   wrapper around it. Land the sandbox fixes first — a freeze-time sandbox check that
+   writes to the host is a defect the dry-run must not inherit. that flag.
