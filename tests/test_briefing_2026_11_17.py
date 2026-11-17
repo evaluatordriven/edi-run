@@ -213,7 +213,10 @@ class Finding4AgentMaker(_Base):
                 "pathlib.Path(sys.argv[2], 'memo.md').write_text('" + PASSING + "', encoding='utf-8')\n"),
                 url=f"http://127.0.0.1:{srv.server_port}/v1/chat/completions")
             cfg = self._cfg(job)
-            cfg["maker"]["sandbox"] = {"type": "sandbox-exec"}
+            st = test_edi._SANDBOX_TYPE
+            if st is None:
+                self.skipTest("no OS sandbox available on this host")
+            cfg["maker"]["sandbox"] = {"type": st}
             self._save(job, cfg)
             loop.freeze_job(job)
             loop.run_job(job)
@@ -249,9 +252,9 @@ class Finding4AgentMaker(_Base):
         """D3.held-out: held-out material never reaches the Maker. R3 (sandboxed variant):
         the runtime launches agent Makers under maker.sandbox confinement, so held_out/
         is neither readable nor writable, and the custody log stays out of reach."""
-        import shutil as _sh
-        if not _sh.which("sandbox-exec"):
-            self.skipTest("sandbox-exec unavailable on this host")
+        import test_edi as _te
+        if _te._SANDBOX_TYPE is None:
+            self.skipTest("no OS sandbox available on this host")
         job = self._agent_job("f4d", (
             "import pathlib, sys\n"
             "ho = pathlib.Path(__file__).resolve().parents[1] / 'held_out' / 'controls' / 'planted.md'\n"
@@ -265,7 +268,7 @@ class Finding4AgentMaker(_Base):
             "    wrote = False\n"
             "pathlib.Path(sys.argv[2], 'memo.md').write_text('" + PASSING + "held_out_readable=' + str(seen) + ' held_out_writable=' + str(wrote) + '\\n', encoding='utf-8')\n"))
         cfg = self._cfg(job)
-        cfg["maker"]["sandbox"] = {"type": "sandbox-exec"}
+        cfg["maker"]["sandbox"] = {"type": test_edi._SANDBOX_TYPE}
         self._save(job, cfg)
         loop.freeze_job(job)
         loop.run_job(job)

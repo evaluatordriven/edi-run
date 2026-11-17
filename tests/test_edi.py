@@ -17,6 +17,16 @@ import gates  # noqa: E402
 import loop  # noqa: E402
 import check as custody_check  # vendored custody checker; resolves via loop.py's vendor path insert  # noqa: E402
 
+def _sandbox_type():
+    if sys.platform == "darwin" and shutil.which("sandbox-exec"):
+        return "sandbox-exec"
+    if sys.platform.startswith("linux") and shutil.which("bwrap"):
+        return "bwrap"
+    return None
+
+
+_SANDBOX_TYPE = _sandbox_type()
+
 
 def sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
@@ -707,6 +717,8 @@ class TestEDIRuntime(unittest.TestCase):
             loop.run_job(job)
 
     def test_agent_maker_proxy_key_and_metering(self):
+        if _SANDBOX_TYPE is None:
+            self.skipTest("no OS sandbox available on this host")
         # The agent Maker calls models only through the local proxy: no key in its env,
         # every upstream call metered, files handed back like a chat Maker's.
         server = http.server.HTTPServer(("127.0.0.1", 0), _MockLLMHandler)
@@ -738,7 +750,7 @@ class TestEDIRuntime(unittest.TestCase):
             cfg["maker"] = {"name": "Agent Maker", "kind": "agent", "version": "1.0.0", "method": {"file": "method.md"},
                             "url": f"http://127.0.0.1:{port}/v1/chat/completions",
                             "model": {"family": "mock", "identifier": "mock-agent", "endpoint": "127.0.0.1", "readOnly": False},
-                            "sandbox": {"type": "sandbox-exec"},
+                            "sandbox": {"type": _SANDBOX_TYPE},
                             "command": [sys.executable, str(agent)]}
             (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
             loop.freeze_job(job)
@@ -758,6 +770,8 @@ class TestEDIRuntime(unittest.TestCase):
             server.server_close()
 
     def test_agent_maker_failures(self):
+        if _SANDBOX_TYPE is None:
+            self.skipTest("no OS sandbox available on this host")
         # nonzero exit and empty output both halt as maker_failed; timeout kills
         job = self._make_base_job(subdir="job_agent_fail")
         agent = job / "scripts" / "agent_fail.py"
@@ -765,7 +779,7 @@ class TestEDIRuntime(unittest.TestCase):
         cfg = json.loads((job / "job.json").read_text())
         cfg["maker"] = {"name": "Agent Maker", "kind": "agent", "version": "1", "method": {"file": "method.md"},
                         "url": "https://example.invalid/v1", "model": {"family": "m", "identifier": "m1", "endpoint": "example.invalid", "readOnly": False},
-                        "sandbox": {"type": "sandbox-exec"},
+                        "sandbox": {"type": _SANDBOX_TYPE},
                         "command": [sys.executable, str(agent)]}
         cfg["pricing"] = {"default": {"input_usd_per_mtok": 0, "output_usd_per_mtok": 0}}
         (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
