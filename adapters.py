@@ -41,9 +41,12 @@ def sandbox_usable(stype):
     if stype == "bwrap":
         if not shutil.which("bwrap"):
             return False
-        probe = subprocess.run(["bwrap", "--unshare-pid", "--dev-bind", "/", "/", "true"],
-                               capture_output=True, timeout=30)
-        return probe.returncode == 0
+        with tempfile.TemporaryDirectory(prefix="edi_bwrap_probe_") as pd:
+            probe = subprocess.run(
+                ["bwrap", "--die-with-parent", "--unshare-pid", "--dev-bind", "/", "/",
+                 "--tmpfs", pd, "true"],
+                capture_output=True, timeout=30)
+            return probe.returncode == 0
     return False
 
 

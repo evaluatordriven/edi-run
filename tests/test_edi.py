@@ -22,12 +22,16 @@ def _sandbox_type():
         return "sandbox-exec"
     if sys.platform.startswith("linux") and shutil.which("bwrap"):
         # bwrap needs unprivileged user namespaces; some hosts (Ubuntu hosted runners)
-        # ship the binary but forbid them. Probe capability, not mere presence.
-        probe = subprocess.run(
-            ["bwrap", "--unshare-pid", "--dev-bind", "/", "/", "true"],
-            capture_output=True, timeout=30)
-        if probe.returncode == 0:
-            return "bwrap"
+        # ship the binary but forbid them. Probe with the same flag shape the real
+        # sandbox uses (tmpfs mounts included), and show the probe stderr on failure.
+        with tempfile.TemporaryDirectory(prefix="edi_bwrap_probe_") as pd:
+            probe = subprocess.run(
+                ["bwrap", "--die-with-parent", "--unshare-pid", "--dev-bind", "/", "/",
+                 "--tmpfs", pd, "true"],
+                capture_output=True, timeout=30)
+            if probe.returncode == 0:
+                return "bwrap"
+            print("bwrap probe failed:", probe.stderr.decode()[:200], flush=True)
     return None
 
 
