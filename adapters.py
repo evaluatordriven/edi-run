@@ -33,19 +33,38 @@ def _chat_json(url, model_id, sys_prompt, user_prompt, key_env="OPENROUTER_API_K
     return json.loads(m.group(1) if m else txt), host, raw
 
 
-def sandbox_usable(stype):
+def sandbox_prefix(stype, jd, sb_p):
+    """The sandbox argv prefix for one launch, shared by the launcher and the
+    capability probe so the probe exercises the exact flag shape used at runtime."""
+    if stype == "sandbox-exec":
+        profile = sb_p / "agent.sb"
+        return ["sandbox-exec", "-f", str(profile)]
+    if stype == "bwrap":
+        cmd = ["bwrap", "--die-with-parent", "--unshare-pid", "--dev-bind", "/", "/",
+               "--tmpfs", str(jd)]
+        if (jd / "scripts").is_dir():
+            cmd += ["--ro-bind", str(jd / "scripts"), str(jd / "scripts")]
+        cmd += ["--tmpfs", str(pathlib.Path.home() / ".ssh"),
+                "--ro-bind", "/dev/null", str(pathlib.Path.home() / ".hermes" / ".env"),
+                "--bind", str(sb_p), str(sb_p)]
+        return cmd
+    return None
+
+
+def sandbox_usable(stype, jd=None, sb_p=None):
     """True when the declared sandbox can actually launch here, not merely when the
-    binary exists (Ubuntu hosted runners ship bwrap but forbid user namespaces)."""
+    binary exists (Ubuntu hosted runners ship bwrap but forbid user namespaces).
+    Probes with the real flag shape via sandbox_prefix."""
     if stype == "sandbox-exec":
         return bool(shutil.which("sandbox-exec"))
     if stype == "bwrap":
         if not shutil.which("bwrap"):
             return False
         with tempfile.TemporaryDirectory(prefix="edi_bwrap_probe_") as pd:
-            probe = subprocess.run(
-                ["bwrap", "--die-with-parent", "--unshare-pid", "--dev-bind", "/", "/",
-                 "--tmpfs", pd, "true"],
-                capture_output=True, timeout=30)
+            probe_jd, probe_sb = pathlib.Path(pd) / "job", pathlib.Path(pd) / "sb"
+            probe_jd.mkdir(), probe_sb.mkdir()
+            probe = subprocess.run(sandbox_prefix(stype, probe_jd, probe_sb) + ["true"],
+                                   capture_output=True, timeout=30)
             print(f"bwrap probe rc={probe.returncode} err={probe.stderr.decode()[:120]!r}", flush=True)
             return probe.returncode == 0
     return False
@@ -112,6 +131,8 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 stype = (maker_cfg.get("sandbox") or {}).get("type")
                 jd = pathlib.Path(job_dir).resolve()  # seatbelt matches canonical paths only
                 home = pathlib.Path.home()
+                if stype not in ("sandbox-exec", "bwrap"):
+                    raise gates.GateError(f"unknown sandbox type {stype}; supported: sandbox-exec (macOS), bwrap (Linux)")
                 if stype == "sandbox-exec":
                     q = chr(34)  # seatbelt profiles quote paths with double quotes
                     # Reads: default-allow except held-out material, the custody/evidence files
@@ -119,8 +140,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                     # Writes: confined to the agent workspace. Network stays open so the agent
                     # can reach the local proxy; it holds no key and the proxy rejects
                     # undeclared models (keyless-open-endpoint exfil is a disclosed limit).
-                    profile = sb_p / "agent.sb"
-                    profile.write_text(
+                    (sb_p / "agent.sb").write_text(
                         "(version 1)(allow default)\n"
                         "(deny file-write*)\n"
                         f"(allow file-write* (subpath {q}{sb_p}{q}))\n"
@@ -132,22 +152,11 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         f"(deny file-read* (subpath {q}{home / '.ssh'}{q}))\n"
                         f"(deny file-read* (literal {q}{home / '.hermes' / '.env'}{q}))\n",
                         encoding="utf-8")
-                    cmd = ["sandbox-exec", "-f", str(profile)] + cmd
-                elif stype == "bwrap":
-                    # Keep the network namespace (the agent must reach the loop-local proxy).
-                    # The whole job dir is masked with a tmpfs — held_out, evidence, and the
-                    # custody files live inside it — then the agent's own scripts subtree is
-                    # bound back read-only (the agent must be able to load its code). The
-                    # packet itself is read from the agent workspace copy.
-                    cmd = ["bwrap", "--die-with-parent", "--unshare-pid", "--dev-bind", "/", "/",
-                           "--tmpfs", str(jd)]
-                    if (jd / "scripts").is_dir():
-                        cmd += ["--ro-bind", str(jd / "scripts"), str(jd / "scripts")]
-                    cmd += ["--tmpfs", str(home / ".ssh"),
-                            "--ro-bind", "/dev/null", str(home / ".hermes" / ".env"),
-                            "--bind", str(sb_p), str(sb_p)] + cmd
-                elif stype:
-                    raise gates.GateError(f"unknown sandbox type {stype}; supported: sandbox-exec (macOS), bwrap (Linux)")
+                # bwrap: keep the network namespace (the agent must reach the loop-local
+                # proxy); the whole job dir is masked with a tmpfs -- held_out, evidence,
+                # and the custody files live inside it -- then the agent's own scripts
+                # subtree is bound back read-only. The packet is read from the workspace copy.
+                cmd = sandbox_prefix(stype, jd, sb_p) or cmd  # prefix None only for unknown types, refused above
                 proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
                 if proc.returncode != 0:
                     raise RuntimeError(f"Agent Maker failed ({proc.returncode}): {proc.stderr.strip()} | cmd[0:4]={cmd[:4]}")
