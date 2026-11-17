@@ -46,6 +46,7 @@ def sandbox_usable(stype):
                 ["bwrap", "--die-with-parent", "--unshare-pid", "--dev-bind", "/", "/",
                  "--tmpfs", pd, "true"],
                 capture_output=True, timeout=30)
+            print(f"bwrap probe rc={probe.returncode} err={probe.stderr.decode()[:120]!r}", flush=True)
             return probe.returncode == 0
     return False
 
@@ -149,7 +150,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                     raise gates.GateError(f"unknown sandbox type {stype}; supported: sandbox-exec (macOS), bwrap (Linux)")
                 proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
                 if proc.returncode != 0:
-                    raise RuntimeError(f"Agent Maker failed ({proc.returncode}): {proc.stderr.strip()}")
+                    raise RuntimeError(f"Agent Maker failed ({proc.returncode}): {proc.stderr.strip()} | cmd[0:4]={cmd[:4]}")
                 if not any(gates.safe_rel(sf, sb_art).is_file() for sf in subject_files):
                     raise RuntimeError("Agent Maker returned no subject files")
                 mk_usage = {"agent_calls": calls}  # metered per-call by the loop
