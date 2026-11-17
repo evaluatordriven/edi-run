@@ -77,10 +77,12 @@ class FindingG_LinuxCredentialParity(_R2Base):
             f.write_text("decoy")
         with unittest.mock.patch("adapters.pathlib.Path.home", return_value=fake_home):
             cmd = adapters.sandbox_prefix("bwrap", jd, sb)
+        pairs = [(cmd[i], cmd[i + 1]) for i in range(len(cmd) - 1)]  # contiguous flag/path pairs
         for n in adapters._HOME_DOTFILE_DIRS:
-            self.assertIn(["--tmpfs", str(fake_home / ("." + n))], cmd)
+            self.assertIn(("--tmpfs", str(fake_home / ("." + n))), pairs)
         for n in adapters._HOME_DOTFILE_FILES:
-            self.assertIn(["--ro-bind", "/dev/null", str(fake_home / ("." + n))], cmd)
+            self.assertIn(("--ro-bind", "/dev/null", str(fake_home / ("." + n))),
+                          [(cmd[i], cmd[i + 1], cmd[i + 2]) for i in range(len(cmd) - 2)])
 
 
 class FindingH_UnresolvedHome(_R2Base):
