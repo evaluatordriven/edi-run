@@ -43,7 +43,8 @@ Every rule in `DOCTRINE.md` and `SPEC.md` maps to a deterministic runtime gate e
 
 - **I-07 · Bounded Loop, Named Terminal States & Verdict/Disposition Split**
   - *Normative source:* `DOCTRINE.md` §4 Principle 10 & 11, §5 ("The exits"); `SPEC.md` `CL1-13`, §5.6, §6.
-  - *Enforced mechanism:* `step_decision(job)`. Enforces explicit `max_rounds`, `max_cost_usd`, and `max_wall_seconds` (no defaults permitted; missing bounds fail `gate_freeze`). Every run terminates in an explicit loop verdict (`accepted` | `needs_owner` | `rejected`) plus reason tag (`all_conform`, `census`, `no_observation`, `no_artifact`, `cap_reached`, `dormant_channel`, `dimension_tradeoff`). Separately records the human Approver's `disposition` (`given` | `not_yet_given` | `declined`, `acknowledgesUnobserved[]`) via a `disposition` event in `job.jsonl` without mutating any check or verdict (`CL1-13`).
+  - *Enforced mechanism:* `step_decision(job)`. Enforces explicit `max_rounds`, `max_cost_usd`, and `max_wall_seconds` (no defaults permitted; missing bounds fail `gate_freeze`). Every run terminates in an explicit loop verdict (`accepted` | `needs_owner` | `rejected`) plus reason tag (`all_conform`, `census`, `no_observation`, `no_artifact`, `cap_reached`, `dormant_channel`, `dimension_tradeoff`, `maker_failed`). Separately records the human Approver's `disposition` (`given` | `not_yet_given` | `declined`, `acknowledgesUnobserved[]`) via a `disposition` event in `job.jsonl` without mutating any check or verdict (`CL1-13`).
+  - *Cost accounting:* model-call token usage from the harness envelopes is accumulated into `state.json` (`token_usage`, `cost_usd`) each round and priced via an optional `pricing` map in `job.json` (`{model: {input_usd_per_mtok, output_usd_per_mtok}}`; unpriced models contribute $0 but their tokens are still recorded). The wall clock never pauses: elapsed time is banked into `wall_spent_seconds` at every round boundary, so a re-invocation cannot reset its budget. `run_job` executes once per job (a second invocation is refused). `state.json` writes are atomic (`os.replace`). Model endpoints must be `https` (localhost exempt); credentials are never sent over plain http.
 
 ---
 
@@ -77,11 +78,11 @@ Every rule in `DOCTRINE.md` and `SPEC.md` maps to a deterministic runtime gate e
 ```
 
 ### Seat Boundaries at Runtime
-- **Owner / Approver:** Supplies `job.json` bounds, approves `bar.md` (with Buyer/Specialist), receives `needs_owner` escalations with options + recommendation, and issues final `disposition` (`given` / `not_yet_given` / `declined`).
+- **Owner / Approver:** Supplies `job.json` bounds, approves `bar.md` (with Buyer/Specialist), receives `needs_owner` escalations (`escalation.json`: deterministic options + recommendation derived from the reason tag), and issues final `disposition` (`given` / `not_yet_given` / `declined`).
 - **Architect:** Authors `bar.md`, `rubric.md`, `method.md`, and `packet.json` prior to `bar-frozen`. Locked out of runtime state once `work-started` is logged.
 - **Orchestrator (`loop.py`):** Deterministic state machine. Zero LLM judgment. Assembles round packets from `(best_artifact, measured_defects, measured_workable_solutions) \ held_out_set`.
-- **Maker (`adapters.py`):** Invoked in an isolated working directory containing only the round packet. Has zero read access to `held_out/`, `scores.jsonl`, or `job.jsonl`.
-- **Evaluator (`adapters.py`):** Invoked with `readOnly: true` (`CL2-2`) against a content-addressed snapshot of the candidate artifact (`package-round-N.tar.gz`) plus interleaved `held_out/` control cases. Cannot write to the artifact directory.
+- **Maker (`adapters.py`):** Invoked in an isolated working directory containing only the round packet, with a minimal environment (no inherited secrets). Has zero read access to `held_out/` (locked to `0700`/`0600` at freeze), `scores.jsonl`, or `job.jsonl`. *Known limitation:* the sandbox is cwd-level, not OS-confined — a hostile script Maker could still read absolute paths; OS-level confinement is deliberately out of scope (Minimalism QAR).
+- **Evaluator (`adapters.py`):** Invoked with `readOnly: true` (`CL2-2`) against a content-addressed snapshot of the candidate artifact (`package-round-N.tar.gz`) plus interleaved `held_out/` control cases, with a minimal environment (no inherited API keys or tokens). Cannot write to the artifact directory.
 
 ### Deterministic State Machine
 

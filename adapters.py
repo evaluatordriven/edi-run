@@ -18,6 +18,9 @@ def _load_key(env_name="OPENROUTER_API_KEY"):
 
 
 def _chat_json(url, model_id, sys_prompt, user_prompt, key_env="OPENROUTER_API_KEY", timeout=60):
+    u = urllib.parse.urlparse(url)
+    if u.scheme != "https" and u.hostname not in ("localhost", "127.0.0.1", "::1"):
+        raise ValueError(f"refusing to send credentials over non-https endpoint: {url}")
     key = _load_key(key_env)
     headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})}
     extra = {"reasoning": {"effort": "low"}} if "openrouter.ai" in url else {}
@@ -30,7 +33,7 @@ def _chat_json(url, model_id, sys_prompt, user_prompt, key_env="OPENROUTER_API_K
     return json.loads(m.group(1) if m else txt), host, raw
 
 
-def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout=60):
+def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: float = 60):
     out_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="edi_maker_") as sb:
         sb_p, sb_art = pathlib.Path(sb), pathlib.Path(sb) / "artifact"
@@ -66,13 +69,14 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout=6
                 shutil.copy2(cand, dst)
 
 
-def run_evaluator(eval_cfg, target_path, dimension_id, job_dir=None, harness_out=None, timeout=60, dim_cfg=None, rubric_txt=""):
+def run_evaluator(eval_cfg, target_path, dimension_id, job_dir=None, harness_out=None, timeout: float = 60, dim_cfg=None, rubric_txt=""):
     if "command" in eval_cfg:
         cmd = _resolve_cmd(list(eval_cfg["command"]), job_dir)
         with tempfile.TemporaryDirectory(prefix="edi_eval_") as sb:
             sb_t = pathlib.Path(sb) / "target"
             (shutil.copytree if target_path.is_dir() else shutil.copy2)(target_path, sb_t)
-            proc = subprocess.run(cmd + [str(sb_t), str(dimension_id)], cwd=sb, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
+            env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": sb, "LANG": os.environ.get("LANG", "en_US.UTF-8")}
+            proc = subprocess.run(cmd + [str(sb_t), str(dimension_id)], cwd=sb, env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
         return {"unobserved": {"channel": eval_cfg["id"], "reason": proc.stderr.strip() or "nonzero exit"}} if proc.returncode != 0 else json.loads(proc.stdout.strip())
     txt = "\n---\n".join(f"FILE {p.name}:\n{p.read_text(encoding='utf-8')}" for p in sorted(target_path.rglob("*")) if p.is_file()) if target_path.is_dir() else target_path.read_text(encoding="utf-8")
     sys_p = "You are an independent E-DI Evaluator seat. Judge the artifact strictly against the dimension criterion and scale anchors. Return ONLY JSON: {\"score\": <number>, \"observation\": \"<exact quote from artifact>\", \"remedy\": \"<concise fix if below threshold, else empty>\"}"
@@ -81,7 +85,7 @@ def run_evaluator(eval_cfg, target_path, dimension_id, job_dir=None, harness_out
         payload, ans_host, raw = _chat_json(eval_cfg["url"], eval_cfg["model"]["identifier"], sys_p, usr_p, eval_cfg.get("apiKeyEnv", "OPENROUTER_API_KEY"), timeout)
         if harness_out:
             harness_out.write_text(json.dumps({"evaluator": eval_cfg["id"], "endpoint": ans_host, "model": raw.get("model"), "usage": raw.get("usage"), "verdict": payload}, indent=2) + "\n", encoding="utf-8")
-        return dict(payload, _endpoint=ans_host)
+        return dict(payload, _endpoint=ans_host, _usage=raw.get("usage"))
     except Exception as e:
         if harness_out:
             harness_out.write_text(json.dumps({"evaluator": eval_cfg["id"], "error": str(e)}, indent=2) + "\n", encoding="utf-8")

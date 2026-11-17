@@ -475,6 +475,67 @@ class TestEDIRuntime(unittest.TestCase):
         events = [json.loads(line) for line in (job_ok / "job.jsonl").read_text().splitlines()]
         self.assertEqual(sum(1 for e in events if e["type"] == "disposition"), 1)
 
+    def test_bounded_loop_run_once_cost_cap_and_maker_crash(self):
+        # run_job executes once: a second invocation is refused
+        job1 = self._make_base_job(subdir="job_once_run")
+        loop.freeze_job(job1)
+        self.assertEqual(loop.run_job(job1), 0)
+        with self.assertRaises(gates.GateError):
+            loop.run_job(job1)
+        # cost cap actually fires: preset spent cost above the bound
+        job2 = self._make_base_job(subdir="job_costcap")
+        cfg = json.loads((job2 / "job.json").read_text())
+        cfg["bounds"]["max_cost_usd"] = 0.01
+        (job2 / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        loop.freeze_job(job2)
+        st = json.loads((job2 / "state.json").read_text())
+        st["cost_usd"] = 0.5
+        (job2 / "state.json").write_text(json.dumps(st, indent=2), encoding="utf-8")
+        self.assertEqual(loop.run_job(job2), 2)
+        st2 = json.loads((job2 / "state.json").read_text())
+        self.assertEqual((st2["terminal_state"], st2["reason"]), ("needs_owner", "cap_reached"))
+        self.assertTrue((job2 / "escalation.json").is_file())
+        esc = json.loads((job2 / "escalation.json").read_text())
+        self.assertTrue(esc["options"])
+        self.assertIn("recommendation", esc)
+        # a Maker crash halts as needs_owner/maker_failed, never a traceback
+        job3 = self._make_base_job(subdir="job_makerfail")
+        loop.freeze_job(job3)
+        maker = job3 / "scripts" / "maker.py"
+        maker.write_text("import sys\nsys.stderr.write('boom')\nsys.exit(3)\n", encoding="utf-8")
+        self.assertEqual(loop.run_job(job3), 2)
+        st3 = json.loads((job3 / "state.json").read_text())
+        self.assertEqual((st3["terminal_state"], st3["reason"]), ("needs_owner", "maker_failed"))
+        self.assertIn("boom", st3["maker_error"])
+        self.assertTrue((job3 / "escalation.json").is_file())
+
+    def test_cost_pricing_and_https_and_env_hygiene(self):
+        # pricing math
+        self.assertAlmostEqual(loop._cost_of({"prompt_tokens": 1000, "completion_tokens": 2000}, {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 2.0}), 0.005)
+        self.assertEqual(loop._cost_of(None, {}), 0.0)
+        # credentials never go over plain http
+        with self.assertRaises(ValueError):
+            adapters._chat_json("http://api.example.com/v1", "m", "s", "u", timeout=1)
+        # evaluator scripts run without inherited secrets
+        leak = self.tmp / "leak_eval.py"
+        leak.write_text(
+            "import json, os, sys\n"
+            "bad = [k for k in os.environ if any(s in k.upper() for s in ('KEY', 'TOKEN', 'SECRET', 'PASSWORD'))]\n"
+            "sys.stderr.write(','.join(bad))\n"
+            "print(json.dumps({'score': 5.0, 'observation': 'env checked', 'remedy': ''}))\n",
+            encoding="utf-8",
+        )
+        (self.tmp / "target.txt").write_text("# Header\n", encoding="utf-8")
+        ev = {"id": "E9", "name": "Env Check", "kind": "script", "model": None, "script": {"name": "leak_eval.py", "author": "X", "digest": {"sha256": "0" * 64}}, "command": [sys.executable, str(leak)]}
+        res = adapters.run_evaluator(ev, self.tmp / "target.txt", "D1")
+        self.assertNotIn("unobserved", res)
+        # held_out locked down at freeze
+        job = self._make_base_job(subdir="job_ho_mode")
+        loop.freeze_job(job)
+        ho = job / "held_out"
+        self.assertEqual(oct(ho.stat().st_mode & 0o777), "0o700")
+        self.assertEqual(oct((ho / "controls" / "clean.md").stat().st_mode & 0o777), "0o600")
+
     def test_unit_post_freeze_instrument_tamper_detected(self):
         job_dir = self._make_base_job()
         loop.freeze_job(job_dir)
