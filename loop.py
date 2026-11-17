@@ -40,7 +40,8 @@ def _gap_list(st, extra=()):
 
 def _emit_gap_record(job_dir, st, cfg, extra=()):
     gaps = _gap_list(st, extra)
-    log_last = json.loads((job_dir / "job.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    lines = (job_dir / "job.jsonl").read_text(encoding="utf-8").splitlines()
+    log_last = json.loads(lines[-1]) if lines else {}
     rec = {"recordType": "edi-run/gap-record",
            "x-edi-run": {"gaps": gaps, "terminalState": st.get("terminal_state"),
                           "reason": st.get("reason"), "startedAt": st.get("startedAt"),
@@ -199,6 +200,13 @@ def run_job(job_dir):
 def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
     job_dir = pathlib.Path(job_dir).resolve()
     cfg, st = json.loads((job_dir / "job.json").read_text(encoding="utf-8")), json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
+    log_path = job_dir / "job.jsonl"
+    log_problems = custody_record.verify(str(log_path), files=True)
+    if log_problems:
+        raise gates.GateError("custody log chain broken; refusing to finalize: " + "; ".join(map(str, log_problems[:3])))
+    log_events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+    if any(e.get("type") == "disposition" for e in log_events):
+        raise gates.GateError("job already finalized (disposition event exists); finalize runs once")
     if gates.gate_instruments(cfg, job_dir) != st["pins"]:
         raise gates.GateError("frozen instruments modified after freeze (I-01/I-02)")
     gates.gate_seats(cfg, job_dir, approver_by=by)
@@ -242,10 +250,10 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
 
     try:
         rc, detail = _assemble()
-        if rc != 0:
-            return _emit_gap_record(job_dir, st, cfg, extra=[{"invariant": "custody-assembly", "missing": detail}])
     except Exception as e:  # noqa: BLE001 -- §6: assembly failure becomes a diagnosable gap record
-        return _emit_gap_record(job_dir, st, cfg, extra=[{"invariant": "custody-assembly", "missing": str(e)[-500:]}])
+        rc, detail = -1, str(e)[-500:]
+    if rc != 0:
+        return _emit_gap_record(job_dir, st, cfg, extra=[{"invariant": "custody-assembly", "missing": detail}])
     return verify_job(job_dir)
 
 

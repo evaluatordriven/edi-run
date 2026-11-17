@@ -430,11 +430,10 @@ class TestEDIRuntime(unittest.TestCase):
         # provenance survives: the disposition event is in the custody log
         events = [json.loads(line) for line in (job_rej / "job.jsonl").read_text().splitlines()]
         self.assertTrue(any(e["type"] == "disposition" for e in events))
-        # The emitter can fail: strip the gaps -> a bare doc must NOT verify OK is
-        # impossible to assert directly, so instead verify the guard trips on a doctored record.
+        # check.py rejects any non-custody document, so the emitter's own output can
+        # never read OK -- the guarantee lives in the no-predicate construction.
         doctored = dict(rec)
         doctored["x-edi-run"] = dict(rec["x-edi-run"], gaps=[])
-        # gap record with no gaps and no custody fields must not verify OK either
         rep = custody_check.verify(doctored, files=str(job_rej / "artifact"),
                                    evidence=str(job_rej / "evidence"),
                                    bar=str(job_rej / "bar.md"))
@@ -449,6 +448,32 @@ class TestEDIRuntime(unittest.TestCase):
                 loop._emit_gap_record(job_rej, st_gap, cfg_gap)
         finally:
             loop.custody_check.verify = orig_verify
+
+    def test_integrity_tampered_log_hard_fails_never_gap_record(self):
+        # Frontier-review blocker fix: a broken custody chain must raise, never
+        # downgrade to a gap-listed record.
+        job_ok = self._make_base_job(subdir="job_tamper")
+        loop.freeze_job(job_ok)
+        loop.run_job(job_ok)
+        events = (job_ok / "job.jsonl").read_text().splitlines()
+        tampered = json.loads(events[1])
+        tampered["data"] = {"job": "FORGED"}
+        events[1] = json.dumps(tampered)
+        (job_ok / "job.jsonl").write_text("\n".join(events) + "\n", encoding="utf-8")
+        before = (job_ok / "record.json").exists()
+        with self.assertRaises(gates.GateError):
+            loop.finalize_job(job_ok, state="given", by="Casey Park")
+        self.assertFalse(before)  # no record existed; finalize must not write one
+
+    def test_finalize_runs_once_double_disposition_refused(self):
+        job_ok = self._make_base_job(subdir="job_once")
+        loop.freeze_job(job_ok)
+        loop.run_job(job_ok)
+        self.assertEqual(loop.finalize_job(job_ok, state="given", by="Casey Park"), 0)
+        with self.assertRaises(gates.GateError):
+            loop.finalize_job(job_ok, state="declined", by="Casey Park")
+        events = [json.loads(line) for line in (job_ok / "job.jsonl").read_text().splitlines()]
+        self.assertEqual(sum(1 for e in events if e["type"] == "disposition"), 1)
 
     def test_unit_post_freeze_instrument_tamper_detected(self):
         job_dir = self._make_base_job()
