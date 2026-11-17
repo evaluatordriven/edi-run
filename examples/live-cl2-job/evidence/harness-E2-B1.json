@@ -1,0 +1,15 @@
+{
+  "evaluator": "E2",
+  "endpoint": "generativelanguage.googleapis.com",
+  "model": "gemini-3-flash-preview",
+  "usage": {
+    "completion_tokens": 62,
+    "prompt_tokens": 314,
+    "total_tokens": 655
+  },
+  "verdict": {
+    "score": 1.0,
+    "observation": "The problem was resolved in commit 7f3a91c",
+    "remedy": "Add '## Root Cause & Prevention' section, wrap commit in backticks, and use YYYY-MM-DD date format."
+  }
+}

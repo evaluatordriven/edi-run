@@ -1,0 +1,9 @@
+{
+  "dimension": "D1",
+  "evaluator": "E2",
+  "round": 2,
+  "run": 2,
+  "score": 5.0,
+  "observation": "# Incident Summary: Auth Token Cache Outage",
+  "remedy": ""
+}

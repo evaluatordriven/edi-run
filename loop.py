@@ -93,7 +93,7 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, rem_s):
                     score, out = float(res["score"]), ("conforms" if float(res["score"]) >= float(sc_cfg["threshold"]) else "does_not_conform")
                     ev_name = f"reading-{did}-{ev_id}-r{round_n}-run{run_i}.json"
                     (job_dir / "evidence" / ev_name).write_text(json.dumps({"dimension": did, "evaluator": ev_id, "round": round_n, "run": run_i, "score": score, "observation": res.get("observation", ""), "remedy": res.get("remedy", "")}, indent=2) + "\n", encoding="utf-8")
-                    chk = {"dimension": did, "evaluator": ev_id, "run": run_i, "batch": bid, "at": custody_record.now(), "outcome": out, "score": score, "failureCondition": f"score < {sc_cfg['threshold']}", "evidence": {"name": ev_name, "sha256": gates.sha256_file(job_dir / "evidence" / ev_name)}, "unobserved": None}
+                    chk = {"dimension": did, "evaluator": ev_id, "run": run_i, "batch": bid, "at": custody_record.now(), "outcome": out, "score": score, "failureCondition": f"score < {sc_cfg['threshold']}", "evidence": {"name": ev_name, "sha256": gates.sha256_file(job_dir / "evidence" / ev_name)}, "unobserved": None, **({"endpoint": res["_endpoint"]} if res.get("_endpoint") else {})}
                     per_dim[did].append(score)
                     if out == "does_not_conform":
                         defects.append({"dimension": did, "evaluator": ev_id, "score": score, "observation": res.get("observation", ""), "remedy": res.get("remedy", "")})

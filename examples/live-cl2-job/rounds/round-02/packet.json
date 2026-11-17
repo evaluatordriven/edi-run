@@ -1,0 +1,61 @@
+{
+  "round": 2,
+  "mode": "pass_r2",
+  "best_artifact_digest": "49339e81177aefbb3611f95e4b7545e8f4dc4ad8b9dfc07e449bcc01c7934fa0",
+  "defects": [
+    {
+      "dimension": "D2",
+      "evaluator": "E1",
+      "score": 1.0,
+      "observation": "# Incident Summary: Auth Token Cache Outage\n\nOn October 14, 2026, a Redis TTL misconfiguration cause",
+      "remedy": "Add section \"## Root Cause & Prevention\" citing the 7-char hex commit SHA in backticks (e.g. `7f3a91c`) and date as YYYY-MM-DD (e.g. 2026-10-14)."
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E1",
+      "score": 1.0,
+      "observation": "# Incident Summary: Auth Token Cache Outage\n\nOn October 14, 2026, a Redis TTL misconfiguration cause",
+      "remedy": "Add section \"## Root Cause & Prevention\" citing the 7-char hex commit SHA in backticks (e.g. `7f3a91c`) and date as YYYY-MM-DD (e.g. 2026-10-14)."
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E2",
+      "score": 1.0,
+      "observation": "The problem was resolved in commit 7f3a91c",
+      "remedy": "Add '## Root Cause & Prevention' section, wrap commit in backticks, and use YYYY-MM-DD date format."
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E2",
+      "score": 1.0,
+      "observation": "The artifact lacks a '## Root Cause & Prevention' section, the commit SHA is not in backticks, and the date is not in YYYY-MM-DD format.",
+      "remedy": "Add '## Root Cause & Prevention' section, wrap commit SHA in backticks, and format date as YYYY-MM-DD."
+    }
+  ],
+  "workable_solutions": [
+    {
+      "dimension": "D1",
+      "evaluator": "E1",
+      "score": 5.0,
+      "round": 1
+    },
+    {
+      "dimension": "D1",
+      "evaluator": "E1",
+      "score": 5.0,
+      "round": 1
+    },
+    {
+      "dimension": "D1",
+      "evaluator": "E2",
+      "score": 5.0,
+      "round": 1
+    },
+    {
+      "dimension": "D1",
+      "evaluator": "E2",
+      "score": 5.0,
+      "round": 1
+    }
+  ]
+}

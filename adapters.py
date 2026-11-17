@@ -20,7 +20,9 @@ def _load_key(env_name="OPENROUTER_API_KEY"):
 def _chat_json(url, model_id, sys_prompt, user_prompt, key_env="OPENROUTER_API_KEY", timeout=60):
     key = _load_key(key_env)
     headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})}
-    body = json.dumps({"model": model_id, "temperature": 0.0, "reasoning": {"effort": "low"}, "messages": [{"role": "system", "content": sys_prompt}, {"role": "user", "content": "/no_think\n" + user_prompt}]}).encode("utf-8")
+    extra = {"reasoning": {"effort": "low"}} if "openrouter.ai" in url else {}
+    u_txt = ("/no_think\n" + user_prompt) if "qwen" in model_id.casefold() else user_prompt
+    body = json.dumps({"model": model_id, "temperature": 0.0, **extra, "messages": [{"role": "system", "content": sys_prompt}, {"role": "user", "content": u_txt}]}).encode("utf-8")
     with urllib.request.urlopen(urllib.request.Request(url, data=body, headers=headers, method="POST"), timeout=max(1.0, float(timeout))) as resp:
         raw, host = json.loads(resp.read().decode("utf-8")), urllib.parse.urlparse(resp.geturl()).hostname or ""
     txt = raw["choices"][0]["message"]["content"].strip()
@@ -79,7 +81,7 @@ def run_evaluator(eval_cfg, target_path, dimension_id, job_dir=None, harness_out
         payload, ans_host, raw = _chat_json(eval_cfg["url"], eval_cfg["model"]["identifier"], sys_p, usr_p, eval_cfg.get("apiKeyEnv", "OPENROUTER_API_KEY"), timeout)
         if harness_out:
             harness_out.write_text(json.dumps({"evaluator": eval_cfg["id"], "endpoint": ans_host, "model": raw.get("model"), "usage": raw.get("usage"), "verdict": payload}, indent=2) + "\n", encoding="utf-8")
-        return payload
+        return dict(payload, _endpoint=ans_host)
     except Exception as e:
         if harness_out:
             harness_out.write_text(json.dumps({"evaluator": eval_cfg["id"], "error": str(e)}, indent=2) + "\n", encoding="utf-8")

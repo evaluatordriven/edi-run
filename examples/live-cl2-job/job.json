@@ -1,0 +1,141 @@
+{
+  "job": "live-cl2-incident-summary",
+  "levelClaimed": "CL2",
+  "specVersion": "0.9.8",
+  "bounds": {
+    "max_rounds": 3,
+    "max_cost_usd": 1.0,
+    "max_wall_seconds": 300
+  },
+  "subjectFiles": [
+    "summary.md"
+  ],
+  "bar": {
+    "file": "bar.md",
+    "digest": {
+      "sha256": "b09e1865cfb9ae512507b49a6fa500b1bf0ca6def7842caf1a7934af1517f815"
+    },
+    "frozenAt": "2026-10-05T09:00:00Z",
+    "author": "Jordan Blake",
+    "dimensions": [
+      {
+        "id": "D1",
+        "criterion": "Starts with '# Incident Summary:' header and stays between 40 and 180 words",
+        "scale": {
+          "anchors": {
+            "1": "missing required structure or citation",
+            "5": "all elements present"
+          },
+          "floor": 0.0,
+          "threshold": 4.0
+        }
+      },
+      {
+        "id": "D2",
+        "criterion": "Contains '## Root Cause & Prevention' section with 7-char hex commit SHA in backticks and YYYY-MM-DD date",
+        "scale": {
+          "anchors": {
+            "1": "missing required structure or citation",
+            "5": "all elements present"
+          },
+          "floor": 0.0,
+          "threshold": 4.0
+        }
+      }
+    ],
+    "approvals": [
+      {
+        "role": "buyer",
+        "by": "Casey Park",
+        "barDigest": {
+          "sha256": "b09e1865cfb9ae512507b49a6fa500b1bf0ca6def7842caf1a7934af1517f815"
+        },
+        "at": "2026-10-05T08:40:00Z",
+        "adopted": null
+      },
+      {
+        "role": "specialist",
+        "by": "Riley Moss",
+        "barDigest": {
+          "sha256": "b09e1865cfb9ae512507b49a6fa500b1bf0ca6def7842caf1a7934af1517f815"
+        },
+        "at": "2026-10-05T08:50:00Z",
+        "adopted": null
+      }
+    ],
+    "publishedAt": null,
+    "groundTruth": [],
+    "dissent": []
+  },
+  "maker": {
+    "name": "QwenMaker",
+    "kind": "model",
+    "version": "qwen3-32b",
+    "method": {
+      "file": "method.md"
+    },
+    "url": "https://openrouter.ai/api/v1/chat/completions",
+    "model": {
+      "family": "qwen",
+      "identifier": "qwen/qwen3-32b",
+      "endpoint": "openrouter.ai",
+      "readOnly": false
+    }
+  },
+  "instrument": {
+    "rubric": {
+      "file": "rubric.md"
+    },
+    "runner": {
+      "file": "runner.md"
+    }
+  },
+  "evaluators": [
+    {
+      "id": "E1",
+      "name": "StructGate",
+      "kind": "script",
+      "model": null,
+      "script": {
+        "name": "eval_struct.py",
+        "author": "Morgan Lee",
+        "digest": {
+          "sha256": "3e717cdc830294f681af6e3f619350fbd063c466a23b8a0e9085e0507e787298"
+        }
+      },
+      "command": [
+        "python3",
+        "scripts/eval_struct.py"
+      ],
+      "runs": 2
+    },
+    {
+      "id": "E2",
+      "name": "GeminiDirectEvaluator",
+      "kind": "model",
+      "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "apiKeyEnv": "GEMINI_API_KEY",
+      "model": {
+        "family": "gemini",
+        "identifier": "gemini-3-flash-preview",
+        "endpoint": "generativelanguage.googleapis.com",
+        "readOnly": true
+      },
+      "script": null,
+      "runs": 2
+    }
+  ],
+  "controls": {
+    "clean": "held_out/controls/clean.md",
+    "planted": "held_out/controls/planted.md"
+  },
+  "retention": {
+    "location": "examples/live-cl2-job",
+    "public": false
+  },
+  "disposition": {
+    "state": "given",
+    "by": "Casey Park",
+    "acknowledgesUnobserved": []
+  }
+}

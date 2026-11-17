@@ -1,0 +1,15 @@
+{
+  "evaluator": "E2",
+  "endpoint": "generativelanguage.googleapis.com",
+  "model": "gemini-3-flash-preview",
+  "usage": {
+    "completion_tokens": 68,
+    "prompt_tokens": 384,
+    "total_tokens": 739
+  },
+  "verdict": {
+    "score": 5.0,
+    "observation": "## Root Cause & Prevention\nThe root cause was an improperly configured TTL value in Redis, which was fixed in commit `7f3a91c` on 2026-10-14.",
+    "remedy": ""
+  }
+}

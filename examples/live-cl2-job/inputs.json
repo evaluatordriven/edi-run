@@ -1,0 +1,380 @@
+{
+  "subject": {
+    "dir": "artifact"
+  },
+  "specVersion": "0.9.8",
+  "levelClaimed": "CL2",
+  "bar": {
+    "digest": {
+      "sha256": "b09e1865cfb9ae512507b49a6fa500b1bf0ca6def7842caf1a7934af1517f815"
+    },
+    "frozenAt": "2026-11-17T01:53:02.748668Z",
+    "author": "Jordan Blake",
+    "dimensions": [
+      {
+        "id": "D1",
+        "criterion": "Starts with '# Incident Summary:' header and stays between 40 and 180 words",
+        "scale": {
+          "anchors": {
+            "1": "missing required structure or citation",
+            "5": "all elements present"
+          },
+          "floor": 0.0,
+          "threshold": 4.0
+        }
+      },
+      {
+        "id": "D2",
+        "criterion": "Contains '## Root Cause & Prevention' section with 7-char hex commit SHA in backticks and YYYY-MM-DD date",
+        "scale": {
+          "anchors": {
+            "1": "missing required structure or citation",
+            "5": "all elements present"
+          },
+          "floor": 0.0,
+          "threshold": 4.0
+        }
+      }
+    ],
+    "approvals": [
+      {
+        "role": "buyer",
+        "by": "Casey Park",
+        "barDigest": {
+          "sha256": "b09e1865cfb9ae512507b49a6fa500b1bf0ca6def7842caf1a7934af1517f815"
+        },
+        "at": "2026-10-05T08:40:00Z",
+        "adopted": null
+      },
+      {
+        "role": "specialist",
+        "by": "Riley Moss",
+        "barDigest": {
+          "sha256": "b09e1865cfb9ae512507b49a6fa500b1bf0ca6def7842caf1a7934af1517f815"
+        },
+        "at": "2026-10-05T08:50:00Z",
+        "adopted": null
+      }
+    ],
+    "publishedAt": null,
+    "groundTruth": [],
+    "dissent": []
+  },
+  "maker": {
+    "name": "QwenMaker",
+    "kind": "model",
+    "version": "qwen3-32b",
+    "method": {
+      "file": "method.md"
+    },
+    "model": {
+      "family": "qwen",
+      "identifier": "qwen/qwen3-32b",
+      "endpoint": "openrouter.ai",
+      "readOnly": false
+    }
+  },
+  "startedAt": "2026-11-17T01:53:02.776610Z",
+  "producedAt": "2026-11-17T01:53:42.890800Z",
+  "instrument": {
+    "rubric": {
+      "file": "rubric.md"
+    },
+    "runner": {
+      "file": "runner.md"
+    }
+  },
+  "evaluators": [
+    {
+      "id": "E1",
+      "name": "StructGate",
+      "kind": "script",
+      "model": null,
+      "script": {
+        "name": "eval_struct.py",
+        "author": "Morgan Lee",
+        "digest": {
+          "sha256": "3e717cdc830294f681af6e3f619350fbd063c466a23b8a0e9085e0507e787298"
+        }
+      }
+    },
+    {
+      "id": "E2",
+      "name": "GeminiDirectEvaluator",
+      "kind": "model",
+      "model": {
+        "family": "gemini",
+        "identifier": "gemini-3-flash-preview",
+        "endpoint": "generativelanguage.googleapis.com",
+        "readOnly": true
+      },
+      "script": null
+    }
+  ],
+  "checks": [
+    {
+      "dimension": "D1",
+      "evaluator": "E1",
+      "run": 1,
+      "batch": "B2",
+      "at": "2026-11-17T01:53:43.197483Z",
+      "outcome": "conforms",
+      "score": 5.0,
+      "failureCondition": "score < 4.0",
+      "evidence": {
+        "name": "reading-D1-E1-r2-run1.json",
+        "sha256": "13bd3fac3d8b923f77faab8c62327b44d77dfb08595327625022da14b4429cf4"
+      },
+      "unobserved": null
+    },
+    {
+      "dimension": "D1",
+      "evaluator": "E1",
+      "run": 2,
+      "batch": "B2",
+      "at": "2026-11-17T01:53:43.239495Z",
+      "outcome": "conforms",
+      "score": 5.0,
+      "failureCondition": "score < 4.0",
+      "evidence": {
+        "name": "reading-D1-E1-r2-run2.json",
+        "sha256": "5c01b935cf6533fb15ff924dc34c50f53057d93dec9d6a8809471dce9770d88e"
+      },
+      "unobserved": null
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E1",
+      "run": 1,
+      "batch": "B2",
+      "at": "2026-11-17T01:53:43.279217Z",
+      "outcome": "conforms",
+      "score": 5.0,
+      "failureCondition": "score < 4.0",
+      "evidence": {
+        "name": "reading-D2-E1-r2-run1.json",
+        "sha256": "c609d5337740db808e5d5e12c8375803c32c1532a869982d3483234f50c6daa3"
+      },
+      "unobserved": null
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E1",
+      "run": 2,
+      "batch": "B2",
+      "at": "2026-11-17T01:53:43.317268Z",
+      "outcome": "conforms",
+      "score": 5.0,
+      "failureCondition": "score < 4.0",
+      "evidence": {
+        "name": "reading-D2-E1-r2-run2.json",
+        "sha256": "bdbe9f8e3edbe8aa90310792150f7f165e762c94441e37d8db8438c006ee7100"
+      },
+      "unobserved": null
+    },
+    {
+      "dimension": "D1",
+      "evaluator": "E2",
+      "run": 1,
+      "batch": "B2",
+      "at": "2026-11-17T01:54:05.355206Z",
+      "outcome": "conforms",
+      "score": 5.0,
+      "failureCondition": "score < 4.0",
+      "evidence": {
+        "name": "reading-D1-E2-r2-run1.json",
+        "sha256": "acb2dcce13429646b33353536004ca656829a3d5030bda11e9c08f9fc326d8c3"
+      },
+      "unobserved": null,
+      "endpoint": "generativelanguage.googleapis.com"
+    },
+    {
+      "dimension": "D1",
+      "evaluator": "E2",
+      "run": 2,
+      "batch": "B2",
+      "at": "2026-11-17T01:54:12.952052Z",
+      "outcome": "conforms",
+      "score": 5.0,
+      "failureCondition": "score < 4.0",
+      "evidence": {
+        "name": "reading-D1-E2-r2-run2.json",
+        "sha256": "e82bd0a78fc20fd7507d9c970e633731334b5aeca6b3887d79d1ead2eb9b54da"
+      },
+      "unobserved": null,
+      "endpoint": "generativelanguage.googleapis.com"
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E2",
+      "run": 1,
+      "batch": "B2",
+      "at": "2026-11-17T01:54:14.873729Z",
+      "outcome": "conforms",
+      "score": 5.0,
+      "failureCondition": "score < 4.0",
+      "evidence": {
+        "name": "reading-D2-E2-r2-run1.json",
+        "sha256": "bffca5dcfc17be04e280f0404d08c6400ea325c32249c01a584e7c7e7c18a32f"
+      },
+      "unobserved": null,
+      "endpoint": "generativelanguage.googleapis.com"
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E2",
+      "run": 2,
+      "batch": "B2",
+      "at": "2026-11-17T01:54:16.789835Z",
+      "outcome": "conforms",
+      "score": 5.0,
+      "failureCondition": "score < 4.0",
+      "evidence": {
+        "name": "reading-D2-E2-r2-run2.json",
+        "sha256": "36e2daa26d19390eea9cb7378fe0e4421fc143c07d73508693511a7943306d07"
+      },
+      "unobserved": null,
+      "endpoint": "generativelanguage.googleapis.com"
+    }
+  ],
+  "controls": [
+    {
+      "id": "K-B2-E1-D1-clean",
+      "batch": "B2",
+      "evaluator": "E1",
+      "dimension": "D1",
+      "case": {
+        "sha256": "2e20cecb3a555d9c7c73a1966e3778f2aa1208959f212f9ad1b0986430158e34"
+      },
+      "expected": "conforms",
+      "outcome": "conforms"
+    },
+    {
+      "id": "K-B2-E1-D1-planted",
+      "batch": "B2",
+      "evaluator": "E1",
+      "dimension": "D1",
+      "case": {
+        "sha256": "547306f2b13521d3b55725e8c21a33c3ff2c1c88350f357c06d1585b0e123cb2"
+      },
+      "expected": "does_not_conform",
+      "outcome": "does_not_conform"
+    },
+    {
+      "id": "K-B2-E1-D2-clean",
+      "batch": "B2",
+      "evaluator": "E1",
+      "dimension": "D2",
+      "case": {
+        "sha256": "2e20cecb3a555d9c7c73a1966e3778f2aa1208959f212f9ad1b0986430158e34"
+      },
+      "expected": "conforms",
+      "outcome": "conforms"
+    },
+    {
+      "id": "K-B2-E1-D2-planted",
+      "batch": "B2",
+      "evaluator": "E1",
+      "dimension": "D2",
+      "case": {
+        "sha256": "547306f2b13521d3b55725e8c21a33c3ff2c1c88350f357c06d1585b0e123cb2"
+      },
+      "expected": "does_not_conform",
+      "outcome": "does_not_conform"
+    },
+    {
+      "id": "K-B2-E2-D1-clean",
+      "batch": "B2",
+      "evaluator": "E2",
+      "dimension": "D1",
+      "case": {
+        "sha256": "2e20cecb3a555d9c7c73a1966e3778f2aa1208959f212f9ad1b0986430158e34"
+      },
+      "expected": "conforms",
+      "outcome": "conforms"
+    },
+    {
+      "id": "K-B2-E2-D1-planted",
+      "batch": "B2",
+      "evaluator": "E2",
+      "dimension": "D1",
+      "case": {
+        "sha256": "547306f2b13521d3b55725e8c21a33c3ff2c1c88350f357c06d1585b0e123cb2"
+      },
+      "expected": "does_not_conform",
+      "outcome": "does_not_conform"
+    },
+    {
+      "id": "K-B2-E2-D2-clean",
+      "batch": "B2",
+      "evaluator": "E2",
+      "dimension": "D2",
+      "case": {
+        "sha256": "2e20cecb3a555d9c7c73a1966e3778f2aa1208959f212f9ad1b0986430158e34"
+      },
+      "expected": "conforms",
+      "outcome": "conforms"
+    },
+    {
+      "id": "K-B2-E2-D2-planted",
+      "batch": "B2",
+      "evaluator": "E2",
+      "dimension": "D2",
+      "case": {
+        "sha256": "547306f2b13521d3b55725e8c21a33c3ff2c1c88350f357c06d1585b0e123cb2"
+      },
+      "expected": "does_not_conform",
+      "outcome": "does_not_conform"
+    }
+  ],
+  "disagreements": [],
+  "violations": [],
+  "separationGaps": [],
+  "retention": {
+    "location": "examples/live-cl2-job",
+    "public": false
+  },
+  "external": [
+    {
+      "requirement": "CL1-15",
+      "subject": "E2",
+      "evidence": {
+        "name": "harness-E2-B2.json",
+        "sha256": "fa84a3f907221e5be3eec132c4f550b767937f772ee10cf90a1b1e246fc0928f"
+      },
+      "readBy": "Jordan Blake"
+    }
+  ],
+  "disposition": {
+    "state": "given",
+    "by": "Casey Park",
+    "at": "2026-11-17T01:54:16.945221Z",
+    "acknowledgesUnobserved": []
+  },
+  "spread": [
+    {
+      "dimension": "D1",
+      "evaluator": "E1",
+      "runs": 2,
+      "agreement": 2
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E1",
+      "runs": 2,
+      "agreement": 2
+    },
+    {
+      "dimension": "D1",
+      "evaluator": "E2",
+      "runs": 2,
+      "agreement": 2
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E2",
+      "runs": 2,
+      "agreement": 2
+    }
+  ]
+}
