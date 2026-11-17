@@ -205,6 +205,8 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
     if log_problems:
         raise gates.GateError("custody log chain broken; refusing to finalize: " + "; ".join(map(str, log_problems[:3])))
     log_events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+    if not log_events or log_events[0].get("type") != "job-start":
+        raise gates.GateError("custody log does not begin with job-start; refusing to finalize a truncated or foreign log")
     if any(e.get("type") == "disposition" for e in log_events):
         raise gates.GateError("job already finalized (disposition event exists); finalize runs once")
     if gates.gate_instruments(cfg, job_dir) != st["pins"]:
