@@ -1,6 +1,6 @@
 """Deterministic E-DI state machine (I-05 through I-07) wrapping evaluatordriven/custody tools."""
 from collections import Counter
-import json, math, pathlib, shutil, subprocess, sys, time
+import json, math, os, pathlib, shutil, subprocess, sys, time
 import adapters, gates
 
 VENDOR = pathlib.Path(__file__).resolve().parent / "vendor"
@@ -77,6 +77,11 @@ def freeze_job(job_dir, started_at=None):
         time.sleep(0.002)
         s_at = started_at or _append(job_dir, "work-started", cfg["maker"]["name"], [], {})["at"]
     gates.gate_freeze(cfg, job_dir, started_at=s_at)
+    ho = job_dir / "held_out"
+    if ho.is_dir():
+        for f in ho.rglob("*"):
+            os.chmod(f, 0o700 if f.is_dir() else 0o600)
+        os.chmod(ho, 0o700)
     demos, rub_txt = [], gates.safe_rel(cfg["instrument"]["rubric"]["file"], job_dir).read_text(encoding="utf-8")
     if cfg["levelClaimed"] == "CL3":
         p_case = gates.safe_rel(cfg["controls"]["planted"], job_dir)
@@ -91,10 +96,10 @@ def freeze_job(job_dir, started_at=None):
     return 0
 
 
-def _eval_batch(cfg, job_dir, round_n, art_dir, rem_s):
+def _eval_batch(cfg, job_dir, round_n, art_dir, deadline):
     bid, dims = f"B{round_n}", cfg["bar"]["dimensions"]
     scales, ordered = {d["id"]: d.get("scale") for d in dims}, sorted(cfg["evaluators"], key=lambda e: 0 if e["kind"] == "script" else 1)
-    checks, controls, scores_rows, externals, per_dim, defects, solutions = [], [], [], [], {d["id"]: [] for d in dims}, [], []
+    checks, controls, scores_rows, externals, per_dim, defects, solutions, usages = [], [], [], [], {d["id"]: [] for d in dims}, [], [], []
     clean_p, planted_p = gates.safe_rel(cfg["controls"]["clean"], job_dir), gates.safe_rel(cfg["controls"]["planted"], job_dir)
     rub_txt = gates.safe_rel(cfg["instrument"]["rubric"]["file"], job_dir).read_text(encoding="utf-8")
     for ev in ordered:
@@ -102,7 +107,7 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, rem_s):
         for d in dims:
             did, thr = d["id"], float((scales[d["id"]] or {}).get("threshold", 4.0))
             for tag, path, exp in (("clean", clean_p, "conforms"), ("planted", planted_p, "does_not_conform")):
-                cid, res = f"K-{bid}-{ev_id}-{did}-{tag}", adapters.run_evaluator(ev, path, did, job_dir=job_dir, timeout=rem_s, dim_cfg=d, rubric_txt=rub_txt)
+                cid, res = f"K-{bid}-{ev_id}-{did}-{tag}", adapters.run_evaluator(ev, path, did, job_dir=job_dir, timeout=max(1.0, deadline - time.monotonic()), dim_cfg=d, rubric_txt=rub_txt)
                 sc = res.get("score")
                 if sc is None or not math.isfinite(float(sc)):
                     bad_dims.add(did)
@@ -118,12 +123,14 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, rem_s):
             did, sc_cfg = d["id"], scales[d["id"]]
             for run_i in range(1, int(ev.get("runs", 2 if cfg["levelClaimed"] in ("CL2", "CL3") else 1)) + 1):
                 har = job_dir / "evidence" / f"harness-{ev_id}-{bid}.json" if ev["kind"] == "model" and run_i == 1 else None
-                res = adapters.run_evaluator(ev, art_dir, did, job_dir=job_dir, harness_out=har, timeout=rem_s, dim_cfg=d, rubric_txt=rub_txt)
+                res = adapters.run_evaluator(ev, art_dir, did, job_dir=job_dir, harness_out=har, timeout=max(1.0, deadline - time.monotonic()), dim_cfg=d, rubric_txt=rub_txt)
                 if did in bad_dims or "unobserved" in res or res.get("score") is None:
                     u = res.get("unobserved") or {"channel": ev_id, "reason": "evaluator failed batch control (CL1-9)"}
                     chk = {"dimension": did, "evaluator": ev_id, "run": run_i, "batch": bid, "at": custody_record.now(), "outcome": "unobserved", "score": None, "failureCondition": f"score < {sc_cfg['threshold']}" if sc_cfg else d["criterion"], "evidence": None, "unobserved": u}
                 else:
                     score, out = float(res["score"]), ("conforms" if float(res["score"]) >= float(sc_cfg["threshold"]) else "does_not_conform")
+                    if res.get("_usage"):
+                        usages.append({"evaluator": ev_id, "model": ev.get("model", {}).get("identifier") if isinstance(ev.get("model"), dict) else ev.get("model"), "usage": res["_usage"]})
                     ev_name = f"reading-{did}-{ev_id}-r{round_n}-run{run_i}.json"
                     (job_dir / "evidence" / ev_name).write_text(json.dumps({"dimension": did, "evaluator": ev_id, "round": round_n, "run": run_i, "score": score, "observation": res.get("observation", ""), "remedy": res.get("remedy", "")}, indent=2) + "\n", encoding="utf-8")
                     chk = {"dimension": did, "evaluator": ev_id, "run": run_i, "batch": bid, "at": custody_record.now(), "outcome": out, "score": score, "failureCondition": f"score < {sc_cfg['threshold']}", "evidence": {"name": ev_name, "sha256": gates.sha256_file(job_dir / "evidence" / ev_name)}, "unobserved": None, **({"endpoint": res["_endpoint"]} if res.get("_endpoint") else {})}
@@ -136,10 +143,41 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, rem_s):
                 checks.append(chk)
         if ev["kind"] == "model":
             h_name = f"harness-{ev_id}-{bid}.json"
-            ex = {"requirement": "CL1-15", "subject": ev_id, "evidence": {"name": h_name, "sha256": gates.sha256_file(job_dir / "evidence" / h_name)}, "readBy": cfg["bar"]["author"]}
+            ex = {"requirement": "CL1-15", "subject": ev_id, "evidence": {"name": h_name, "sha256": gates.sha256_file(job_dir / "evidence" / h_name)}, "readBy": "edi-run"}
             externals.append(ex)
             _append(job_dir, "external", ex["readBy"], [], ex)
-    return checks, controls, scores_rows, externals, {k: min(v) if v else 0.0 for k, v in per_dim.items()}, defects, solutions
+    return checks, controls, scores_rows, externals, {k: min(v) if v else 0.0 for k, v in per_dim.items()}, defects, solutions, usages
+
+
+def _write_state(job_dir, state):
+    tmp = job_dir / "state.json.tmp"
+    tmp.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, job_dir / "state.json")
+
+
+def _cost_of(usage, pricing):
+    u = usage or {}
+    pt, ct = float(u.get("prompt_tokens", 0) or 0), float(u.get("completion_tokens", 0) or 0)
+    rate = pricing.get("input_usd_per_mtok", 0.0), pricing.get("output_usd_per_mtok", 0.0)
+    return (pt * rate[0] + ct * rate[1]) / 1e6
+
+
+def _write_escalation(job_dir, state, cfg):
+    reason = state.get("reason")
+    opts = {"cap_reached": [("raise-bounds", "Edit max_rounds/max_cost_usd/max_wall_seconds in job.json, then re-freeze a successor job carrying the incumbent forward"), ("accept-incumbent", "Finalize with --disposition given to accept the current best artifact"), ("abandon", "Finalize with --disposition declined")],
+            "no_observation": [("inspect-evidence", "Read evidence/ and scores.jsonl; the evaluator channel failed its controls or errored"), ("accept-incumbent", "Finalize with --disposition given --ack-unobserved <DIMS> to accept with acknowledged gaps"), ("abandon", "Finalize with --disposition declined")],
+            "no_artifact": [("fix-maker", "The Maker produced nothing; check the Maker command and method.md"), ("abandon", "Finalize with --disposition declined")],
+            "dormant_channel": [("vary-method", "Two consecutive identical artifacts; revise method.md so the Maker can actually change the artifact"), ("accept-incumbent", "Finalize with --disposition given"), ("abandon", "Finalize with --disposition declined")],
+            "dimension_tradeoff": [("owner-ruling", "The revision is better on one dimension and worse on another; pick which artifact ships and finalize accordingly"), ("abandon", "Finalize with --disposition declined")],
+            "maker_failed": [("fix-maker", "The Maker command failed; state.json maker_error has the stderr tail"), ("abandon", "Finalize with --disposition declined")],
+            "all_conform": [("finalize", "Finalize with --disposition given to bind the Owner disposition")]}
+    rec = {"terminalState": state.get("terminal_state"), "reason": reason, "incumbentRound": state.get("incumbent_round"),
+           "options": [{"id": o[0], "action": o[1]} for o in opts.get(reason, [("inspect-state", "Read state.json and evidence/ before deciding")])],
+           "recommendation": {"cap_reached": "accept-incumbent if the incumbent meets the bar on inspection, else raise-bounds",
+                              "no_observation": "inspect-evidence first; accept-incumbent only with explicit --ack-unobserved",
+                              "no_artifact": "fix-maker", "dormant_channel": "vary-method", "dimension_tradeoff": "owner-ruling",
+                              "maker_failed": "fix-maker", "all_conform": "finalize"}.get(reason, "inspect-state")}
+    (job_dir / "escalation.json").write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
 
 
 def run_job(job_dir):
@@ -147,11 +185,15 @@ def run_job(job_dir):
     cfg, state = json.loads((job_dir / "job.json").read_text(encoding="utf-8")), json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
     if gates.gate_instruments(cfg, job_dir) != state["pins"]:
         raise gates.GateError("frozen instruments modified after freeze (I-01/I-02)")
+    if state.get("terminal_state"):
+        raise gates.GateError(f"job already reached terminal state {state['terminal_state']} ({state.get('reason')}); run executes once")
     max_rounds, max_wall, max_cost, t0 = int(cfg["bounds"]["max_rounds"]), float(cfg["bounds"]["max_wall_seconds"]), float(cfg["bounds"]["max_cost_usd"]), time.monotonic()
     dims, floors = [d["id"] for d in cfg["bar"]["dimensions"]], {d["id"]: float(cfg.get("rejectFloor", (d.get("scale") or {}).get("floor", 0.0))) for d in cfg["bar"]["dimensions"]}
     held_hashes = {gates.sha256_file(p) for p in (job_dir / "held_out").rglob("*") if p.is_file()} if (job_dir / "held_out").is_dir() else set()
+    pricing = cfg.get("pricing", {})
     for r in range(1, max_rounds + 1):
-        rem_s = max_wall - (time.monotonic() - t0)
+        wall_base = float(state.get("wall_spent_seconds", 0.0))
+        rem_s = max_wall - wall_base - (time.monotonic() - t0)
         if rem_s <= 0 or state.get("cost_usd", 0.0) >= max_cost:
             state.update(terminal_state="needs_owner", reason="cap_reached")
             break
@@ -167,14 +209,23 @@ def run_job(job_dir):
         except (TimeoutError, subprocess.TimeoutExpired):
             state.update(terminal_state="needs_owner", reason="cap_reached")
             break
+        except gates.GateError:
+            raise  # integrity/security violations fail loud, never become dispositions
+        except Exception as e:  # Maker runtime crash is a halted run, not a traceback
+            state.update(terminal_state="needs_owner", reason="maker_failed", maker_error=str(e)[-300:])
+            break
         cand_digest = _subject_digest(art_dir, cfg["subjectFiles"], held_hashes)
         if cand_digest is None or cand_digest in (state["last_candidate_digest"], state["incumbent_digest"]):
             state.update(terminal_state="needs_owner", reason="no_artifact" if cand_digest is None else "dormant_channel")
             break
         state["last_candidate_digest"] = cand_digest
         ev_prod = _append(job_dir, "artifact-produced", cfg["maker"]["name"], [art_dir / f for f in cfg["subjectFiles"]], {})
-        checks, ctls, s_rows, exts, d_scores, defects, solutions = _eval_batch(cfg, job_dir, r, art_dir, max_wall - (time.monotonic() - t0))
+        checks, ctls, s_rows, exts, d_scores, defects, solutions, usages = _eval_batch(cfg, job_dir, r, art_dir, t0 + max_wall - wall_base)
         state["rounds"][str(r)] = {"producedAt": ev_prod["at"], "digest": cand_digest, "checks": checks, "controls": ctls, "scores": s_rows, "external": exts, "dim_scores": d_scores}
+        for u in usages:
+            key = u["model"] or u["evaluator"]
+            state["token_usage"] = {**state.get("token_usage", {}), key: {k: state.get("token_usage", {}).get(key, {}).get(k, 0) + v for k, v in u["usage"].items() if isinstance(v, (int, float))}}
+            state["cost_usd"] = round(state.get("cost_usd", 0.0) + _cost_of(u["usage"], pricing.get(key, pricing.get("default", {}))), 6)
         if any(c["outcome"] == "unobserved" for c in checks):
             if state["incumbent_round"] is None:
                 state.update(incumbent_round=r, incumbent_digest=cand_digest, incumbent_scores=d_scores)
@@ -193,6 +244,12 @@ def run_job(job_dir):
         if all(c["outcome"] == "conforms" for c in win_checks) or r == max_rounds:
             state.update(terminal_state="accepted" if all(c["outcome"] == "conforms" for c in win_checks) else "needs_owner", reason="all_conform" if all(c["outcome"] == "conforms" for c in win_checks) else "cap_reached")
             break
+        # wall clock never pauses: bank elapsed time before the next round
+        state["wall_spent_seconds"] = wall_base + (time.monotonic() - t0)
+        t0 = time.monotonic()
+        _write_state(job_dir, state)
+    if state.get("terminal_state") == "needs_owner":
+        _write_escalation(job_dir, state, cfg)
     (job_dir / "state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     return {"accepted": 0, "rejected": 1, "needs_owner": 2}[state["terminal_state"]]
 
