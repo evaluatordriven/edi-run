@@ -61,18 +61,49 @@ class FindingG_LinuxCredentialParity(_R2Base):
         import shutil, unittest.mock
         if shutil.which("bwrap") is None:
             self.skipTest("bwrap not available on this host")
-        fake_home = pathlib.Path(self.tmp.name)
+        fake_home = self.tmp  # NOT .name -- the fixture bug that turned the Linux legs red
         (fake_home / ".aws").mkdir()
         (fake_home / ".aws" / "credentials").write_text("decoy")
         (fake_home / ".netrc").write_text("decoy")
+        (fake_home / ".ssh").mkdir()
         jd = fake_home / "jobs" / "jobA"
         (jd / "held_out").mkdir(parents=True)
         sb = fake_home / "sb"
         sb.mkdir()
         with unittest.mock.patch("adapters.pathlib.Path.home", return_value=fake_home):
             cmd = adapters.sandbox_prefix("bwrap", jd, sb)
-        self.assertIn(["--tmpfs", str(fake_home / ".aws")], cmd)
-        self.assertIn(["--ro-bind", "/dev/null", str(fake_home / ".netrc")], cmd)
+        for n in adapters._HOME_DOTFILE_DIRS:
+            self.assertIn(["--tmpfs", str(fake_home / ("." + n))], cmd)
+        for n in adapters._HOME_DOTFILE_FILES:
+            self.assertIn(["--ro-bind", "/dev/null", str(fake_home / ("." + n))], cmd)
+
+
+class FindingH_UnresolvedHome(_R2Base):
+    def test_h_profile_built_from_unresolved_home_still_denies(self):
+        """Round-2 close-out (adversarial #1): tempfile paths on macOS live under a
+        symlinked /var/folders; a profile built from the UNRESOLVED path silently
+        voids every dotfile deny. sandbox_prefix/run_maker must .resolve() home."""
+        if test_edi._SANDBOX_TYPE != "sandbox-exec":
+            self.skipTest("needs sandbox-exec")
+        fake_home = self.tmp  # /var/folders/... -- NON-canonical on macOS
+        (fake_home / ".aws").mkdir()
+        cred = fake_home / ".aws" / "credentials"
+        cred.write_text("SECRET-AWS")
+        target = str(cred)  # attacker uses the path as found, unresolved
+        script = (
+            "import pathlib, sys\n"
+            "try:\n"
+            "    open(" + repr(target) + ").read()\n"
+            "    verdict = 'LEAKED'\n"
+            "except PermissionError:\n"
+            "    verdict = 'DENIED'\n"
+            "pathlib.Path(sys.argv[2], 'memo.md').write_text('" + PASSING + "aws=' + verdict + '\\n', encoding='utf-8')\n")
+        import unittest.mock
+        job = self._sandboxed_agent_job("home-resolve", script)
+        with unittest.mock.patch("adapters.pathlib.Path.home", return_value=fake_home):
+            loop.freeze_job(job)
+            loop.run_job(job)
+        self.assertIn("aws=DENIED", self._memo_tail(job))
 
 
 class FindingF_AgentTmpdir(_R2Base):

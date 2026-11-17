@@ -37,7 +37,8 @@ def _chat_json(url, model_id, sys_prompt, user_prompt, key_env="OPENROUTER_API_K
 # list, consumed by the seatbelt profile and the bwrap masks -- they must not
 # drift; round-2 close-out #1).
 _HOME_DOTFILE_DIRS = ("config", "aws", "gnupg", "kube", "docker")
-_HOME_DOTFILE_FILES = ("netrc", "git-credentials", "zsh_history", "bash_history", "wget-hsts", "npmrc", "pypirc")
+_HOME_DOTFILE_FILES = ("netrc", "git-credentials", "zsh_history", "bash_history", "wget-hsts", "npmrc", "pypirc",
+                       "gitcookies", "dockercfg", "yarnrc.yml", "pgpass", "my.cnf", "vault-token", "s3cfg", "boto", "hgrc")
 
 
 def sandbox_prefix(stype, jd, sb_p):
@@ -53,7 +54,7 @@ def sandbox_prefix(stype, jd, sb_p):
         # is ever created on the host. Own network namespace (round-2 E): the only way
         # out is the relay to the proxy's Unix socket. Every job's controls are masked
         # (round-2 B): control sets are reused across jobs under one jobs root.
-        home = pathlib.Path.home()
+        home = pathlib.Path.home().resolve()  # seatbelt/bwrap match canonical paths only
         cmd = ["bwrap", "--die-with-parent", "--unshare-pid", "--unshare-net",
                "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
                "--tmpfs", str(jd)]
@@ -226,7 +227,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 cmd = _resolve_cmd(list(maker_cfg["command"]), job_dir)
                 stype = (maker_cfg.get("sandbox") or {}).get("type")
                 jd = pathlib.Path(job_dir).resolve()  # seatbelt matches canonical paths only
-                home = pathlib.Path.home()
+                home = pathlib.Path.home().resolve()  # seatbelt matches canonical paths only
                 if stype not in ("sandbox-exec", "bwrap"):
                     raise gates.GateError(f"unknown sandbox type {stype}; supported: sandbox-exec (macOS), bwrap (Linux)")
                 if stype == "sandbox-exec":
