@@ -62,14 +62,19 @@ class FindingG_LinuxCredentialParity(_R2Base):
         if shutil.which("bwrap") is None:
             self.skipTest("bwrap not available on this host")
         fake_home = self.tmp  # NOT .name -- the fixture bug that turned the Linux legs red
-        (fake_home / ".aws").mkdir()
-        (fake_home / ".aws" / "credentials").write_text("decoy")
-        (fake_home / ".netrc").write_text("decoy")
         (fake_home / ".ssh").mkdir()
         jd = fake_home / "jobs" / "jobA"
         (jd / "held_out").mkdir(parents=True)
         sb = fake_home / "sb"
         sb.mkdir()
+        # decoys for EVERY entry, so a dropped tuple member cannot hide behind
+        # 'mask applies only to existing paths'
+        for n in adapters._HOME_DOTFILE_DIRS:
+            (fake_home / ("." + n)).mkdir(exist_ok=True)
+        for n in adapters._HOME_DOTFILE_FILES:
+            f = fake_home / ("." + n)
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("decoy")
         with unittest.mock.patch("adapters.pathlib.Path.home", return_value=fake_home):
             cmd = adapters.sandbox_prefix("bwrap", jd, sb)
         for n in adapters._HOME_DOTFILE_DIRS:
