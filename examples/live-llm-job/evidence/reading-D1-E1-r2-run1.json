@@ -1,0 +1,9 @@
+{
+  "dimension": "D1",
+  "evaluator": "E1",
+  "round": 2,
+  "run": 1,
+  "score": 5.0,
+  "observation": "# Incident Summary: Auth Token Cache Outage\n\nOn October 14, 2026, a Redis TTL misconfiguration cause",
+  "remedy": ""
+}

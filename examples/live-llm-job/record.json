@@ -1,0 +1,308 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "summary.md",
+      "digest": {
+        "sha256": "fc9f136441acd506d0195ce48734f03f04dd02501056ed2e1df0bb47d985f53a"
+      }
+    }
+  ],
+  "predicateType": "https://evaluatordriven.com/custody/v1",
+  "predicate": {
+    "specVersion": "0.9.8",
+    "levelClaimed": "CL1",
+    "bar": {
+      "digest": {
+        "sha256": "b09e1865cfb9ae512507b49a6fa500b1bf0ca6def7842caf1a7934af1517f815"
+      },
+      "frozenAt": "2026-11-17T00:21:51.079016Z",
+      "author": "Jordan Blake",
+      "dimensions": [
+        {
+          "id": "D1",
+          "criterion": "Starts with '# Incident Summary:' header and stays between 40 and 180 words",
+          "scale": {
+            "anchors": {
+              "1": "missing required structure or citation",
+              "5": "all elements present"
+            },
+            "floor": 0.0,
+            "threshold": 4.0
+          }
+        },
+        {
+          "id": "D2",
+          "criterion": "Contains '## Root Cause & Prevention' section with 7-char hex commit SHA in backticks and YYYY-MM-DD date",
+          "scale": {
+            "anchors": {
+              "1": "missing required structure or citation",
+              "5": "all elements present"
+            },
+            "floor": 0.0,
+            "threshold": 4.0
+          }
+        }
+      ],
+      "approvals": [
+        {
+          "role": "buyer",
+          "by": "Casey Park",
+          "at": "2026-11-17T00:21:51.082540Z",
+          "barDigest": {
+            "sha256": "b09e1865cfb9ae512507b49a6fa500b1bf0ca6def7842caf1a7934af1517f815"
+          },
+          "adopted": null
+        },
+        {
+          "role": "specialist",
+          "by": "Riley Moss",
+          "at": "2026-11-17T00:21:51.086918Z",
+          "barDigest": {
+            "sha256": "b09e1865cfb9ae512507b49a6fa500b1bf0ca6def7842caf1a7934af1517f815"
+          },
+          "adopted": null
+        }
+      ],
+      "publishedAt": null,
+      "groundTruth": [],
+      "dissent": []
+    },
+    "maker": {
+      "name": "QwenMaker",
+      "kind": "model",
+      "version": "qwen3-32b",
+      "method": {
+        "sha256": "7570105ba05eea1264db5b3fc2484459e06a47273476f8cf861fda5ec8bbb885"
+      },
+      "model": {
+        "family": "qwen",
+        "identifier": "qwen/qwen3-32b",
+        "endpoint": "openrouter.ai",
+        "readOnly": false
+      }
+    },
+    "startedAt": "2026-11-17T00:21:51.108340Z",
+    "producedAt": "2026-11-17T00:22:25.147448Z",
+    "instrument": {
+      "rubric": {
+        "sha256": "ecf574f32bf7b6e71fb4e84e3587d27da7c7f2bb64599d02c1e634b96c4f12a2"
+      },
+      "runner": {
+        "sha256": "749097aeb4a14951071a6ce9554380ddfb48034362d2dd6f5aed5c91284f298b"
+      }
+    },
+    "evaluators": [
+      {
+        "id": "E1",
+        "name": "StructGate",
+        "kind": "script",
+        "model": null,
+        "script": {
+          "name": "eval_struct.py",
+          "author": "Morgan Lee",
+          "digest": {
+            "sha256": "3e717cdc830294f681af6e3f619350fbd063c466a23b8a0e9085e0507e787298"
+          }
+        }
+      },
+      {
+        "id": "E2",
+        "name": "ClaudeEvaluator",
+        "kind": "model",
+        "model": {
+          "family": "claude",
+          "identifier": "anthropic/claude-opus-5.5",
+          "endpoint": "openrouter.ai",
+          "readOnly": true
+        },
+        "script": null
+      }
+    ],
+    "checks": [
+      {
+        "at": "2026-11-17T00:22:25.489120Z",
+        "batch": "B2",
+        "dimension": "D1",
+        "evaluator": "E1",
+        "evidence": {
+          "name": "reading-D1-E1-r2-run1.json",
+          "sha256": "13bd3fac3d8b923f77faab8c62327b44d77dfb08595327625022da14b4429cf4"
+        },
+        "failureCondition": "score < 4.0",
+        "outcome": "conforms",
+        "run": 1,
+        "score": 5.0,
+        "unobserved": null
+      },
+      {
+        "at": "2026-11-17T00:22:25.520142Z",
+        "batch": "B2",
+        "dimension": "D2",
+        "evaluator": "E1",
+        "evidence": {
+          "name": "reading-D2-E1-r2-run1.json",
+          "sha256": "c609d5337740db808e5d5e12c8375803c32c1532a869982d3483234f50c6daa3"
+        },
+        "failureCondition": "score < 4.0",
+        "outcome": "conforms",
+        "run": 1,
+        "score": 5.0,
+        "unobserved": null
+      },
+      {
+        "at": "2026-11-17T00:22:40.380722Z",
+        "batch": "B2",
+        "dimension": "D1",
+        "evaluator": "E2",
+        "evidence": {
+          "name": "reading-D1-E2-r2-run1.json",
+          "sha256": "acb2dcce13429646b33353536004ca656829a3d5030bda11e9c08f9fc326d8c3"
+        },
+        "failureCondition": "score < 4.0",
+        "outcome": "conforms",
+        "run": 1,
+        "score": 5.0,
+        "unobserved": null
+      },
+      {
+        "at": "2026-11-17T00:22:42.469688Z",
+        "batch": "B2",
+        "dimension": "D2",
+        "evaluator": "E2",
+        "evidence": {
+          "name": "reading-D2-E2-r2-run1.json",
+          "sha256": "0a526a36efbf82b60bbaf48e356e1696deefa7440480989c7d96d270a84fa8c3"
+        },
+        "failureCondition": "score < 4.0",
+        "outcome": "conforms",
+        "run": 1,
+        "score": 5.0,
+        "unobserved": null
+      }
+    ],
+    "controls": [
+      {
+        "batch": "B2",
+        "case": {
+          "sha256": "2e20cecb3a555d9c7c73a1966e3778f2aa1208959f212f9ad1b0986430158e34"
+        },
+        "dimension": "D1",
+        "evaluator": "E1",
+        "expected": "conforms",
+        "id": "K-B2-E1-D1-clean",
+        "outcome": "conforms"
+      },
+      {
+        "batch": "B2",
+        "case": {
+          "sha256": "547306f2b13521d3b55725e8c21a33c3ff2c1c88350f357c06d1585b0e123cb2"
+        },
+        "dimension": "D1",
+        "evaluator": "E1",
+        "expected": "does_not_conform",
+        "id": "K-B2-E1-D1-planted",
+        "outcome": "does_not_conform"
+      },
+      {
+        "batch": "B2",
+        "case": {
+          "sha256": "2e20cecb3a555d9c7c73a1966e3778f2aa1208959f212f9ad1b0986430158e34"
+        },
+        "dimension": "D2",
+        "evaluator": "E1",
+        "expected": "conforms",
+        "id": "K-B2-E1-D2-clean",
+        "outcome": "conforms"
+      },
+      {
+        "batch": "B2",
+        "case": {
+          "sha256": "547306f2b13521d3b55725e8c21a33c3ff2c1c88350f357c06d1585b0e123cb2"
+        },
+        "dimension": "D2",
+        "evaluator": "E1",
+        "expected": "does_not_conform",
+        "id": "K-B2-E1-D2-planted",
+        "outcome": "does_not_conform"
+      },
+      {
+        "batch": "B2",
+        "case": {
+          "sha256": "2e20cecb3a555d9c7c73a1966e3778f2aa1208959f212f9ad1b0986430158e34"
+        },
+        "dimension": "D1",
+        "evaluator": "E2",
+        "expected": "conforms",
+        "id": "K-B2-E2-D1-clean",
+        "outcome": "conforms"
+      },
+      {
+        "batch": "B2",
+        "case": {
+          "sha256": "547306f2b13521d3b55725e8c21a33c3ff2c1c88350f357c06d1585b0e123cb2"
+        },
+        "dimension": "D1",
+        "evaluator": "E2",
+        "expected": "does_not_conform",
+        "id": "K-B2-E2-D1-planted",
+        "outcome": "does_not_conform"
+      },
+      {
+        "batch": "B2",
+        "case": {
+          "sha256": "2e20cecb3a555d9c7c73a1966e3778f2aa1208959f212f9ad1b0986430158e34"
+        },
+        "dimension": "D2",
+        "evaluator": "E2",
+        "expected": "conforms",
+        "id": "K-B2-E2-D2-clean",
+        "outcome": "conforms"
+      },
+      {
+        "batch": "B2",
+        "case": {
+          "sha256": "547306f2b13521d3b55725e8c21a33c3ff2c1c88350f357c06d1585b0e123cb2"
+        },
+        "dimension": "D2",
+        "evaluator": "E2",
+        "expected": "does_not_conform",
+        "id": "K-B2-E2-D2-planted",
+        "outcome": "does_not_conform"
+      }
+    ],
+    "disagreements": [],
+    "violations": [],
+    "separationGaps": [],
+    "retention": {
+      "location": "examples/live-llm-job",
+      "public": false
+    },
+    "external": [
+      {
+        "evidence": {
+          "name": "harness-E2-B1.json",
+          "sha256": "84312b9e62eae5a455ddf220ff8549586a49bcaf3ad1ce74286fb17a88620cd7"
+        },
+        "readBy": "Jordan Blake",
+        "requirement": "CL1-15",
+        "subject": "E2"
+      },
+      {
+        "evidence": {
+          "name": "harness-E2-B2.json",
+          "sha256": "f6cd06e7a741b51029020ea5c3664b41aadc9c5694c6ac7ff94d022417cb8a40"
+        },
+        "readBy": "Jordan Blake",
+        "requirement": "CL1-15",
+        "subject": "E2"
+      }
+    ],
+    "disposition": {
+      "acknowledgesUnobserved": [],
+      "state": "given",
+      "by": "Casey Park",
+      "at": "2026-11-17T00:22:42.640952Z"
+    }
+  }
+}

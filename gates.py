@@ -117,7 +117,8 @@ def gate_packet(packet, job_dir, expected_incumbent_digest):
     low, held_dir = json.dumps(packet, sort_keys=True).casefold(), job_dir / "held_out"
     if any(k in low for k in ("held_out", "scores.jsonl", "job.jsonl")):
         raise GateError("held-out path marker leaked into Maker packet (I-04)")
+    pub = "".join((job_dir / f).read_text(encoding="utf-8", errors="ignore").casefold() for f in ("bar.md", "method.md") if (job_dir / f).is_file())
     for p in (p for p in (held_dir.rglob("*") if held_dir.is_dir() else []) if p.is_file()):
-        lines = [ln.strip().casefold()[:24] for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines() if len(ln.strip()) >= 16]
+        lines = [ln.strip().casefold()[:24] for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines() if len(ln.strip()) >= 16 and ln.strip().casefold()[:24] not in pub]
         if sha256_file(p).casefold() in low or any(s in low for s in lines):
             raise GateError(f"held-out content or digest from {p.name} leaked into Maker packet (I-04)")

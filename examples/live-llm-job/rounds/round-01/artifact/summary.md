@@ -1,0 +1,3 @@
+# Incident Summary: Auth Token Cache Outage
+
+On October 14, 2026, a Redis TTL misconfiguration caused an outage in the authentication token caching system, leading to widespread service disruptions. The issue stemmed from an incorrect time-to-live (TTL) setting that prematurely evicted tokens from the cache, resulting in failed authentication requests. The problem was resolved in commit 7f3a91c, where the TTL value was corrected to ensure tokens remained in the cache for the intended duration, restoring normal service operation.

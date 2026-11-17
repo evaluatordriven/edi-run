@@ -44,12 +44,12 @@ def freeze_job(job_dir, started_at=None):
         time.sleep(0.002)
         s_at = started_at or _append(job_dir, "work-started", cfg["maker"]["name"], [], {})["at"]
     gates.gate_freeze(cfg, job_dir, started_at=s_at)
-    demos = []
+    demos, rub_txt = [], gates.safe_rel(cfg["instrument"]["rubric"]["file"], job_dir).read_text(encoding="utf-8")
     if cfg["levelClaimed"] == "CL3":
         p_case = gates.safe_rel(cfg["controls"]["planted"], job_dir)
         for ev in cfg["evaluators"]:
             for d in cfg["bar"]["dimensions"]:
-                res = adapters.run_evaluator(ev, p_case, d["id"], job_dir=job_dir)
+                res = adapters.run_evaluator(ev, p_case, d["id"], job_dir=job_dir, dim_cfg=d, rubric_txt=rub_txt)
                 if res.get("score") is not None and float(res["score"]) >= float((d.get("scale") or {}).get("threshold", 4.0)):
                     raise gates.GateError(f"CL3 planted case passed on {ev['id']}/{d['id']} (CL3-1)")
                 demos.append({"dimension": d["id"], "evaluator": ev["id"], "planted": {"sha256": gates.sha256_file(p_case)}, "outcome": "does_not_conform", "at": custody_record.now()})
@@ -61,14 +61,15 @@ def freeze_job(job_dir, started_at=None):
 def _eval_batch(cfg, job_dir, round_n, art_dir, rem_s):
     bid, dims = f"B{round_n}", cfg["bar"]["dimensions"]
     scales, ordered = {d["id"]: d.get("scale") for d in dims}, sorted(cfg["evaluators"], key=lambda e: 0 if e["kind"] == "script" else 1)
-    checks, controls, scores_rows, externals, per_dim, defects = [], [], [], [], {d["id"]: [] for d in dims}, []
+    checks, controls, scores_rows, externals, per_dim, defects, solutions = [], [], [], [], {d["id"]: [] for d in dims}, [], []
     clean_p, planted_p = gates.safe_rel(cfg["controls"]["clean"], job_dir), gates.safe_rel(cfg["controls"]["planted"], job_dir)
+    rub_txt = gates.safe_rel(cfg["instrument"]["rubric"]["file"], job_dir).read_text(encoding="utf-8")
     for ev in ordered:
         ev_id, bad_dims = ev["id"], set()
         for d in dims:
             did, thr = d["id"], float((scales[d["id"]] or {}).get("threshold", 4.0))
             for tag, path, exp in (("clean", clean_p, "conforms"), ("planted", planted_p, "does_not_conform")):
-                cid, res = f"K-{bid}-{ev_id}-{did}-{tag}", adapters.run_evaluator(ev, path, did, job_dir=job_dir, timeout=rem_s)
+                cid, res = f"K-{bid}-{ev_id}-{did}-{tag}", adapters.run_evaluator(ev, path, did, job_dir=job_dir, timeout=rem_s, dim_cfg=d, rubric_txt=rub_txt)
                 sc = res.get("score")
                 if sc is None or not math.isfinite(float(sc)):
                     bad_dims.add(did)
@@ -84,7 +85,7 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, rem_s):
             did, sc_cfg = d["id"], scales[d["id"]]
             for run_i in range(1, int(ev.get("runs", 2 if cfg["levelClaimed"] in ("CL2", "CL3") else 1)) + 1):
                 har = job_dir / "evidence" / f"harness-{ev_id}-{bid}.json" if ev["kind"] == "model" and run_i == 1 else None
-                res = adapters.run_evaluator(ev, art_dir, did, job_dir=job_dir, harness_out=har, timeout=rem_s)
+                res = adapters.run_evaluator(ev, art_dir, did, job_dir=job_dir, harness_out=har, timeout=rem_s, dim_cfg=d, rubric_txt=rub_txt)
                 if did in bad_dims or "unobserved" in res or res.get("score") is None:
                     u = res.get("unobserved") or {"channel": ev_id, "reason": "evaluator failed batch control (CL1-9)"}
                     chk = {"dimension": did, "evaluator": ev_id, "run": run_i, "batch": bid, "at": custody_record.now(), "outcome": "unobserved", "score": None, "failureCondition": f"score < {sc_cfg['threshold']}" if sc_cfg else d["criterion"], "evidence": None, "unobserved": u}
@@ -95,7 +96,9 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, rem_s):
                     chk = {"dimension": did, "evaluator": ev_id, "run": run_i, "batch": bid, "at": custody_record.now(), "outcome": out, "score": score, "failureCondition": f"score < {sc_cfg['threshold']}", "evidence": {"name": ev_name, "sha256": gates.sha256_file(job_dir / "evidence" / ev_name)}, "unobserved": None}
                     per_dim[did].append(score)
                     if out == "does_not_conform":
-                        defects.append({"dimension": did, "score": score, "remedy": res.get("remedy", "")})
+                        defects.append({"dimension": did, "evaluator": ev_id, "score": score, "observation": res.get("observation", ""), "remedy": res.get("remedy", "")})
+                    else:
+                        solutions.append({"dimension": did, "evaluator": ev_id, "score": score, "round": round_n})
                 chk["at"] = _append(job_dir, "check", ev_id, [], chk)["at"]
                 checks.append(chk)
         if ev["kind"] == "model":
@@ -103,7 +106,7 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, rem_s):
             ex = {"requirement": "CL1-15", "subject": ev_id, "evidence": {"name": h_name, "sha256": gates.sha256_file(job_dir / "evidence" / h_name)}, "readBy": cfg["bar"]["author"]}
             externals.append(ex)
             _append(job_dir, "external", ex["readBy"], [], ex)
-    return checks, controls, scores_rows, externals, {k: min(v) if v else 0.0 for k, v in per_dim.items()}, defects
+    return checks, controls, scores_rows, externals, {k: min(v) if v else 0.0 for k, v in per_dim.items()}, defects, solutions
 
 
 def run_job(job_dir):
@@ -126,14 +129,18 @@ def run_job(job_dir):
         (r_dir / "packet.json").write_text(json.dumps(pkt, indent=2) + "\n", encoding="utf-8")
         if state["incumbent_round"]:
             shutil.copytree(job_dir / "rounds" / f"round-{state['incumbent_round']:02d}" / "artifact", art_dir, dirs_exist_ok=True)
-        adapters.run_maker(cfg["maker"], r_dir / "packet.json", art_dir, cfg["subjectFiles"], job_dir, timeout=rem_s)
+        try:
+            adapters.run_maker(cfg["maker"], r_dir / "packet.json", art_dir, cfg["subjectFiles"], job_dir, timeout=rem_s)
+        except TimeoutError:
+            state.update(terminal_state="needs_owner", reason="cap_reached")
+            break
         cand_digest = _subject_digest(art_dir, cfg["subjectFiles"], held_hashes)
         if cand_digest is None or cand_digest in (state["last_candidate_digest"], state["incumbent_digest"]):
             state.update(terminal_state="needs_owner", reason="no_artifact" if cand_digest is None else "dormant_channel")
             break
         state["last_candidate_digest"] = cand_digest
         ev_prod = _append(job_dir, "artifact-produced", cfg["maker"]["name"], [art_dir / f for f in cfg["subjectFiles"]], {})
-        checks, ctls, s_rows, exts, d_scores, defects = _eval_batch(cfg, job_dir, r, art_dir, max_wall - (time.monotonic() - t0))
+        checks, ctls, s_rows, exts, d_scores, defects, solutions = _eval_batch(cfg, job_dir, r, art_dir, max_wall - (time.monotonic() - t0))
         state["rounds"][str(r)] = {"producedAt": ev_prod["at"], "digest": cand_digest, "checks": checks, "controls": ctls, "scores": s_rows, "external": exts, "dim_scores": d_scores}
         if any(c["outcome"] == "unobserved" for c in checks):
             if state["incumbent_round"] is None:
@@ -142,7 +149,7 @@ def run_job(job_dir):
             break
         inc = state["incumbent_scores"]
         if inc is None or (any(d_scores[d] > inc[d] for d in dims) and not any(d_scores[d] < inc[d] for d in dims)):
-            state.update(incumbent_round=r, incumbent_digest=cand_digest, incumbent_scores=d_scores, defects=defects)
+            state.update(incumbent_round=r, incumbent_digest=cand_digest, incumbent_scores=d_scores, defects=defects, solutions=solutions)
         elif any(d_scores[d] > inc[d] for d in dims) and any(d_scores[d] < inc[d] for d in dims):
             state.update(terminal_state="needs_owner", reason="dimension_tradeoff")
             break
@@ -165,24 +172,28 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
     gates.gate_seats(cfg, job_dir, approver_by=by)
     if not st.get("incumbent_round"):
         raise gates.GateError("cannot finalize a job that produced no artifact")
-    win_r, art_dst, log_path = str(st["incumbent_round"]), job_dir / "artifact", job_dir / "job.jsonl"
+    win_r, max_r, art_dst, log_path = str(st["incumbent_round"]), str(max(int(k) for k in st["rounds"])), job_dir / "artifact", job_dir / "job.jsonl"
     win = st["rounds"][win_r]
     shutil.rmtree(art_dst, ignore_errors=True)
     shutil.copytree(job_dir / "rounds" / f"round-{int(win_r):02d}" / "artifact", art_dst)
     (job_dir / "scores.jsonl").write_text("\n".join(json.dumps(r) for r in win["scores"]) + "\n", encoding="utf-8")
-    ev_prod = _append(job_dir, "artifact-produced", cfg["maker"]["name"], [art_dst / f for f in cfg["subjectFiles"]], {})
-    checks = [dict(c, at=_append(job_dir, "check", c["evaluator"], [], c)["at"]) for c in win["checks"]]
-    for k in win["controls"]:
-        _append(job_dir, "control", k["evaluator"], [], {ki: vi for ki, vi in k.items() if ki not in ("expected", "outcome")})
-    for ex in win["external"]:
-        _append(job_dir, "external", ex["readBy"], [], ex)
+    if win_r != max_r:
+        ev_prod = _append(job_dir, "artifact-produced", cfg["maker"]["name"], [art_dst / f for f in cfg["subjectFiles"]], {})
+        checks = [dict(c, at=_append(job_dir, "check", c["evaluator"], [], c)["at"]) for c in win["checks"]]
+        for k in win["controls"]:
+            _append(job_dir, "control", k["evaluator"], [], {ki: vi for ki, vi in k.items() if ki not in ("expected", "outcome")})
+        for ex in win["external"]:
+            _append(job_dir, "external", ex["readBy"], [], ex)
+        prod_at = ev_prod["at"]
+    else:
+        checks, prod_at = win["checks"], win["producedAt"]
     ack = ack_unobserved if ack_unobserved is not None else cfg["disposition"].get("acknowledgesUnobserved", [])
     ev_disp = _append(job_dir, "disposition", by, [], {"state": state, "acknowledgesUnobserved": ack})
     violations = [{"dimension": d["id"], "description": f"{d['id']} failed conform threshold"} for d in cfg["bar"]["dimensions"] if any(c["dimension"] == d["id"] and c["outcome"] == "does_not_conform" for c in checks)]
     disagreements = [{"dimension": d["id"], "checks": [i for i, c in enumerate(checks) if c["dimension"] == d["id"]], "note": "evaluators disagreed"} for d in cfg["bar"]["dimensions"] if len({c["outcome"] for c in checks if c["dimension"] == d["id"]}) > 1]
     evals_clean = [{k: v for k, v in e.items() if k in ("id", "name", "kind", "model", "script", "sameModelAsMaker")} for e in cfg["evaluators"]]
     inputs = {"subject": {"dir": "artifact"}, "specVersion": cfg.get("specVersion", "0.9.8"), "levelClaimed": cfg["levelClaimed"], "bar": dict({k: v for k, v in cfg["bar"].items() if k != "file"}, frozenAt=st["frozenAt"]),
-              "maker": {k: v for k, v in cfg["maker"].items() if k in ("name", "kind", "version", "method", "model")}, "startedAt": st["startedAt"], "producedAt": ev_prod["at"], "instrument": cfg["instrument"],
+              "maker": {k: v for k, v in cfg["maker"].items() if k in ("name", "kind", "version", "method", "model")}, "startedAt": st["startedAt"], "producedAt": prod_at, "instrument": cfg["instrument"],
               "evaluators": evals_clean, "checks": checks, "controls": win["controls"], "disagreements": disagreements, "violations": violations, "separationGaps": cfg.get("separationGaps", []),
               "retention": cfg["retention"], "external": win["external"], "disposition": {"state": state, "by": by, "at": ev_disp["at"], "acknowledgesUnobserved": ack}}
     if cfg["levelClaimed"] in ("CL2", "CL3"):

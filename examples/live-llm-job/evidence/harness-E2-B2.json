@@ -1,0 +1,33 @@
+{
+  "evaluator": "E2",
+  "endpoint": "openrouter.ai",
+  "model": "anthropic/claude-opus-5.5",
+  "usage": {
+    "prompt_tokens": 603,
+    "completion_tokens": 84,
+    "total_tokens": 687,
+    "cost": 0.004092,
+    "is_byok": false,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0,
+      "audio_tokens": 0,
+      "video_tokens": 0
+    },
+    "cost_details": {
+      "upstream_inference_cost": 0.004092,
+      "upstream_inference_prompt_cost": 0.002412,
+      "upstream_inference_completions_cost": 0.00168
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0,
+      "image_tokens": 0,
+      "audio_tokens": 0
+    }
+  },
+  "verdict": {
+    "score": 5.0,
+    "observation": "## Root Cause & Prevention\nThe root cause was a misconfigured TTL value in Redis, which was fixed in commit `7f3a91c` on 2026-10-14.",
+    "remedy": ""
+  }
+}
