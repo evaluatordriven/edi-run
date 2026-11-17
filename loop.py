@@ -37,6 +37,8 @@ def freeze_job(job_dir, started_at=None):
         time.sleep(0.002)
         ev_frz = _append(job_dir, "bar-frozen", cfg["bar"]["author"], [bar_p], {})
         cfg["bar"]["frozenAt"] = ev_frz["at"]
+        for a in cfg["bar"]["approvals"]:
+            _append(job_dir, "approval", a["by"], [bar_p], {"role": a["role"], "barDigest": a["barDigest"]["sha256"], "adopted": a.get("adopted")})
     else:
         ev_frz = _append(job_dir, "bar-frozen", cfg["bar"]["author"], [bar_p], {})
         for a in cfg["bar"]["approvals"]:
@@ -50,8 +52,8 @@ def freeze_job(job_dir, started_at=None):
         for ev in cfg["evaluators"]:
             for d in cfg["bar"]["dimensions"]:
                 res = adapters.run_evaluator(ev, p_case, d["id"], job_dir=job_dir, dim_cfg=d, rubric_txt=rub_txt)
-                if res.get("score") is not None and float(res["score"]) >= float((d.get("scale") or {}).get("threshold", 4.0)):
-                    raise gates.GateError(f"CL3 planted case passed on {ev['id']}/{d['id']} (CL3-1)")
+                if res.get("score") is None or float(res["score"]) >= float((d.get("scale") or {}).get("threshold", 4.0)):
+                    raise gates.GateError(f"CL3 planted case did not fail on {ev['id']}/{d['id']} (CL3-1)")
                 demos.append({"dimension": d["id"], "evaluator": ev["id"], "planted": {"sha256": gates.sha256_file(p_case)}, "outcome": "does_not_conform", "at": custody_record.now()})
     state = {"status": "frozen", "pins": pins, "startedAt": s_at, "frozenAt": ev_frz["at"], "demonstrations": demos, "incumbent_round": None, "incumbent_digest": None, "incumbent_scores": None, "last_candidate_digest": None, "defects": [], "solutions": [], "rounds": {}, "terminal_state": None, "reason": None, "cost_usd": 0.0}
     (job_dir / "state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
@@ -131,7 +133,7 @@ def run_job(job_dir):
             shutil.copytree(job_dir / "rounds" / f"round-{state['incumbent_round']:02d}" / "artifact", art_dir, dirs_exist_ok=True)
         try:
             adapters.run_maker(cfg["maker"], r_dir / "packet.json", art_dir, cfg["subjectFiles"], job_dir, timeout=rem_s)
-        except TimeoutError:
+        except (TimeoutError, subprocess.TimeoutExpired):
             state.update(terminal_state="needs_owner", reason="cap_reached")
             break
         cand_digest = _subject_digest(art_dir, cfg["subjectFiles"], held_hashes)
