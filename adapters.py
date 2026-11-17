@@ -116,13 +116,12 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         encoding="utf-8")
                     cmd = ["sandbox-exec", "-f", str(profile)] + cmd
                 elif stype == "bwrap":
-                    # Keep the network namespace (the agent must reach the loop-local proxy);
-                    # held_out and secret paths are masked, the workspace stays writable.
-                    cmd = ["bwrap", "--die-with-parent", "--dev-bind", "/", "/",
-                           "--tmpfs", str(jd / "held_out"), "--tmpfs", str(home / ".ssh"),
+                    # Keep the network namespace (the agent must reach the loop-local proxy).
+                    # The whole job dir is masked with a tmpfs (held_out and the custody files
+                    # live inside it); the workspace stays writable.
+                    cmd = ["bwrap", "--die-with-parent", "--unshare-pid", "--dev-bind", "/", "/",
+                           "--tmpfs", str(jd), "--tmpfs", str(home / ".ssh"),
                            "--ro-bind", "/dev/null", str(home / ".hermes" / ".env"),
-                           "--ro-bind", "/dev/null", str(jd / "job.jsonl"),
-                           "--ro-bind", "/dev/null", str(jd / "scores.jsonl"),
                            "--bind", str(sb_p), str(sb_p)] + cmd
                 elif stype:
                     raise gates.GateError(f"unknown sandbox type {stype}; supported: sandbox-exec (macOS), bwrap (Linux)")
