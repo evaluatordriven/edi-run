@@ -16,6 +16,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      # The agent tests run under bwrap, which needs unprivileged user namespaces.
+      # Ubuntu 24.04 runner images forbid them by AppArmor default; the hosted runner
+      # is throwaway, so the restriction is lifted for this run only. If the sysctl
+      # is absent (older image), the suite still runs and the agent tests skip as before.
+      - name: Allow unprivileged user namespaces (throwaway hosted runner)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - name: Run test suite
         run: python3 -m unittest discover -s tests -p 'test_*.py'
   macos:
