@@ -1,6 +1,6 @@
 """Deterministic E-DI state machine (I-05 through I-07) wrapping evaluatordriven/custody tools."""
 from collections import Counter
-import json, math, os, pathlib, shutil, subprocess, sys, time
+import json, math, os, pathlib, shutil, signal, subprocess, sys, time
 import adapters, gates
 
 VENDOR = pathlib.Path(__file__).resolve().parent / "vendor"
@@ -58,11 +58,21 @@ def freeze_job(job_dir, started_at=None):
     job_dir, cfg = pathlib.Path(job_dir).resolve(), json.loads((pathlib.Path(job_dir) / "job.json").read_text(encoding="utf-8"))
     gates.gate_bounds(cfg)
     gates.gate_seats(cfg, job_dir)
+    model_ids = []
+    if cfg["maker"].get("kind") == "model":
+        model_ids.append((cfg["maker"].get("model") or {}).get("identifier") if isinstance(cfg["maker"].get("model"), dict) else cfg["maker"].get("model"))
+    model_ids += [(e.get("model") or {}).get("identifier") if isinstance(e.get("model"), dict) else e.get("model") for e in cfg["evaluators"] if e.get("kind") == "model"]
+    pricing_map = cfg.get("pricing", {})
+    missing = [m for m in model_ids if m and m not in pricing_map and "default" not in pricing_map]
+    if missing:
+        raise gates.GateError(f"missing pricing for model seat(s) {missing}; add a pricing map to job.json so the cost cap is enforceable")
     pins = gates.gate_instruments(cfg, job_dir)
     if (job_dir / "job.jsonl").exists():
         raise gates.GateError("job.jsonl already exists; freeze runs once")
-    _append(job_dir, "job-start", "edi-run", [], {"job": cfg["job"]})
+    # Every check that can refuse the freeze runs BEFORE the first log write --
+    # a refused freeze must leave nothing behind for the corrected retry to trip over.
     seed = cfg.get("seed")
+    seed_pins = None
     if seed:
         sdir = gates.safe_rel(seed["dir"], job_dir)
         if not sdir.is_dir():
@@ -72,7 +82,12 @@ def freeze_job(job_dir, started_at=None):
             raise gates.GateError(f"seed must supply exactly subjectFiles {sorted(cfg['subjectFiles'])}; found {seed_files}")
         if any(str(e["name"]).casefold() == str(seed["author"]).casefold() for e in cfg["evaluators"]):
             raise gates.GateError("seed author cannot serve as Evaluator (CL1-6)")
-        _append(job_dir, "artifact-supplied", seed["author"], [sdir / f for f in cfg["subjectFiles"]], {"origin": seed.get("origin", ""), "note": seed.get("note", "")})
+        if any(str(a["by"]).casefold() == str(seed["author"]).casefold() for a in cfg["bar"]["approvals"]):
+            raise gates.GateError("seed author cannot hold the Buyer or Specialist seat (the approver of the bar would be the maker of record)")
+        seed_pins = {f: gates.sha256_file(sdir / f) for f in cfg["subjectFiles"]}
+    _append(job_dir, "job-start", "edi-run", [], {"job": cfg["job"]})
+    if seed:
+        _append(job_dir, "artifact-supplied", seed["author"], [gates.safe_rel(seed["dir"], job_dir) / f for f in cfg["subjectFiles"]], {"origin": seed.get("origin", ""), "note": seed.get("note", "")})
     bar_p = gates.safe_rel(cfg["bar"].get("file", "bar.md"), job_dir)
     if cfg["levelClaimed"] == "baseline":
         s_at = started_at or _append(job_dir, "work-started", cfg["maker"]["name"], [], {})["at"]
@@ -88,14 +103,6 @@ def freeze_job(job_dir, started_at=None):
         time.sleep(0.002)
         s_at = started_at or _append(job_dir, "work-started", cfg["maker"]["name"], [], {})["at"]
     gates.gate_freeze(cfg, job_dir, started_at=s_at)
-    model_ids = []
-    if cfg["maker"].get("kind") == "model":
-        model_ids.append((cfg["maker"].get("model") or {}).get("identifier") if isinstance(cfg["maker"].get("model"), dict) else cfg["maker"].get("model"))
-    model_ids += [(e.get("model") or {}).get("identifier") if isinstance(e.get("model"), dict) else e.get("model") for e in cfg["evaluators"] if e.get("kind") == "model"]
-    pricing_map = cfg.get("pricing", {})
-    missing = [m for m in model_ids if m and m not in pricing_map and "default" not in pricing_map]
-    if missing:
-        raise gates.GateError(f"missing pricing for model seat(s) {missing}; add a pricing map to job.json so the cost cap is enforceable")
     ho = job_dir / "held_out"
     if ho.is_dir():
         for f in ho.rglob("*"):
@@ -110,7 +117,7 @@ def freeze_job(job_dir, started_at=None):
                 if res.get("score") is None or float(res["score"]) >= float((d.get("scale") or {}).get("threshold", 4.0)):
                     raise gates.GateError(f"CL3 planted case did not fail on {ev['id']}/{d['id']} (CL3-1)")
                 demos.append({"dimension": d["id"], "evaluator": ev["id"], "planted": {"sha256": gates.sha256_file(p_case)}, "outcome": "does_not_conform", "at": custody_record.now()})
-    state = {"status": "frozen", "pins": pins, "startedAt": s_at, "frozenAt": ev_frz["at"], "demonstrations": demos, "incumbent_round": None, "incumbent_digest": None, "incumbent_scores": None, "last_candidate_digest": None, "defects": [], "solutions": [], "rounds": {}, "terminal_state": None, "reason": None, "cost_usd": 0.0, "seed": {"dir": seed["dir"], "author": seed["author"]} if seed else None}
+    state = {"status": "frozen", "pins": pins, "startedAt": s_at, "frozenAt": ev_frz["at"], "demonstrations": demos, "incumbent_round": None, "incumbent_digest": None, "incumbent_scores": None, "last_candidate_digest": None, "defects": [], "solutions": [], "rounds": {}, "terminal_state": None, "reason": None, "cost_usd": 0.0, "seed": ({"dir": seed["dir"], "author": seed["author"], "digests": seed_pins} if seed else None)}
     (job_dir / "state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     return 0
 
@@ -202,13 +209,15 @@ def _write_escalation(job_dir, state, cfg):
             "dormant_channel": [("vary-method", "Two consecutive identical artifacts; revise method.md so the Maker can actually change the artifact"), ("accept-incumbent", "Finalize with --disposition given"), ("abandon", "Finalize with --disposition declined")],
             "dimension_tradeoff": [("owner-ruling", "The revision is better on one dimension and worse on another; pick which artifact ships and finalize accordingly"), ("abandon", "Finalize with --disposition declined")],
             "maker_failed": [("fix-maker", "The Maker command failed; state.json maker_error has the stderr tail"), ("abandon", "Finalize with --disposition declined")],
+            "interrupted": [("inspect-state", "The run was interrupted (Ctrl-C or SIGTERM); the log holds every completed event"), ("abandon", "Finalize with --disposition declined")],
+            "runtime_error": [("inspect-state", "A runtime defect halted the job; state.json runtime_error has the detail"), ("abandon", "Finalize with --disposition declined")],
             "all_conform": [("finalize", "Finalize with --disposition given to bind the Owner disposition")]}
     rec = {"terminalState": state.get("terminal_state"), "reason": reason, "incumbentRound": state.get("incumbent_round"),
            "options": [{"id": o[0], "action": o[1]} for o in opts.get(reason, [("inspect-state", "Read state.json and evidence/ before deciding")])],
            "recommendation": {"cap_reached": "accept-incumbent if the incumbent meets the bar on inspection, else raise-bounds",
                               "no_observation": "inspect-evidence first; accept-incumbent only with explicit --ack-unobserved",
                               "no_artifact": "fix-maker", "dormant_channel": "vary-method", "dimension_tradeoff": "owner-ruling",
-                              "maker_failed": "fix-maker", "all_conform": "finalize"}.get(reason, "inspect-state")}
+                              "maker_failed": "fix-maker", "interrupted": "inspect-state", "runtime_error": "inspect-state", "all_conform": "finalize"}.get(reason, "inspect-state")}
     (job_dir / "escalation.json").write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
 
 
@@ -226,6 +235,11 @@ def run_job(job_dir):
     dims, floors = [d["id"] for d in cfg["bar"]["dimensions"]], {d["id"]: float(cfg.get("rejectFloor", (d.get("scale") or {}).get("floor", 0.0))) for d in cfg["bar"]["dimensions"]}
     held_hashes = {gates.sha256_file(p) for p in (job_dir / "held_out").rglob("*") if p.is_file()} if (job_dir / "held_out").is_dir() else set()
     pricing = cfg.get("pricing", {})
+    prev_term = None
+    if hasattr(signal, "SIGTERM"):
+        def _on_term(signum, frame):
+            raise KeyboardInterrupt()
+        prev_term = signal.signal(signal.SIGTERM, _on_term)
     try:
       for r in range(1, max_rounds + 1):
         wall_base = float(state.get("wall_spent_seconds", 0.0))
@@ -245,6 +259,9 @@ def run_job(job_dir):
             # Round 1 evaluates the Owner-supplied seed as-is: an unvalidated candidate,
             # never credited to the Maker. If it already meets the bar, no Maker call is paid.
             for f in cfg["subjectFiles"]:
+                pinned = state["seed"]["digests"].get(f)
+                if pinned and gates.sha256_file(job_dir / cfg["seed"]["dir"] / f) != pinned:
+                    raise gates.GateError(f"seed file {f} changed after freeze (pinned {pinned[:12]}...); refusing to evaluate a different draft")
                 dst = art_dir / f
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(job_dir / cfg["seed"]["dir"] / f, dst)
@@ -297,10 +314,16 @@ def run_job(job_dir):
         t0 = time.time()
         _write_state(job_dir, state)
     except gates.GateError:
-        raise  # integrity/security violations fail loud
+        raise  # integrity/security violations fail loud (finally still records the halt)
+    except KeyboardInterrupt:
+        state.update(terminal_state="needs_owner", reason="interrupted")  # Ctrl-C / SIGINT
     except Exception as e:  # any runtime defect still leaves a saved, named end state
         state.update(terminal_state="needs_owner", reason="runtime_error", runtime_error=str(e)[-300:])
     finally:
+        if prev_term is not None:
+            signal.signal(signal.SIGTERM, prev_term)
+        if state.get("terminal_state") is None:  # SIGTERM / hard interruption of any kind
+            state.update(terminal_state="needs_owner", reason="interrupted")
         state["wall_spent_seconds"] = float(state.get("wall_spent_seconds", 0.0)) + (time.time() - t0)
         if state.get("terminal_state") == "needs_owner":
             _write_escalation(job_dir, state, cfg)
