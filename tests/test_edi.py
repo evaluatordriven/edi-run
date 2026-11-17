@@ -706,6 +706,73 @@ class TestEDIRuntime(unittest.TestCase):
         with self.assertRaises(gates.GateError):  # no silent rerun after an interruption
             loop.run_job(job)
 
+    def test_agent_maker_proxy_key_and_metering(self):
+        # The agent Maker calls models only through the local proxy: no key in its env,
+        # every upstream call metered, files handed back like a chat Maker's.
+        server = http.server.HTTPServer(("127.0.0.1", 0), _MockLLMHandler)
+        port = server.server_port
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        try:
+            job = self._make_base_job(subdir="job_agent")
+            (job / "seed").mkdir()
+            (job / "seed" / "memo.md").write_text("# Header\nNo figure yet.\n", encoding="utf-8")
+            agent = job / "scripts" / "agent.py"
+            agent.write_text(
+                "import json, os, pathlib, sys, urllib.request\n"
+                "pkt_path, art = sys.argv[1], sys.argv[2]\n"
+                "leak = [k for k in os.environ if any(s in k.upper() for s in ('KEY', 'TOKEN', 'SECRET', 'PASSWORD'))]\n"
+                "assert not leak, f'key leak: {leak}'\n"
+                "body = json.dumps({'model': os.environ['AGENT_MODEL'], 'messages': [{'role': 'user', 'content': 'draft'}]}).encode()\n"
+                "req = urllib.request.Request(os.environ['AGENT_PROXY_URL'], data=body, method='POST')\n"
+                "resp = json.loads(urllib.request.urlopen(req, timeout=10).read())\n"
+                "txt = resp['choices'][0]['message']['content']\n"
+                "assert txt  # the agent did receive a model reply through the proxy\n"
+                "pathlib.Path(art, 'memo.md').write_text('# Header\\nFigure: 42% (Source: Q3, 2026-10-01)\\n', encoding='utf-8')\n",
+                encoding="utf-8",
+            )
+            # a raw upstream URL must not work: the agent only has the proxy URL
+            cfg = json.loads((job / "job.json").read_text())
+            cfg["pricing"] = {"default": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}}
+            cfg["seed"] = {"dir": "seed", "author": "Dana Voss", "origin": "Owner draft", "note": ""}
+            cfg["maker"] = {"name": "Agent Maker", "kind": "agent", "version": "1.0.0", "method": {"file": "method.md"},
+                            "url": f"http://127.0.0.1:{port}/v1/chat/completions",
+                            "model": {"family": "mock", "identifier": "mock-agent", "endpoint": "127.0.0.1", "readOnly": False},
+                            "command": [sys.executable, str(agent)]}
+            (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+            loop.freeze_job(job)
+            self.assertEqual(loop.run_job(job), 0)
+            st = json.loads((job / "state.json").read_text())
+            self.assertGreater(st["cost_usd"], 0.0)  # agent's upstream calls are metered
+            self.assertIn("mock-agent", st["token_usage"])
+            self.assertEqual(st["incumbent_round"], 2)  # seed lacks D2 -> agent revision wins
+            self.assertEqual(loop.finalize_job(job, state="given", by="Casey Park"), 0)
+            self.assertEqual(loop.verify_job(job), 0)  # record kind maps agent -> model, checker OK
+            rec = json.loads((job / "record.json").read_text())
+            self.assertEqual(rec["predicate"]["maker"]["kind"], "model")
+            self.assertEqual(rec["predicate"]["maker"]["name"], "Agent Maker")
+        finally:
+            _MockLLMHandler.mode = "ok"
+            server.shutdown()
+            server.server_close()
+
+    def test_agent_maker_failures(self):
+        # nonzero exit and empty output both halt as maker_failed; timeout kills
+        job = self._make_base_job(subdir="job_agent_fail")
+        agent = job / "scripts" / "agent_fail.py"
+        agent.write_text("import sys\nsys.stderr.write('agent blew up')\nsys.exit(7)\n", encoding="utf-8")
+        cfg = json.loads((job / "job.json").read_text())
+        cfg["maker"] = {"name": "Agent Maker", "kind": "agent", "version": "1", "method": {"file": "method.md"},
+                        "url": "https://example.invalid/v1", "model": {"family": "m", "identifier": "m1", "endpoint": "example.invalid", "readOnly": False},
+                        "command": [sys.executable, str(agent)]}
+        cfg["pricing"] = {"default": {"input_usd_per_mtok": 0, "output_usd_per_mtok": 0}}
+        (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        loop.freeze_job(job)
+        self.assertEqual(loop.run_job(job), 2)
+        st = json.loads((job / "state.json").read_text())
+        self.assertEqual((st["terminal_state"], st["reason"]), ("needs_owner", "maker_failed"))
+        self.assertIn("agent blew up", st["maker_error"])
+
     def test_unit_post_freeze_instrument_tamper_detected(self):
         job_dir = self._make_base_job()
         loop.freeze_job(job_dir)

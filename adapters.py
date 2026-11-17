@@ -1,5 +1,5 @@
 """Seat execution adapters (script subprocess + stdlib OpenAI-compatible HTTP client). Standard library only."""
-import json, os, pathlib, re, shutil, subprocess, tempfile, urllib.parse, urllib.request
+import http.server, json, os, pathlib, re, shutil, subprocess, tempfile, threading, urllib.parse, urllib.request
 import gates
 
 
@@ -44,7 +44,53 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(gates.safe_rel(sf, out_dir), dst)
         shutil.copy2(packet_path, sb_p / "packet.json")
-        if "command" in maker_cfg:
+        if maker_cfg.get("kind") == "agent":
+            # Agent Maker: a blocking child in its own confined workspace. The agent
+            # calls models ONLY through a local proxy that holds the key and logs every
+            # upstream call (host, model, usage) -- the agent's environment carries no
+            # credentials, and every token is metered toward the cost cap.
+            usage_log = sb_p / "proxy-usage.jsonl"
+            upstream = maker_cfg["url"]
+            key = _load_key(maker_cfg.get("apiKeyEnv", "OPENROUTER_API_KEY"))
+            calls = []
+
+            class _Proxy(http.server.BaseHTTPRequestHandler):
+                def log_message(self, format, *args):  # noqa: A002 -- stdlib signature
+                    return
+
+                def do_POST(self):
+                    body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                    req = json.loads(body.decode("utf-8")) if body else {}
+                    headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})}
+                    with urllib.request.urlopen(urllib.request.Request(upstream, data=body, headers=headers, method="POST"), timeout=max(1.0, float(timeout))) as resp:
+                        out, host = resp.read(), urllib.parse.urlparse(resp.geturl()).hostname or ""
+                    try:
+                        resp_json = json.loads(out.decode("utf-8"))
+                        calls.append({"host": host, "model": req.get("model"), "usage": resp_json.get("usage")})
+                    except (ValueError, json.JSONDecodeError):
+                        calls.append({"host": host, "model": req.get("model"), "usage": None})
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(out)))
+                    self.end_headers()
+                    self.wfile.write(out)
+
+            srv = http.server.HTTPServer(("127.0.0.1", 0), _Proxy)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            try:
+                env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(sb_p), "LANG": os.environ.get("LANG", "en_US.UTF-8"),
+                       "AGENT_PROXY_URL": f"http://127.0.0.1:{srv.server_port}/v1/chat/completions", "AGENT_MODEL": maker_cfg.get("model", {}).get("identifier", "")}
+                cmd = _resolve_cmd(list(maker_cfg["command"]), job_dir)
+                proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
+                if proc.returncode != 0:
+                    raise RuntimeError(f"Agent Maker failed ({proc.returncode}): {proc.stderr.strip()}")
+                if not any(gates.safe_rel(sf, sb_art).is_file() for sf in subject_files):
+                    raise RuntimeError("Agent Maker returned no subject files")
+                mk_usage = {"agent_calls": calls}  # metered per-call by the loop
+            finally:
+                srv.shutdown()
+                srv.server_close()
+        elif "command" in maker_cfg:
             cmd, env = _resolve_cmd(list(maker_cfg["command"]), job_dir), {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": tempfile.gettempdir()}
             proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
             if proc.returncode != 0:

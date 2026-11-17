@@ -21,6 +21,13 @@ python3 edi.py finalize <job_dir> --disposition given --by "Casey Park"
 python3 edi.py verify <job_dir>
 ```
 
+## Maker seats
+
+Three Maker kinds in `job.json`:
+- `"kind": "script"` — a command run in an isolated workspace (minimal env, no keys).
+- `"kind": "model"` — a single chat call by the loop; keyed from the loop's environment.
+- `"kind": "agent"` — a blocking tool-using agent child in its own confined workspace. The agent calls models **only** through a local proxy the loop spins up (`AGENT_PROXY_URL`): the key never enters the agent's environment, and every upstream call is metered toward the cost cap and logged (host, model, usage). The agent writes subject files into its workspace and exits; nonzero exit or no files halts as `needs_owner/maker_failed`. In the custody record an agent Maker is recorded as `kind: "model"` (the checker's enum) with its declared model identity. Evaluators remain script or single model calls by design — their simplicity is what makes them trustworthy.
+
 ## Starting from an existing draft
 
 Set `seed` in `job.json` — `{"dir": "seed", "author": "Dana Voss", "origin": "Owner draft 2026-11-16"}` — where `seed/` contains exactly the `subjectFiles`. The draft is logged as `artifact-supplied` before the bar freezes, evaluated in round 1 like any candidate, and revised from there; a draft that already meets the bar finishes with zero Maker calls. The seed's author is recorded as the maker of record for that artifact and cannot serve as an Evaluator.
