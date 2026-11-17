@@ -81,6 +81,7 @@ Every rule in `DOCTRINE.md` and `SPEC.md` maps to a deterministic runtime gate e
 ### Seat Boundaries at Runtime
 - **Owner / Approver:** Supplies `job.json` bounds, approves `bar.md` (with Buyer/Specialist), receives `needs_owner` escalations (`escalation.json`: deterministic options + recommendation derived from the reason tag), and issues final `disposition` (`given` / `not_yet_given` / `declined`).
 - **Architect:** Authors `bar.md`, `rubric.md`, `method.md`, and `packet.json` prior to `bar-frozen`. Locked out of runtime state once `work-started` is logged.
+- **Seed author (optional):** Supplies an existing draft (`seed` in `job.json`) before `bar-frozen`. A provenance seat only — no runtime authority; their artifact is judged like any candidate, credited as its maker of record, and they may not serve as Evaluator (CL1-6).
 - **Orchestrator (`loop.py`):** Deterministic state machine. Zero LLM judgment. Assembles round packets from `(best_artifact, measured_defects, measured_workable_solutions) \ held_out_set`.
 - **Maker (`adapters.py`):** Invoked in an isolated working directory containing only the round packet, with a minimal environment. The packet is built without `held_out/`, `scores.jsonl`, or `job.jsonl` (`held_out/` is locked to `0700`/`0600` at freeze) — but the sandbox is cwd-level, not OS-confined: a hostile script Maker running as the same user could still read absolute paths. OS-level confinement is deliberately out of scope (Minimalism QAR); the runtime's exclusion is by construction, not by confinement.
 - **Evaluator (`adapters.py`):** Invoked with `readOnly: true` (`CL2-2`) against a content-addressed snapshot of the candidate artifact (`package-round-N.tar.gz`) plus interleaved `held_out/` control cases, with a minimal environment (no inherited API keys or tokens). Cannot write to the artifact directory.
@@ -97,7 +98,9 @@ Every rule in `DOCTRINE.md` and `SPEC.md` maps to a deterministic runtime gate e
   v
 [MAKE_ROUND_n]
   |-- gate_packet() ( enforces best-artifact handoff + held-out exclusion )
-  |-- invoke Maker -> log: artifact-produced (or halt: no_artifact -> NEEDS_OWNER)
+  |-- if seed job and n == 1: copy seed files -> log: artifact-produced (actor = seed author, data.seed)
+  |     (no Maker call; the seed is evaluated like any candidate)
+  |-- else: invoke Maker -> log: artifact-produced (or halt: no_artifact -> NEEDS_OWNER)
   |-- if sha256(artifact_n) == sha256(artifact_n-1) -> halt: dormant_channel -> NEEDS_OWNER
   v
 [OBSERVE_AND_JUDGE_n]
