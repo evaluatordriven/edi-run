@@ -212,6 +212,9 @@ class Finding4AgentMaker(_Base):
                 "        pass\n"
                 "pathlib.Path(sys.argv[2], 'memo.md').write_text('" + PASSING + "', encoding='utf-8')\n"),
                 url=f"http://127.0.0.1:{srv.server_port}/v1/chat/completions")
+            cfg = self._cfg(job)
+            cfg["maker"]["sandbox"] = {"type": "sandbox-exec"}
+            self._save(job, cfg)
             loop.freeze_job(job)
             loop.run_job(job)
             self.assertNotIn("other-family/model-x", _RecordingUpstream.seen,
@@ -242,10 +245,13 @@ class Finding4AgentMaker(_Base):
         with self.assertRaises(gates.GateError):
             loop.freeze_job(job)
 
-    @unittest.expectedFailure
     def test_4d_agent_maker_cannot_read_held_out(self):
-        """D3.held-out: held-out material never goes to the Maker. Today the agent finds the job
-        directory from its own resolved command path and reads held_out/ (cwd-level sandbox only)."""
+        """D3.held-out: held-out material never reaches the Maker. R3 (sandboxed variant):
+        the runtime launches agent Makers under maker.sandbox confinement, so held_out/
+        is neither readable nor writable, and the custody log stays out of reach."""
+        import shutil as _sh
+        if not _sh.which("sandbox-exec"):
+            self.skipTest("sandbox-exec unavailable on this host")
         job = self._agent_job("f4d", (
             "import pathlib, sys\n"
             "ho = pathlib.Path(__file__).resolve().parents[1] / 'held_out' / 'controls' / 'planted.md'\n"
@@ -253,11 +259,19 @@ class Finding4AgentMaker(_Base):
             "    ho.read_text(); seen = True\n"
             "except OSError:\n"
             "    seen = False\n"
-            "pathlib.Path(sys.argv[2], 'memo.md').write_text('" + PASSING + "held_out_readable=' + str(seen) + '\\n', encoding='utf-8')\n"))
+            "try:\n"
+            "    pathlib.Path(ho.parent, 'tampered.md').write_text('x'); wrote = True\n"
+            "except OSError:\n"
+            "    wrote = False\n"
+            "pathlib.Path(sys.argv[2], 'memo.md').write_text('" + PASSING + "held_out_readable=' + str(seen) + ' held_out_writable=' + str(wrote) + '\\n', encoding='utf-8')\n"))
+        cfg = self._cfg(job)
+        cfg["maker"]["sandbox"] = {"type": "sandbox-exec"}
+        self._save(job, cfg)
         loop.freeze_job(job)
         loop.run_job(job)
         memo = (job / "rounds" / "round-01" / "artifact" / "memo.md").read_text()
         self.assertIn("held_out_readable=False", memo)
+        self.assertIn("held_out_writable=False", memo)  # deny file-write* keeps the controls intact
 
 
 if __name__ == "__main__":

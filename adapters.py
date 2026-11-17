@@ -1,5 +1,5 @@
 """Seat execution adapters (script subprocess + stdlib OpenAI-compatible HTTP client). Standard library only."""
-import http.server, json, os, pathlib, re, shutil, subprocess, tempfile, threading, urllib.parse, urllib.request
+import http.server, json, os, pathlib, re, shutil, subprocess, tempfile, threading, urllib.error, urllib.parse, urllib.request
 import gates
 
 
@@ -37,7 +37,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
     mk_usage = None
     out_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="edi_maker_") as sb:
-        sb_p, sb_art = pathlib.Path(sb), pathlib.Path(sb) / "artifact"
+        sb_p, sb_art = pathlib.Path(sb).resolve(), pathlib.Path(sb).resolve() / "artifact"
         sb_art.mkdir()
         for sf in (sf for sf in subject_files if gates.safe_rel(sf, out_dir).is_file()):
             dst = gates.safe_rel(sf, sb_art)
@@ -68,8 +68,12 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         self.end_headers()
                         return
                     headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})}
-                    with urllib.request.urlopen(urllib.request.Request(upstream, data=body, headers=headers, method="POST"), timeout=max(1.0, float(timeout))) as resp:
-                        out, host = resp.read(), urllib.parse.urlparse(resp.geturl()).hostname or ""
+                    try:
+                        with urllib.request.urlopen(urllib.request.Request(upstream, data=body, headers=headers, method="POST"), timeout=max(1.0, float(timeout))) as resp:
+                            out, host = resp.read(), urllib.parse.urlparse(resp.geturl()).hostname or ""
+                    except urllib.error.HTTPError as e:
+                        calls.append({"host": urllib.parse.urlparse(upstream).hostname, "model": req.get("model"), "usage": None, "upstream_error": e.code})
+                        out = json.dumps({"error": {"code": e.code}}).encode("utf-8")
                     try:
                         resp_json = json.loads(out.decode("utf-8"))
                         calls.append({"host": host, "model": req.get("model"), "usage": resp_json.get("usage")})
@@ -88,20 +92,38 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                        "AGENT_PROXY_URL": f"http://127.0.0.1:{srv.server_port}/v1/chat/completions", "AGENT_MODEL": maker_cfg.get("model", {}).get("identifier", "")}
                 cmd = _resolve_cmd(list(maker_cfg["command"]), job_dir)
                 stype = (maker_cfg.get("sandbox") or {}).get("type")
+                jd = pathlib.Path(job_dir).resolve()  # seatbelt matches canonical paths only
+                home = pathlib.Path.home()
                 if stype == "sandbox-exec":
-                    q = chr(34)  # sandbox profiles quote paths with double quotes
+                    q = chr(34)  # seatbelt profiles quote paths with double quotes
+                    # Reads: default-allow except held-out material, the custody/evidence files
+                    # (the Maker works from the packet, not the log), and secret files.
+                    # Writes: confined to the agent workspace. Network stays open so the agent
+                    # can reach the local proxy; it holds no key and the proxy rejects
+                    # undeclared models (keyless-open-endpoint exfil is a disclosed limit).
                     profile = sb_p / "agent.sb"
                     profile.write_text(
                         "(version 1)(allow default)\n"
-                        f"(deny file-read* (subpath {q}{job_dir / 'held_out'}{q}))\n"
-                        f"(deny file-read* (subpath {q}{pathlib.Path.home() / '.hermes'}{q}))\n"
-                        f"(deny file-read* (subpath {q}{pathlib.Path.home() / '.ssh'}{q}))\n",
+                        "(deny file-write*)\n"
+                        f"(allow file-write* (subpath {q}{sb_p}{q}))\n"
+                        f"(deny file-read* (subpath {q}{jd / 'held_out'}{q}))\n"
+                        f"(deny file-read* (subpath {q}{jd / 'evidence'}{q}))\n"
+                        f"(deny file-read* (literal {q}{jd / 'job.jsonl'}{q}))\n"
+                        f"(deny file-read* (literal {q}{jd / 'scores.jsonl'}{q}))\n"
+                        f"(deny file-read* (literal {q}{jd / 'job.json'}{q}))\n"
+                        f"(deny file-read* (subpath {q}{home / '.ssh'}{q}))\n"
+                        f"(deny file-read* (literal {q}{home / '.hermes' / '.env'}{q}))\n",
                         encoding="utf-8")
                     cmd = ["sandbox-exec", "-f", str(profile)] + cmd
                 elif stype == "bwrap":
-                    cmd = ["bwrap", "--unshare-all", "--die-with-parent", "--dev-bind", "/", "/",
-                           "--tmpfs", str(job_dir / "held_out"), "--tmpfs", str(pathlib.Path.home() / ".hermes"),
-                           "--ro-bind", str(sb_p), str(sb_p)] + cmd
+                    # Keep the network namespace (the agent must reach the loop-local proxy);
+                    # held_out and secret paths are masked, the workspace stays writable.
+                    cmd = ["bwrap", "--die-with-parent", "--dev-bind", "/", "/",
+                           "--tmpfs", str(jd / "held_out"), "--tmpfs", str(home / ".ssh"),
+                           "--ro-bind", "/dev/null", str(home / ".hermes" / ".env"),
+                           "--ro-bind", "/dev/null", str(jd / "job.jsonl"),
+                           "--ro-bind", "/dev/null", str(jd / "scores.jsonl"),
+                           "--bind", str(sb_p), str(sb_p)] + cmd
                 elif stype:
                     raise gates.GateError(f"unknown sandbox type {stype}; supported: sandbox-exec (macOS), bwrap (Linux)")
                 proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
@@ -110,6 +132,9 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 if not any(gates.safe_rel(sf, sb_art).is_file() for sf in subject_files):
                     raise RuntimeError("Agent Maker returned no subject files")
                 mk_usage = {"agent_calls": calls}  # metered per-call by the loop
+                round_dir = pathlib.Path(out_dir).resolve().parent.parent
+                if round_dir.is_dir():
+                    (round_dir / "proxy-usage.jsonl").write_text("".join(json.dumps(c) + "\n" for c in calls), encoding="utf-8")
             finally:
                 srv.shutdown()
                 srv.server_close()

@@ -234,10 +234,19 @@ def _write_escalation(job_dir, state, cfg):
 def run_job(job_dir):
     job_dir = pathlib.Path(job_dir).resolve()
     cfg, state = json.loads((job_dir / "job.json").read_text(encoding="utf-8")), json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
-    if gates.gate_instruments(cfg, job_dir) != state["pins"]:
-        raise gates.GateError("frozen instruments modified after freeze (I-01/I-02)")
-    if state.get("terminal_state"):
-        raise gates.GateError(f"job already reached terminal state {state['terminal_state']} ({state.get('reason')}); run executes once")
+    try:
+        if gates.gate_instruments(cfg, job_dir) != state["pins"]:
+            raise gates.GateError("frozen instruments modified after freeze (I-01/I-02)")
+        if state.get("terminal_state"):
+            raise gates.GateError(f"job already reached terminal state {state['terminal_state']} ({state.get('reason')}); run executes once")
+    except gates.GateError as e:
+        if not state.get("terminal_state"):
+            # D4.11: a pre-run integrity refusal leaves a named end state and an escalation
+            # package. An already-terminal job keeps its recorded end state untouched.
+            state.update(terminal_state="needs_owner", reason="integrity_error", integrity_error=str(e)[-300:])
+            _write_escalation(job_dir, state, cfg)
+            _write_state(job_dir, state)
+        raise
     # time.time(), not monotonic: the budget must keep running while the box sleeps.
     # Trade-off accepted and documented: an NTP step can move the budget once, which is
     # the honest failure mode versus silently excluding suspended time.

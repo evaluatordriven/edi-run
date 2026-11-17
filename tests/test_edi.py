@@ -738,6 +738,7 @@ class TestEDIRuntime(unittest.TestCase):
             cfg["maker"] = {"name": "Agent Maker", "kind": "agent", "version": "1.0.0", "method": {"file": "method.md"},
                             "url": f"http://127.0.0.1:{port}/v1/chat/completions",
                             "model": {"family": "mock", "identifier": "mock-agent", "endpoint": "127.0.0.1", "readOnly": False},
+                            "sandbox": {"type": "sandbox-exec"},
                             "command": [sys.executable, str(agent)]}
             (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
             loop.freeze_job(job)
@@ -764,6 +765,7 @@ class TestEDIRuntime(unittest.TestCase):
         cfg = json.loads((job / "job.json").read_text())
         cfg["maker"] = {"name": "Agent Maker", "kind": "agent", "version": "1", "method": {"file": "method.md"},
                         "url": "https://example.invalid/v1", "model": {"family": "m", "identifier": "m1", "endpoint": "example.invalid", "readOnly": False},
+                        "sandbox": {"type": "sandbox-exec"},
                         "command": [sys.executable, str(agent)]}
         cfg["pricing"] = {"default": {"input_usd_per_mtok": 0, "output_usd_per_mtok": 0}}
         (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
