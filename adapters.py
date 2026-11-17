@@ -33,6 +33,20 @@ def _chat_json(url, model_id, sys_prompt, user_prompt, key_env="OPENROUTER_API_K
     return json.loads(m.group(1) if m else txt), host, raw
 
 
+def sandbox_usable(stype):
+    """True when the declared sandbox can actually launch here, not merely when the
+    binary exists (Ubuntu hosted runners ship bwrap but forbid user namespaces)."""
+    if stype == "sandbox-exec":
+        return bool(shutil.which("sandbox-exec"))
+    if stype == "bwrap":
+        if not shutil.which("bwrap"):
+            return False
+        probe = subprocess.run(["bwrap", "--unshare-pid", "--dev-bind", "/", "/", "true"],
+                               capture_output=True, timeout=30)
+        return probe.returncode == 0
+    return False
+
+
 def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: float = 60):
     mk_usage = None
     out_dir.mkdir(parents=True, exist_ok=True)

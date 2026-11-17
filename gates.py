@@ -104,9 +104,9 @@ def gate_seats(cfg, job_dir, approver_by=None):
         stype = (maker.get("sandbox") or {}).get("type")
         if not stype:
             raise GateError("agent Maker requires maker.sandbox {type: sandbox-exec|bwrap}; the runtime must confine the agent (D3.held-out, ruling R3)")
-        import shutil as _sh
-        if not _sh.which(stype):
-            raise GateError(f"maker.sandbox type {stype} is not available on this host; refusing to run an unconfined agent (ruling R3)")
+        import adapters as _adapters
+        if not _adapters.sandbox_usable(stype):
+            raise GateError(f"maker.sandbox type {stype} cannot launch on this host (missing binary or user namespaces forbidden); refusing to run an unconfined agent (ruling R3)")
     if cfg.get("levelClaimed") in ("CL2", "CL3"):
         mk_name = maker.get("name", "")
         if any(same(a.get("by", ""), mk_name) for a in bar.get("approvals") or []) or same(bar.get("author", ""), mk_name):

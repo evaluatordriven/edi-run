@@ -21,7 +21,13 @@ def _sandbox_type():
     if sys.platform == "darwin" and shutil.which("sandbox-exec"):
         return "sandbox-exec"
     if sys.platform.startswith("linux") and shutil.which("bwrap"):
-        return "bwrap"
+        # bwrap needs unprivileged user namespaces; some hosts (Ubuntu hosted runners)
+        # ship the binary but forbid them. Probe capability, not mere presence.
+        probe = subprocess.run(
+            ["bwrap", "--unshare-pid", "--dev-bind", "/", "/", "true"],
+            capture_output=True, timeout=30)
+        if probe.returncode == 0:
+            return "bwrap"
     return None
 
 
