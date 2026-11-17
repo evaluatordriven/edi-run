@@ -5,20 +5,28 @@ on:
   pull_request:
 
 jobs:
-  test:
+  linux:
     strategy:
       fail-fast: false
       matrix:
-        # macOS: single 3.12 leg -- the hosted macOS runner queue has been killing
-        # queued jobs at ~15m with zero steps (2026-11-17); fewer macOS legs = fewer
-        # queue rolls. 3.10 coverage stays with the ubuntu legs.
-        os: [ubuntu-latest, ubuntu-latest, macos-latest]
-        python: ["3.10", "3.12", "3.12"]
-    runs-on: ${{ matrix.os }}
+        python: ["3.10", "3.12"]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - name: Run test suite
+        run: python3 tests/test_edi.py
+  macos:
+    # Self-hosted macOS runner (Steve-Moitozo, ARM64): the hosted macOS runner queue
+    # repeatedly killed queued jobs at ~15m with zero steps (2026-11-17). A local
+    # runner picks up instantly and removes the queue from the critical path.
+    runs-on: [self-hosted, macOS, ARM64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Run test suite
         run: python3 tests/test_edi.py
