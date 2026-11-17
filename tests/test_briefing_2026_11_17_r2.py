@@ -25,6 +25,7 @@ import test_edi
 import test_briefing_2026_11_17 as r1
 import gates
 import loop
+import adapters
 
 PASSING = r1.PASSING
 REPO = pathlib.Path(loop.__file__).resolve().parent
@@ -50,6 +51,28 @@ def _serve(handler):
     srv = http.server.HTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
+
+
+class FindingG_LinuxCredentialParity(_R2Base):
+    def test_g_bwrap_masks_the_credential_dotfile_family(self):
+        """Round-2 close-out #1: the bwrap masks must cover the same home
+        credential-dotfile family as the macOS seatbelt profile (argv-level:
+        no launch needed, so this runs anywhere bwrap exists)."""
+        import shutil, unittest.mock
+        if shutil.which("bwrap") is None:
+            self.skipTest("bwrap not available on this host")
+        fake_home = pathlib.Path(self.tmp.name)
+        (fake_home / ".aws").mkdir()
+        (fake_home / ".aws" / "credentials").write_text("decoy")
+        (fake_home / ".netrc").write_text("decoy")
+        jd = fake_home / "jobs" / "jobA"
+        (jd / "held_out").mkdir(parents=True)
+        sb = fake_home / "sb"
+        sb.mkdir()
+        with unittest.mock.patch("adapters.pathlib.Path.home", return_value=fake_home):
+            cmd = adapters.sandbox_prefix("bwrap", jd, sb)
+        self.assertIn(["--tmpfs", str(fake_home / ".aws")], cmd)
+        self.assertIn(["--ro-bind", "/dev/null", str(fake_home / ".netrc")], cmd)
 
 
 class FindingF_AgentTmpdir(_R2Base):
