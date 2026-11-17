@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 import adapters  # noqa: E402
 import gates  # noqa: E402
 import loop  # noqa: E402
+import check as custody_check  # vendored custody checker; resolves via loop.py's vendor path insert  # noqa: E402
 
 
 def sha256_bytes(b: bytes) -> str:
@@ -392,8 +393,13 @@ class TestEDIRuntime(unittest.TestCase):
         self.assertEqual(loop.run_job(job_no), 2)
         st_no = json.loads((job_no / "state.json").read_text())
         self.assertEqual((st_no["terminal_state"], st_no["reason"]), ("needs_owner", "no_artifact"))
-        with self.assertRaises(gates.GateError):
-            loop.finalize_job(job_no, state="declined", by="Casey Park")
+        # §6: an incomplete run emits a gap-listed record instead of raising
+        self.assertEqual(loop.finalize_job(job_no, state="declined", by="Casey Park"), 1)
+        rec = json.loads((job_no / "record.json").read_text())
+        invs = {g["invariant"] for g in rec["x-edi-run"]["gaps"]}
+        self.assertIn("I-06", invs)
+        self.assertEqual(rec["x-edi-run"]["terminalState"], "needs_owner")
+        self.assertEqual(rec["x-edi-run"]["reason"], "no_artifact")
 
         job_slow = self._make_base_job(rounds_behavior="slow", subdir="job_slow")
         cfg_s = json.loads((job_slow / "job.json").read_text())
@@ -403,6 +409,71 @@ class TestEDIRuntime(unittest.TestCase):
         self.assertEqual(loop.run_job(job_slow), 2)
         st_s = json.loads((job_slow / "state.json").read_text())
         self.assertEqual((st_s["terminal_state"], st_s["reason"]), ("needs_owner", "cap_reached"))
+
+    def test_gap_emission_assembly_failure_and_emitter_can_fail(self):
+        # §6 path 2: inputs assembly failure becomes a gap-listed record, exit 1.
+        job_rej = self._make_base_job(subdir="job_gap_asm")
+        cfg = json.loads((job_rej / "job.json").read_text())
+        cfg["rejectFloor"] = 2.0
+        (job_rej / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        loop.freeze_job(job_rej)
+        self.assertEqual(loop.run_job(job_rej), 1)
+        cfg = json.loads((job_rej / "job.json").read_text())
+        del cfg["retention"]  # required custody field -> assembly fails
+        (job_rej / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        self.assertEqual(loop.finalize_job(job_rej, state="given", by="Casey Park"), 1)
+        rec = json.loads((job_rej / "record.json").read_text())
+        self.assertEqual(rec["recordType"], "edi-run/gap-record")
+        asm = [g for g in rec["x-edi-run"]["gaps"] if g["invariant"] == "custody-assembly"]
+        self.assertEqual(len(asm), 1)
+        self.assertIn("retention", asm[0]["missing"])
+        # provenance survives: the disposition event is in the custody log
+        events = [json.loads(line) for line in (job_rej / "job.jsonl").read_text().splitlines()]
+        self.assertTrue(any(e["type"] == "disposition" for e in events))
+        # check.py rejects any non-custody document, so the emitter's own output can
+        # never read OK -- the guarantee lives in the no-predicate construction.
+        doctored = dict(rec)
+        doctored["x-edi-run"] = dict(rec["x-edi-run"], gaps=[])
+        rep = custody_check.verify(doctored, files=str(job_rej / "artifact"),
+                                   evidence=str(job_rej / "evidence"),
+                                   bar=str(job_rej / "bar.md"))
+        self.assertNotEqual(rep["verdict"], "OK")
+        # The emitter can fail: if a gap-listed record ever verifies OK, runtime raises.
+        st_gap = json.loads((job_rej / "state.json").read_text())
+        cfg_gap = json.loads((job_rej / "job.json").read_text())
+        orig_verify = loop.custody_check.verify
+        loop.custody_check.verify = lambda *a, **k: {"verdict": "OK"}
+        try:
+            with self.assertRaises(gates.GateError):
+                loop._emit_gap_record(job_rej, st_gap, cfg_gap)
+        finally:
+            loop.custody_check.verify = orig_verify
+
+    def test_integrity_tampered_log_hard_fails_never_gap_record(self):
+        # Frontier-review blocker fix: a broken custody chain must raise, never
+        # downgrade to a gap-listed record.
+        job_ok = self._make_base_job(subdir="job_tamper")
+        loop.freeze_job(job_ok)
+        loop.run_job(job_ok)
+        events = (job_ok / "job.jsonl").read_text().splitlines()
+        tampered = json.loads(events[1])
+        tampered["data"] = {"job": "FORGED"}
+        events[1] = json.dumps(tampered)
+        (job_ok / "job.jsonl").write_text("\n".join(events) + "\n", encoding="utf-8")
+        before = (job_ok / "record.json").exists()
+        with self.assertRaises(gates.GateError):
+            loop.finalize_job(job_ok, state="given", by="Casey Park")
+        self.assertFalse(before)  # no record existed; finalize must not write one
+
+    def test_finalize_runs_once_double_disposition_refused(self):
+        job_ok = self._make_base_job(subdir="job_once")
+        loop.freeze_job(job_ok)
+        loop.run_job(job_ok)
+        self.assertEqual(loop.finalize_job(job_ok, state="given", by="Casey Park"), 0)
+        with self.assertRaises(gates.GateError):
+            loop.finalize_job(job_ok, state="declined", by="Casey Park")
+        events = [json.loads(line) for line in (job_ok / "job.jsonl").read_text().splitlines()]
+        self.assertEqual(sum(1 for e in events if e["type"] == "disposition"), 1)
 
     def test_unit_post_freeze_instrument_tamper_detected(self):
         job_dir = self._make_base_job()
