@@ -39,6 +39,10 @@ A run that halts without a Pareto-best artifact, or whose record assembly fails,
 - `1` — loop `rejected`, checker `FAILED`, or a gap-listed record was emitted
 - `2` — loop halted at `needs_owner`, checker `NOT-CHECKABLE`
 
+## CI
+
+GitHub Actions runs the suite on ubuntu (3.10, 3.12) and macOS (3.12). The macOS matrix is a single leg on purpose: the hosted macOS runner queue has repeatedly cancelled queued jobs at ~15 minutes with zero steps executed, and fewer macOS legs means fewer queue rolls. Every macOS failure to date has been a queue kill, not a test failure.
+
 ## Verification & Tests
 
 ```sh
