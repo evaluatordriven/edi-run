@@ -647,6 +647,65 @@ class TestEDIRuntime(unittest.TestCase):
         with self.assertRaises(gates.GateError):
             loop.freeze_job(job2)  # seed author cannot be an Evaluator
 
+    def test_refused_freeze_leaves_no_log(self):
+        # a refused freeze must not write job-start; the corrected retry must succeed
+        job = self._make_base_job(subdir="job_fz_retry")
+        (job / "seed").mkdir()
+        (job / "seed" / "memo.md").write_text("# Header\n", encoding="utf-8")
+        (job / "seed" / "extra.txt").write_text("extra", encoding="utf-8")
+        cfg = json.loads((job / "job.json").read_text())
+        cfg["seed"] = {"dir": "seed", "author": "Dana Voss", "origin": "", "note": ""}
+        (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        with self.assertRaises(gates.GateError):
+            loop.freeze_job(job)
+        self.assertFalse((job / "job.jsonl").exists())  # nothing written
+        (job / "seed" / "extra.txt").unlink()  # fix the defect
+        self.assertEqual(loop.freeze_job(job), 0)  # corrected freeze succeeds
+
+    def test_seed_author_cannot_hold_approval_seat(self):
+        job = self._make_base_job(subdir="job_seed_buyer")
+        (job / "seed").mkdir()
+        (job / "seed" / "memo.md").write_text("# Header\n", encoding="utf-8")
+        cfg = json.loads((job / "job.json").read_text())
+        cfg["seed"] = {"dir": "seed", "author": "Casey Park", "origin": "", "note": ""}  # == Buyer
+        (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        with self.assertRaises(gates.GateError):
+            loop.freeze_job(job)
+
+    def test_seed_edited_after_freeze_refused_at_run(self):
+        job = self._make_base_job(subdir="job_seed_edit")
+        (job / "seed").mkdir()
+        (job / "seed" / "memo.md").write_text("# Header\nFigure: 42% (Source: Q3, 2026-10-01)\n", encoding="utf-8")
+        cfg = json.loads((job / "job.json").read_text())
+        cfg["seed"] = {"dir": "seed", "author": "Dana Voss", "origin": "", "note": ""}
+        (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        loop.freeze_job(job)
+        (job / "seed" / "memo.md").write_text("# Header\nTAMPERED DRAFT\n", encoding="utf-8")
+        with self.assertRaises(gates.GateError):
+            loop.run_job(job)  # fail closed before any evaluation
+        events = [json.loads(line) for line in (job / "job.jsonl").read_text().splitlines()]
+        self.assertFalse([e for e in events if e["type"] == "artifact-produced"])  # nothing evaluated
+        st = json.loads((job / "state.json").read_text())
+        self.assertEqual(st["terminal_state"], "needs_owner")  # halted with a named end state
+
+    def test_interrupt_run_saves_named_end_state_and_blocks_rerun(self):
+        job = self._make_base_job(subdir="job_interrupt")
+        loop.freeze_job(job)
+        orig_maker = loop.adapters.run_maker
+        def _interrupt(*a, **k):
+            raise KeyboardInterrupt()  # what the process feels on Ctrl-C
+        loop.adapters.run_maker = _interrupt
+        try:
+            self.assertEqual(loop.run_job(job), 2)  # Ctrl-C mid-run -> clean halt, not a traceback
+        finally:
+            loop.adapters.run_maker = orig_maker
+        st = json.loads((job / "state.json").read_text())
+        self.assertEqual((st["terminal_state"], st["reason"]), ("needs_owner", "interrupted"))
+        esc = json.loads((job / "escalation.json").read_text())
+        self.assertEqual(esc["reason"], "interrupted")
+        with self.assertRaises(gates.GateError):  # no silent rerun after an interruption
+            loop.run_job(job)
+
     def test_unit_post_freeze_instrument_tamper_detected(self):
         job_dir = self._make_base_job()
         loop.freeze_job(job_dir)
