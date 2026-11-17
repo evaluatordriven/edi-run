@@ -134,7 +134,10 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 mk_usage = {"agent_calls": calls}  # metered per-call by the loop
                 round_dir = pathlib.Path(out_dir).resolve().parent.parent
                 if round_dir.is_dir():
-                    (round_dir / "proxy-usage.jsonl").write_text("".join(json.dumps(c) + "\n" for c in calls), encoding="utf-8")
+                    # accumulate, not clobber: every round's proxy log must survive for audit
+                    with (round_dir / "proxy-usage.jsonl").open("a", encoding="utf-8") as f:
+                        for c in calls:
+                            f.write(json.dumps(c) + "\n")
             finally:
                 srv.shutdown()
                 srv.server_close()

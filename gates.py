@@ -187,11 +187,9 @@ def scrub_held_out(items, needles):
 def gate_packet(packet, job_dir, expected_incumbent_digest):
     if packet.get("best_artifact_digest") != expected_incumbent_digest:
         raise GateError("Maker packet best_artifact_digest does not match Pareto-best incumbent (I-04/I-06)")
-    low, held_dir = json.dumps(packet, sort_keys=True).casefold(), job_dir / "held_out"
+    low, held_dir = _canon(json.dumps(packet, sort_keys=True)), job_dir / "held_out"
     if any(k in low for k in ("held_out", "scores.jsonl", "job.jsonl")):
         raise GateError("held-out path marker leaked into Maker packet (I-04)")
-    pub = "".join((job_dir / f).read_text(encoding="utf-8", errors="ignore").casefold() for f in ("bar.md", "method.md") if (job_dir / f).is_file())
-    for p in (p for p in (held_dir.rglob("*") if held_dir.is_dir() else []) if p.is_file()):
-        lines = [ln.strip().casefold()[:24] for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines() if len(ln.strip()) >= 16 and ln.strip().casefold()[:24] not in pub]
-        if sha256_file(p).casefold() in low or any(s in low for s in lines):
-            raise GateError(f"held-out content or digest from {p.name} leaked into Maker packet (I-04)")
+    for nd in held_out_needles(job_dir):
+        if nd in low:
+            raise GateError("held-out content or digest leaked into Maker packet (I-04)")
