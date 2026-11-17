@@ -266,6 +266,14 @@ class TestEDIRuntime(unittest.TestCase):
         ctl_hashes = {k["case"]["sha256"] for k in rec["predicate"]["controls"]}
         self.assertTrue(subj_hashes.isdisjoint(ctl_hashes))
 
+    def test_committed_examples_verify(self):
+        for ex, want_level in (("two-round-job", "CL1"), ("live-llm-job", "CL1"), ("live-cl2-job", "CL2")):
+            ex_dir = ROOT / "examples" / ex
+            proc = subprocess.run([sys.executable, str(ROOT / "edi.py"), "verify", str(ex_dir)], cwd=str(ROOT), capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, f"{ex} failed verify: {proc.stderr}")
+            rec = json.loads((ex_dir / "record.json").read_text())
+            self.assertEqual(rec["predicate"]["levelClaimed"], want_level)
+
 
 if __name__ == "__main__":
     unittest.main()
