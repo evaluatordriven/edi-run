@@ -117,12 +117,17 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                     cmd = ["sandbox-exec", "-f", str(profile)] + cmd
                 elif stype == "bwrap":
                     # Keep the network namespace (the agent must reach the loop-local proxy).
-                    # The whole job dir is masked with a tmpfs (held_out and the custody files
-                    # live inside it); the workspace stays writable.
+                    # The whole job dir is masked with a tmpfs — held_out, evidence, and the
+                    # custody files live inside it — then the agent's own scripts subtree is
+                    # bound back read-only (the agent must be able to load its code). The
+                    # packet itself is read from the agent workspace copy.
                     cmd = ["bwrap", "--die-with-parent", "--unshare-pid", "--dev-bind", "/", "/",
-                           "--tmpfs", str(jd), "--tmpfs", str(home / ".ssh"),
-                           "--ro-bind", "/dev/null", str(home / ".hermes" / ".env"),
-                           "--bind", str(sb_p), str(sb_p)] + cmd
+                           "--tmpfs", str(jd)]
+                    if (jd / "scripts").is_dir():
+                        cmd += ["--ro-bind", str(jd / "scripts"), str(jd / "scripts")]
+                    cmd += ["--tmpfs", str(home / ".ssh"),
+                            "--ro-bind", "/dev/null", str(home / ".hermes" / ".env"),
+                            "--bind", str(sb_p), str(sb_p)] + cmd
                 elif stype:
                     raise gates.GateError(f"unknown sandbox type {stype}; supported: sandbox-exec (macOS), bwrap (Linux)")
                 proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
