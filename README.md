@@ -21,6 +21,16 @@ python3 edi.py finalize <job_dir> --disposition given --by "Casey Park"
 python3 edi.py verify <job_dir>
 ```
 
+## Incomplete runs
+
+A run that halts without a Pareto-best artifact, or whose record assembly fails, still emits a record: a gap-listed document (`recordType: "edi-run/gap-record"`) whose `x-edi-run.gaps[]` names each unmet invariant from the architecture doc §1. It is invalid by design — `check.py` can never read it as a valid `custody/v1` statement; the disposition event is still logged in the hash-chained `job.jsonl`. Integrity failures are never downgraded: a tampered, truncated, or foreign custody log, modified frozen instruments, or a repeated `finalize` hard-fail with `GateError` and write nothing. `finalize` runs once per job.
+
+## Exit codes
+
+- `0` — loop `accepted`, or verification `OK`
+- `1` — loop `rejected`, checker `FAILED`, or a gap-listed record was emitted
+- `2` — loop halted at `needs_owner`, checker `NOT-CHECKABLE`
+
 ## Verification & Tests
 
 ```sh
