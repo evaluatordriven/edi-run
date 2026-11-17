@@ -231,8 +231,11 @@ def gate_packet(packet, job_dir, expected_incumbent_digest):
     if packet.get("best_artifact_digest") != expected_incumbent_digest:
         raise GateError("Maker packet best_artifact_digest does not match Pareto-best incumbent (I-04/I-06)")
     low, held_dir = _canon(json.dumps(packet, sort_keys=True)), job_dir / "held_out"
-    if any(k in low for k in ("held_out", "scores.jsonl", "job.jsonl")):
-        raise GateError("held-out path marker leaked into Maker packet (I-04)")
+    pub_words = _canon("\n".join((job_dir / f).read_text(encoding="utf-8", errors="ignore") for f in ("bar.md", "method.md") if (job_dir / f).is_file()))
+    for k in ("held_out", "scores.jsonl", "job.jsonl"):
+        # wording the Maker is already given (bar/method) is not a leak (D3.held-out)
+        if k in low and (k not in pub_words or k == "scores.jsonl" or k == "job.jsonl"):
+            raise GateError("held-out path marker leaked into Maker packet (I-04)")
     for nd in held_out_needles(job_dir):
         if nd in low:
             raise GateError("held-out content or digest leaked into Maker packet (I-04)")

@@ -50,7 +50,7 @@ def sandbox_prefix(stype, jd, sb_p):
         cmd = ["bwrap", "--die-with-parent", "--unshare-pid", "--unshare-net",
                "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
                "--tmpfs", str(jd)]
-        for ho in sorted(jd.parent.glob("*/held_out")):  # every job's controls
+        for ho in sorted(set(jd.parent.glob("*/held_out")) | set(jd.parent.rglob("held_out"))):  # every job's controls, any depth
             if ho.is_dir() and ho.parent != jd:
                 cmd += ["--tmpfs", str(ho)]
         if (jd / "scripts").is_dir():
@@ -75,13 +75,18 @@ def sandbox_usable(stype, jd=None, sb_p=None):
         with tempfile.TemporaryDirectory(prefix="edi_bwrap_probe_") as pd:
             probe_jd, probe_sb = pathlib.Path(pd) / "job", pathlib.Path(pd) / "sb"
             probe_jd.mkdir(), probe_sb.mkdir()
-            probe = subprocess.run(sandbox_prefix(stype, probe_jd, probe_sb) + ["true"],
-                                   capture_output=True, timeout=30)
+            probe_cmd = sandbox_prefix(stype, probe_jd, probe_sb)
+            assert probe_cmd is not None  # stype is checked above
+            if stype == "bwrap":  # the probe must exercise the relay too
+                probe_cmd = probe_cmd + [sys.executable, "-I", "-c", _RELAY, str(probe_sb / "proxy.sock"), str(_INNER_PROXY_PORT_BASE), "true"]
+            else:
+                probe_cmd = probe_cmd + ["true"]
+            probe = subprocess.run(probe_cmd, capture_output=True, timeout=30)
             return probe.returncode == 0
     return False
 
 
-_INNER_PROXY_PORT = 18080  # the agent's view of the proxy inside its own network namespace (bwrap)
+_INNER_PROXY_PORT_BASE = 18080  # agent's view of the proxy inside its own netns (bwrap); offset per launch
 _RELAY = (
     "import socket, subprocess, sys, threading\n"
     "sock_path, port, cmd = sys.argv[1], int(sys.argv[2]), sys.argv[3:]\n"
@@ -116,12 +121,25 @@ _RELAY = (
 )
 
 
+class _NoCrossHostRedirect(urllib.request.HTTPRedirectHandler):
+    """The proxy holds the API key; a redirect to a different host must not receive it."""
+
+    def __init__(self, upstream_host):
+        self.upstream_host = upstream_host
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urllib.parse.urlparse(newurl).hostname != self.upstream_host:
+            raise urllib.error.HTTPError(req.full_url, code, f"cross-host redirect to {newurl} refused", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: float = 60):
     mk_usage = None
     out_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="edi_maker_") as sb:
         sb_p, sb_art = pathlib.Path(sb).resolve(), pathlib.Path(sb).resolve() / "artifact"
         sb_art.mkdir()
+        (sb_p / "tmp").mkdir()  # the agent's only writable temp root (writes are workspace-confined)
         for sf in (sf for sf in subject_files if gates.safe_rel(sf, out_dir).is_file()):
             dst = gates.safe_rel(sf, sb_art)
             dst.parent.mkdir(parents=True, exist_ok=True)
@@ -152,8 +170,10 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         return
                     headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})}
                     host, status, err = urllib.parse.urlparse(upstream).hostname or "", 200, None
+                    upstream_host = urllib.parse.urlparse(upstream).hostname or ""
+                    opener = urllib.request.build_opener(_NoCrossHostRedirect(upstream_host))
                     try:
-                        with urllib.request.urlopen(urllib.request.Request(upstream, data=body, headers=headers, method="POST"), timeout=max(1.0, float(timeout))) as resp:
+                        with opener.open(urllib.request.Request(upstream, data=body, headers=headers, method="POST"), timeout=max(1.0, float(timeout))) as resp:
                             out, host = resp.read(), urllib.parse.urlparse(resp.geturl()).hostname or ""
                     except urllib.error.HTTPError as e:
                         status, err = e.code, e.code
@@ -183,6 +203,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             try:
                 env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(sb_p), "LANG": os.environ.get("LANG", "en_US.UTF-8"),
+                       "TMPDIR": str(sb_p / "tmp"),
                        "AGENT_PROXY_URL": proxy_url, "AGENT_MODEL": maker_cfg.get("model", {}).get("identifier", "")}
                 cmd = _resolve_cmd(list(maker_cfg["command"]), job_dir)
                 stype = (maker_cfg.get("sandbox") or {}).get("type")
@@ -208,7 +229,17 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         f"(deny file-read* (literal {q}{jd / 'job.json'}{q}))\n"
                         f"(deny file-read* (subpath {q}{home / '.ssh'}{q}))\n"
                         f"(deny file-read* (literal {q}{home / '.hermes' / '.env'}{q}))\n"
-                        "(deny file-read* (regex #\"/held_out(/|$)\"))\n"
+                        # credential-bearing home dotfiles beyond .ssh: the agent must not
+                        # read what the deny list does not name (round-2 adversarial #7)
+                        + "".join(
+                            f"(deny file-read* (subpath {q}{home / ('.' + n)}{q}))\n"
+                            for n in ("config", "aws", "netrc", "git-credentials", "gnupg", "kube", "docker", "config/gcloud")
+                        )
+                        + "".join(
+                            f"(deny file-read* (literal {q}{home / ('.' + n)}{q}))\n"
+                            for n in ("zsh_history", "bash_history", "netrc", "wget-hsts", "npmrc", "pypirc")
+                        )
+                        + "(deny file-read* (regex #\"/held_out(\\.|/|$)\"))\n"
                         "(deny network*)\n"
                         f"(allow network-outbound (remote ip {q}localhost:{srv.server_port}{q}))\n",
                         encoding="utf-8")
@@ -216,7 +247,8 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 # proxy); the whole job dir is masked with a tmpfs -- held_out, evidence,
                 # and the custody files live inside it -- then the agent's own scripts
                 # subtree is bound back read-only. The packet is read from the workspace copy.
-                relay = [sys.executable, "-I", "-c", _RELAY, str(sb_p / "proxy.sock"), str(_INNER_PROXY_PORT)] if stype == "bwrap" else []
+                inner_port = _INNER_PROXY_PORT_BASE + (os.getpid() % 2000)  # per-launch offset; concurrent jobs must not collide
+                relay = [sys.executable, "-I", "-c", _RELAY, str(sb_p / "proxy.sock"), str(inner_port)] if stype == "bwrap" else []
                 cmd = (sandbox_prefix(stype, jd, sb_p) or []) + relay + cmd
                 proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
                 if proc.returncode != 0:

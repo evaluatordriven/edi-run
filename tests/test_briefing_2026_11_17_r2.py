@@ -52,6 +52,20 @@ def _serve(handler):
     return srv
 
 
+class FindingF_AgentTmpdir(_R2Base):
+    def test_f_the_sandboxed_agent_has_a_usable_temp_root(self):
+        """Deep-review P1: writes are workspace-confined, so tempfile must resolve
+        inside the workspace -- an agent that touches tempfile must not die."""
+        job = self._sandboxed_agent_job("tmpdir", (
+            "import pathlib, sys, tempfile\n"
+            "d = tempfile.mkdtemp()\n"
+            "pathlib.Path(d, 'w.txt').write_text('ok')\n"
+            "pathlib.Path(sys.argv[2], 'memo.md').write_text('" + PASSING + "tmp=ok\\n', encoding='utf-8')\n"))
+        loop.freeze_job(job)
+        loop.run_job(job)
+        self.assertIn("tmp=ok", self._memo_tail(job))
+
+
 # ------------------------------------------------------------------ Finding A
 class FindingA_SandboxWrites(_R2Base):
     def test_a1_sandboxed_agent_cannot_write_outside_its_workspace(self):
