@@ -65,7 +65,6 @@ def sandbox_usable(stype, jd=None, sb_p=None):
             probe_jd.mkdir(), probe_sb.mkdir()
             probe = subprocess.run(sandbox_prefix(stype, probe_jd, probe_sb) + ["true"],
                                    capture_output=True, timeout=30)
-            print(f"bwrap probe rc={probe.returncode} err={probe.stderr.decode()[:120]!r}", flush=True)
             return probe.returncode == 0
     return False
 
