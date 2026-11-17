@@ -76,10 +76,12 @@ def gate_seats(cfg, job_dir, approver_by=None):
     app_by = approver_by if approver_by is not None else disp.get("by", "")
     rf = ((cfg.get("instrument") or {}).get("runner") or {}).get("file")
     r_sha = sha256_file(safe_rel(rf, job_dir)) if rf and (job_dir / rf).is_file() else None
-    evals, mk_mod = cfg.get("evaluators") or [], (maker.get("model") if maker.get("kind") == "model" else None)
+    evals, mk_mod = cfg.get("evaluators") or [], (maker.get("model") if maker.get("kind") in ("model", "agent") else None)
     if not evals:
         raise GateError("at least one evaluator is required")
     for e in evals:
+        if int(e.get("runs", 2)) < 2:
+            raise GateError(f"evaluator {e.get('id')} runs < 2; a verdict rests on at least two scored runs (D4.5)")
         names = [e.get("name", "")]
         if e.get("kind") == "script":
             sc = e.get("script") or {}
@@ -98,7 +100,9 @@ def gate_seats(cfg, job_dir, approver_by=None):
         mk_name = maker.get("name", "")
         if any(same(a.get("by", ""), mk_name) for a in bar.get("approvals") or []) or same(bar.get("author", ""), mk_name):
             raise GateError("CL2/CL3 forbids maker from authoring or approving the bar (CL2-3a)")
-        if maker.get("kind") == "model":
+        if maker.get("kind") == "agent" and not (maker.get("sandbox") or {}).get("type"):
+            raise GateError("agent Maker at CL2/CL3 requires maker.sandbox {type: sandbox-exec|bwrap}; the runtime must confine the agent (D3.held-out, ruling R3)")
+        if maker.get("kind") in ("model", "agent"):
             if not isinstance(mk_mod, dict) or not (mk_mod.get("family") and mk_mod.get("endpoint")):
                 raise GateError("model maker requires maker.model block (CL2-3b)")
             m_fam, m_ep, m_evs = mk_mod["family"].casefold(), mk_mod["endpoint"], [e for e in evals if e.get("kind") == "model"]
@@ -109,6 +113,30 @@ def gate_seats(cfg, job_dir, approver_by=None):
             same_cnt = (max(Counter(f for f in fams if f != UNDISCLOSED).values(), default=0) if m_fam == UNDISCLOSED else sum(1 for f in fams if f == m_fam)) + sum(1 for f in fams if f == UNDISCLOSED)
             if 2 * same_cnt > len(evals):
                 raise GateError("CL2 forbids >50% of evaluators sharing maker's model family (CL2-3c)")
+
+
+def held_out_needles(job_dir):
+    held_dir, needles = job_dir / "held_out", set()
+    pub = "".join((job_dir / f).read_text(encoding="utf-8", errors="ignore").casefold() for f in ("bar.md", "method.md") if (job_dir / f).is_file())
+    for p in (p for p in (held_dir.rglob("*") if held_dir.is_dir() else []) if p.is_file()):
+        needles.add(sha256_file(p).casefold())
+        needles.update(ln.strip().casefold()[:24] for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines() if len(ln.strip()) >= 16 and ln.strip().casefold()[:24] not in pub)
+    return needles
+
+
+WITHHELD = "[withheld: matches held-out material]"
+
+
+def scrub_held_out(items, needles):
+    """Return (items with matching text fields replaced, count withheld) — D4.9 filters, never forwards."""
+    out, n = [], 0
+    for it in items:
+        it = dict(it)
+        for k, v in it.items():
+            if isinstance(v, str) and v and any(nd in v.casefold() or nd == v.casefold() for nd in needles if len(nd) >= 16):
+                it[k], n = WITHHELD, n + 1
+        out.append(it)
+    return out, n
 
 
 def gate_packet(packet, job_dir, expected_incumbent_digest):

@@ -176,7 +176,7 @@ class TestEDIRuntime(unittest.TestCase):
                         "digest": {"sha256": sha256_bytes(eval_script.read_bytes())},
                     },
                     "command": [sys.executable, str(eval_script)],
-                    "runs": 2 if level in ("CL2", "CL3") else 1,
+                    "runs": 2,
                 }
             ],
             "controls": {"clean": "held_out/controls/clean.md", "planted": "held_out/controls/planted.md"},
@@ -570,7 +570,7 @@ class TestEDIRuntime(unittest.TestCase):
             url = f"http://127.0.0.1:{port}/v1/chat/completions"  # localhost http exempt
             cfg2["maker"] = {"name": "HttpMaker", "kind": "model", "version": "1", "method": {"file": "method.md"},
                              "url": url, "model": {"family": "mock", "identifier": "mock-1", "endpoint": "127.0.0.1", "readOnly": False}}
-            cfg2["evaluators"] = [{"id": "EH", "name": "HttpEval", "kind": "model", "url": url, "runs": 1,
+            cfg2["evaluators"] = [{"id": "EH", "name": "HttpEval", "kind": "model", "url": url, "runs": 2,
                                    "model": {"family": "mock", "identifier": "mock-eval", "endpoint": "127.0.0.1", "readOnly": True}}]
             (job2 / "job.json").write_text(json.dumps(cfg2, indent=2), encoding="utf-8")
             loop.freeze_job(job2)
@@ -813,7 +813,7 @@ class TestEDIRuntime(unittest.TestCase):
         cfg["evaluators"].append({
             "id": "E2", "name": "SecondEval", "kind": "script", "model": None,
             "script": {"name": "eval_e2.py", "author": "Samira Patel", "digest": {"sha256": sha256_bytes(eval_s2.read_bytes())}},
-            "command": [sys.executable, str(eval_s2), "--always-low"], "runs": 1,
+            "command": [sys.executable, str(eval_s2), "--always-low"], "runs": 2,
         })
         (job_dis / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         loop.freeze_job(job_dis)

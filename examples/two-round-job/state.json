@@ -6,8 +6,8 @@
     "rubric": "cc53dfc9ebe9dc704fbf781dae33383e1cdcf2d40d3a289c21ee9e658ac854c0",
     "runner": "afb1c8553cd023331888911faa008a864fa5bce49792de62bd9803b068692b7c"
   },
-  "startedAt": "2026-11-17T00:01:31.791957Z",
-  "frozenAt": "2026-11-17T00:01:31.786643Z",
+  "startedAt": "2026-11-17T19:57:09.065115Z",
+  "frozenAt": "2026-11-17T19:57:09.049940Z",
   "demonstrations": [],
   "incumbent_round": 2,
   "incumbent_digest": "71e397e2e28c523b0dea5442c69b3a5ed0a09c3c4ac2f16b63e7dc080ecf9f4f",
@@ -17,10 +17,35 @@
   },
   "last_candidate_digest": "71e397e2e28c523b0dea5442c69b3a5ed0a09c3c4ac2f16b63e7dc080ecf9f4f",
   "defects": [],
-  "solutions": [],
+  "solutions": [
+    {
+      "dimension": "D1",
+      "evaluator": "E1",
+      "score": 5.0,
+      "round": 2
+    },
+    {
+      "dimension": "D1",
+      "evaluator": "E1",
+      "score": 5.0,
+      "round": 2
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E1",
+      "score": 5.0,
+      "round": 2
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E1",
+      "score": 5.0,
+      "round": 2
+    }
+  ],
   "rounds": {
     "1": {
-      "producedAt": "2026-11-17T00:01:34.573732Z",
+      "producedAt": "2026-11-17T19:57:09.178526Z",
       "digest": "1423eda209fcca1162b0f95ea117baa1c33078a7c4e677f70b226eb23d4b9524",
       "checks": [
         {
@@ -28,7 +53,7 @@
           "evaluator": "E1",
           "run": 1,
           "batch": "B1",
-          "at": "2026-11-17T00:01:34.786063Z",
+          "at": "2026-11-17T19:57:10.393128Z",
           "outcome": "conforms",
           "score": 5.0,
           "failureCondition": "score < 4.0",
@@ -39,17 +64,47 @@
           "unobserved": null
         },
         {
+          "dimension": "D1",
+          "evaluator": "E1",
+          "run": 2,
+          "batch": "B1",
+          "at": "2026-11-17T19:57:10.634771Z",
+          "outcome": "conforms",
+          "score": 5.0,
+          "failureCondition": "score < 4.0",
+          "evidence": {
+            "name": "reading-D1-E1-r1-run2.json",
+            "sha256": "6900b944990a7bc9ec08c10a51cab98128d2bb6c0124e5edef0df6ee8699b410"
+          },
+          "unobserved": null
+        },
+        {
           "dimension": "D2",
           "evaluator": "E1",
           "run": 1,
           "batch": "B1",
-          "at": "2026-11-17T00:01:34.833716Z",
+          "at": "2026-11-17T19:57:10.920779Z",
           "outcome": "does_not_conform",
           "score": 1.0,
           "failureCondition": "score < 4.0",
           "evidence": {
             "name": "reading-D2-E1-r1-run1.json",
             "sha256": "3cfadf4f1a20c0934485f9055ea35184cd9323135f2559e409ca79e8f6d03b2b"
+          },
+          "unobserved": null
+        },
+        {
+          "dimension": "D2",
+          "evaluator": "E1",
+          "run": 2,
+          "batch": "B1",
+          "at": "2026-11-17T19:57:11.158798Z",
+          "outcome": "does_not_conform",
+          "score": 1.0,
+          "failureCondition": "score < 4.0",
+          "evidence": {
+            "name": "reading-D2-E1-r1-run2.json",
+            "sha256": "a27e4e9e877282a1cdae0e70ea653852809fa1a24e7eaf0cc67ecc59964fb406"
           },
           "unobserved": null
         }
@@ -141,7 +196,7 @@
       }
     },
     "2": {
-      "producedAt": "2026-11-17T00:01:34.883056Z",
+      "producedAt": "2026-11-17T19:57:11.197653Z",
       "digest": "71e397e2e28c523b0dea5442c69b3a5ed0a09c3c4ac2f16b63e7dc080ecf9f4f",
       "checks": [
         {
@@ -149,7 +204,7 @@
           "evaluator": "E1",
           "run": 1,
           "batch": "B2",
-          "at": "2026-11-17T00:01:35.076223Z",
+          "at": "2026-11-17T19:57:12.446182Z",
           "outcome": "conforms",
           "score": 5.0,
           "failureCondition": "score < 4.0",
@@ -160,17 +215,47 @@
           "unobserved": null
         },
         {
+          "dimension": "D1",
+          "evaluator": "E1",
+          "run": 2,
+          "batch": "B2",
+          "at": "2026-11-17T19:57:12.687825Z",
+          "outcome": "conforms",
+          "score": 5.0,
+          "failureCondition": "score < 4.0",
+          "evidence": {
+            "name": "reading-D1-E1-r2-run2.json",
+            "sha256": "5b0d3eceeec786ef13cba080265dba55d2c56fc6b3b93408e96bcaf1a65b4bbf"
+          },
+          "unobserved": null
+        },
+        {
           "dimension": "D2",
           "evaluator": "E1",
           "run": 1,
           "batch": "B2",
-          "at": "2026-11-17T00:01:35.122487Z",
+          "at": "2026-11-17T19:57:12.926563Z",
           "outcome": "conforms",
           "score": 5.0,
           "failureCondition": "score < 4.0",
           "evidence": {
             "name": "reading-D2-E1-r2-run1.json",
             "sha256": "6216199487c16f61469306f11a479a7a78e10a0c5cb1d972c5b12ae519f8de8c"
+          },
+          "unobserved": null
+        },
+        {
+          "dimension": "D2",
+          "evaluator": "E1",
+          "run": 2,
+          "batch": "B2",
+          "at": "2026-11-17T19:57:13.191815Z",
+          "outcome": "conforms",
+          "score": 5.0,
+          "failureCondition": "score < 4.0",
+          "evidence": {
+            "name": "reading-D2-E1-r2-run2.json",
+            "sha256": "d82e516025114499c87c7aca492c4150cb1f08f67a6313490b8f5437de000f84"
           },
           "unobserved": null
         }
@@ -264,5 +349,7 @@
   },
   "terminal_state": "accepted",
   "reason": "all_conform",
-  "cost_usd": 0.0
+  "cost_usd": 0.0,
+  "seed": null,
+  "wall_spent_seconds": 4.06256103515625
 }

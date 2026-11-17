@@ -8,7 +8,7 @@
     "digest": {
       "sha256": "d572545a4dfb3f63d1a104930e96e53d01b8c7015ec78c42ba978fcb26e1117e"
     },
-    "frozenAt": "2026-11-17T00:01:31.786643Z",
+    "frozenAt": "2026-11-17T19:57:09.049940Z",
     "author": "Jordan Blake",
     "dimensions": [
       {
@@ -69,8 +69,8 @@
     },
     "model": null
   },
-  "startedAt": "2026-11-17T00:01:31.791957Z",
-  "producedAt": "2026-11-17T00:01:35.195664Z",
+  "startedAt": "2026-11-17T19:57:09.065115Z",
+  "producedAt": "2026-11-17T19:57:11.197653Z",
   "instrument": {
     "rubric": {
       "file": "rubric.md"
@@ -100,7 +100,7 @@
       "evaluator": "E1",
       "run": 1,
       "batch": "B2",
-      "at": "2026-11-17T00:01:35.201868Z",
+      "at": "2026-11-17T19:57:12.446182Z",
       "outcome": "conforms",
       "score": 5.0,
       "failureCondition": "score < 4.0",
@@ -111,17 +111,47 @@
       "unobserved": null
     },
     {
+      "dimension": "D1",
+      "evaluator": "E1",
+      "run": 2,
+      "batch": "B2",
+      "at": "2026-11-17T19:57:12.687825Z",
+      "outcome": "conforms",
+      "score": 5.0,
+      "failureCondition": "score < 4.0",
+      "evidence": {
+        "name": "reading-D1-E1-r2-run2.json",
+        "sha256": "5b0d3eceeec786ef13cba080265dba55d2c56fc6b3b93408e96bcaf1a65b4bbf"
+      },
+      "unobserved": null
+    },
+    {
       "dimension": "D2",
       "evaluator": "E1",
       "run": 1,
       "batch": "B2",
-      "at": "2026-11-17T00:01:35.206934Z",
+      "at": "2026-11-17T19:57:12.926563Z",
       "outcome": "conforms",
       "score": 5.0,
       "failureCondition": "score < 4.0",
       "evidence": {
         "name": "reading-D2-E1-r2-run1.json",
         "sha256": "6216199487c16f61469306f11a479a7a78e10a0c5cb1d972c5b12ae519f8de8c"
+      },
+      "unobserved": null
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E1",
+      "run": 2,
+      "batch": "B2",
+      "at": "2026-11-17T19:57:13.191815Z",
+      "outcome": "conforms",
+      "score": 5.0,
+      "failureCondition": "score < 4.0",
+      "evidence": {
+        "name": "reading-D2-E1-r2-run2.json",
+        "sha256": "d82e516025114499c87c7aca492c4150cb1f08f67a6313490b8f5437de000f84"
       },
       "unobserved": null
     }
@@ -183,7 +213,7 @@
   "disposition": {
     "state": "given",
     "by": "Casey Park",
-    "at": "2026-11-17T00:01:35.227255Z",
+    "at": "2026-11-17T19:57:13.257085Z",
     "acknowledgesUnobserved": []
   }
 }

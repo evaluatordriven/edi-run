@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Run test suite
-        run: python3 tests/test_edi.py
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
   macos:
     # Self-hosted macOS runner (Steve-Moitozo, ARM64): the hosted macOS runner queue
     # repeatedly killed queued jobs at ~15m with zero steps (2026-11-17). A local
@@ -29,4 +29,4 @@ jobs:
       # /Users/runner, which does not exist on this machine; stdlib-only suite
       # needs no managed interpreter, and 3.14 adds newer-interpreter coverage.
       - name: Run test suite
-        run: /opt/homebrew/bin/python3 tests/test_edi.py
+        run: /opt/homebrew/bin/python3 -m unittest discover -s tests -p 'test_*.py'

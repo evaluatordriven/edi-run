@@ -21,6 +21,12 @@ python3 edi.py finalize <job_dir> --disposition given --by "Casey Park"
 python3 edi.py verify <job_dir>
 ```
 
+## Doctrine conformance
+
+edi-run implements `evaluatordriven/doctrine` **v0.2.1** (ratified 2026-11-02). Notable rule implementations: a verdict rests on at least two scored runs per dimension (D4.5; freeze refuses fewer); the next round's packet carries every known defect with the round that measured it, and any packet text matching held-out material is replaced with `[withheld: matches held-out material]` and counted (D4.9 — held-out material is filtered out of the Maker's input, never fatal); `escalation.json` carries what was tried (`tried`) and why no observable answer exists (`why`, D4.11); a gate refusal mid-run halts as `integrity_error`, never mislabelled as an interruption.
+
+Agent Makers at CL2/CL3 require `maker.sandbox` (`{"type": "sandbox-exec"}` on macOS, `{"type": "bwrap"}` on Linux) — the runtime itself launches the agent under that confinement, denying `held_out/` and `~/.hermes`; freeze refuses if the sandbox type is unknown for the host. The agent's model calls go through the loop-hosted proxy, which answers 403 to any model other than the declared `maker.model.identifier` (logged, never metered).
+
 ## Maker seats
 
 Three Maker kinds in `job.json`:

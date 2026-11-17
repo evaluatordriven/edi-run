@@ -61,6 +61,12 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 def do_POST(self):
                     body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
                     req = json.loads(body.decode("utf-8")) if body else {}
+                    declared = (maker_cfg.get("model") or {}).get("identifier")
+                    if req.get("model") != declared:
+                        calls.append({"host": None, "model": req.get("model"), "usage": None, "refused": "undeclared model"})
+                        self.send_response(403)
+                        self.end_headers()
+                        return
                     headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})}
                     with urllib.request.urlopen(urllib.request.Request(upstream, data=body, headers=headers, method="POST"), timeout=max(1.0, float(timeout))) as resp:
                         out, host = resp.read(), urllib.parse.urlparse(resp.geturl()).hostname or ""
@@ -81,6 +87,23 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(sb_p), "LANG": os.environ.get("LANG", "en_US.UTF-8"),
                        "AGENT_PROXY_URL": f"http://127.0.0.1:{srv.server_port}/v1/chat/completions", "AGENT_MODEL": maker_cfg.get("model", {}).get("identifier", "")}
                 cmd = _resolve_cmd(list(maker_cfg["command"]), job_dir)
+                stype = (maker_cfg.get("sandbox") or {}).get("type")
+                if stype == "sandbox-exec":
+                    q = chr(34)  # sandbox profiles quote paths with double quotes
+                    profile = sb_p / "agent.sb"
+                    profile.write_text(
+                        "(version 1)(allow default)\n"
+                        f"(deny file-read* (subpath {q}{job_dir / 'held_out'}{q}))\n"
+                        f"(deny file-read* (subpath {q}{pathlib.Path.home() / '.hermes'}{q}))\n"
+                        f"(deny file-read* (subpath {q}{pathlib.Path.home() / '.ssh'}{q}))\n",
+                        encoding="utf-8")
+                    cmd = ["sandbox-exec", "-f", str(profile)] + cmd
+                elif stype == "bwrap":
+                    cmd = ["bwrap", "--unshare-all", "--die-with-parent", "--dev-bind", "/", "/",
+                           "--tmpfs", str(job_dir / "held_out"), "--tmpfs", str(pathlib.Path.home() / ".hermes"),
+                           "--ro-bind", str(sb_p), str(sb_p)] + cmd
+                elif stype:
+                    raise gates.GateError(f"unknown sandbox type {stype}; supported: sandbox-exec (macOS), bwrap (Linux)")
                 proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
                 if proc.returncode != 0:
                     raise RuntimeError(f"Agent Maker failed ({proc.returncode}): {proc.stderr.strip()}")

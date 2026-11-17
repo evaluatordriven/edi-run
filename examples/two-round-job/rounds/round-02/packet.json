@@ -4,10 +4,35 @@
   "best_artifact_digest": "1423eda209fcca1162b0f95ea117baa1c33078a7c4e677f70b226eb23d4b9524",
   "defects": [
     {
+      "round": 1,
       "dimension": "D2",
+      "evaluator": "E1",
       "score": 1.0,
+      "observation": "# Q3 Vendor Memo\nRenewal savings: 18% without citation.",
+      "remedy": "Add Source: citation"
+    },
+    {
+      "round": 1,
+      "dimension": "D2",
+      "evaluator": "E1",
+      "score": 1.0,
+      "observation": "# Q3 Vendor Memo\nRenewal savings: 18% without citation.",
       "remedy": "Add Source: citation"
     }
   ],
-  "workable_solutions": []
+  "workable_solutions": [
+    {
+      "dimension": "D1",
+      "evaluator": "E1",
+      "score": 5.0,
+      "round": 1
+    },
+    {
+      "dimension": "D1",
+      "evaluator": "E1",
+      "score": 5.0,
+      "round": 1
+    }
+  ],
+  "withheld": 0
 }

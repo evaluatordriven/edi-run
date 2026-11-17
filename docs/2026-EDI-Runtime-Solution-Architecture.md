@@ -1,6 +1,6 @@
 # 2026 E-DI Runtime Solution Architecture (`edi-run`)
 
-**Scope:** Reference runtime engine implementing `evaluatordriven/doctrine` (v0.1, 2026-10-29 lift) and emitting conforming `evaluatordriven/custody` records (`custody/v1`, SPEC v0.9.8, predicate `https://evaluatordriven.com/custody/v1`).
+**Scope:** Reference runtime engine implementing `evaluatordriven/doctrine` (v0.2.1, ratified 2026-11-02) and emitting conforming `evaluatordriven/custody` records (`custody/v1`, SPEC v0.9.8, predicate `https://evaluatordriven.com/custody/v1`).
 **Baseline reuse (Wrap vs. Build):** `evaluatordriven/custody` already ships three zero-dependency Python 3.10+ stdlib tools (`tools/record.py`, `tools/make_record.py`, `checker/check.py`). The runtime **wraps** those three files verbatim for hash-chained event logging, in-toto statement assembly, and post-run verification—building only the loop state machine, seat-boundary gates, and adapter dispatch (~350 LOC Python stdlib).
 
 ---
