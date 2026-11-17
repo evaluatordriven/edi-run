@@ -193,11 +193,12 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                     self.end_headers()
                     self.wfile.write(out)
 
+            inner_port = _INNER_PROXY_PORT_BASE + (os.getpid() % 2000)  # per-launch offset; concurrent jobs must not collide
             if (maker_cfg.get("sandbox") or {}).get("type") == "bwrap":
                 class _UnixProxy(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
                     daemon_threads = True
                 srv = _UnixProxy(str(sb_p / "proxy.sock"), _Proxy)
-                proxy_url = f"http://127.0.0.1:{_INNER_PROXY_PORT}/v1/chat/completions"
+                proxy_url = f"http://127.0.0.1:{inner_port}/v1/chat/completions"
             else:
                 srv = http.server.HTTPServer(("127.0.0.1", 0), _Proxy)
                 proxy_url = f"http://127.0.0.1:{srv.server_port}/v1/chat/completions"
@@ -248,7 +249,6 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 # proxy); the whole job dir is masked with a tmpfs -- held_out, evidence,
                 # and the custody files live inside it -- then the agent's own scripts
                 # subtree is bound back read-only. The packet is read from the workspace copy.
-                inner_port = _INNER_PROXY_PORT_BASE + (os.getpid() % 2000)  # per-launch offset; concurrent jobs must not collide
                 relay = [sys.executable, "-I", "-c", _RELAY, str(sb_p / "proxy.sock"), str(inner_port)] if stype == "bwrap" else []
                 cmd = (sandbox_prefix(stype, jd, sb_p) or []) + relay + cmd
                 proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
