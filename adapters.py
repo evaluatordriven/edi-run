@@ -128,8 +128,9 @@ class _NoCrossHostRedirect(urllib.request.HTTPRedirectHandler):
         self.upstream_host = upstream_host
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if urllib.parse.urlparse(newurl).hostname != self.upstream_host:
-            raise urllib.error.HTTPError(req.full_url, code, f"cross-host redirect to {newurl} refused", headers, fp)
+        parts = urllib.parse.urlparse(newurl)
+        if parts.hostname != self.upstream_host or parts.scheme != urllib.parse.urlparse(req.full_url).scheme:
+            raise urllib.error.HTTPError(req.full_url, code, f"redirect to {newurl} refused (cross-host or scheme downgrade)", headers, fp)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
