@@ -156,7 +156,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 # proxy); the whole job dir is masked with a tmpfs -- held_out, evidence,
                 # and the custody files live inside it -- then the agent's own scripts
                 # subtree is bound back read-only. The packet is read from the workspace copy.
-                cmd = sandbox_prefix(stype, jd, sb_p) or cmd  # prefix None only for unknown types, refused above
+                cmd = (sandbox_prefix(stype, jd, sb_p) or []) + cmd
                 proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
                 if proc.returncode != 0:
                     raise RuntimeError(f"Agent Maker failed ({proc.returncode}): {proc.stderr.strip()} | cmd[0:4]={cmd[:4]}")
