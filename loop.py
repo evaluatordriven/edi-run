@@ -23,6 +23,36 @@ def _subject_digest(art_dir, files, held_hashes):
     return custody_record.digest_text("|".join(parts))
 
 
+# --- Gap-emission (docs/2026-EDI-Runtime-Solution-Architecture.md §6) -------------
+# An incomplete run emits a gap-listed record (invalid by design) instead of nothing.
+GAP_RULES = (
+    ("I-01", lambda st: not st.get("frozenAt"), "bar freeze never recorded"),
+    ("I-05", lambda st: not st.get("rounds"), "no evaluation batch completed (no checks observed)"),
+    ("I-06", lambda st: not st.get("incumbent_round"), "no artifact survived as Pareto-best incumbent"),
+    ("I-07", lambda st: not st.get("terminal_state"), "loop has no terminal state"),
+)
+
+
+def _gap_list(st, extra=()):
+    gaps = [{"invariant": inv, "missing": msg} for inv, test, msg in GAP_RULES if test(st)]
+    return gaps + list(extra)
+
+
+def _emit_gap_record(job_dir, st, cfg, extra=()):
+    gaps = _gap_list(st, extra)
+    log_last = json.loads((job_dir / "job.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    rec = {"recordType": "edi-run/gap-record",
+           "x-edi-run": {"gaps": gaps, "terminalState": st.get("terminal_state"),
+                          "reason": st.get("reason"), "startedAt": st.get("startedAt"),
+                          "lastEventHash": log_last.get("hash")}}
+    (job_dir / "record.json").write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
+    rep = custody_check.verify(rec, files=str(job_dir / "artifact"), evidence=str(job_dir / "evidence"),
+                               bar=str(job_dir / cfg["bar"]["file"]))
+    if rep["verdict"] == "OK":
+        raise gates.GateError("gap-listed record unexpectedly verified OK (emitter defect)")
+    return 1
+
+
 def freeze_job(job_dir, started_at=None):
     job_dir, cfg = pathlib.Path(job_dir).resolve(), json.loads((pathlib.Path(job_dir) / "job.json").read_text(encoding="utf-8"))
     gates.gate_bounds(cfg)
@@ -172,8 +202,10 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
     if gates.gate_instruments(cfg, job_dir) != st["pins"]:
         raise gates.GateError("frozen instruments modified after freeze (I-01/I-02)")
     gates.gate_seats(cfg, job_dir, approver_by=by)
+    ack = ack_unobserved if ack_unobserved is not None else cfg["disposition"].get("acknowledgesUnobserved", [])
     if not st.get("incumbent_round"):
-        raise gates.GateError("cannot finalize a job that produced no artifact")
+        _append(job_dir, "disposition", by, [], {"state": state, "acknowledgesUnobserved": ack})
+        return _emit_gap_record(job_dir, st, cfg)
     win_r, max_r, art_dst, log_path = str(st["incumbent_round"]), str(max(int(k) for k in st["rounds"])), job_dir / "artifact", job_dir / "job.jsonl"
     win = st["rounds"][win_r]
     shutil.rmtree(art_dst, ignore_errors=True)
@@ -189,23 +221,31 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
         prod_at = ev_prod["at"]
     else:
         checks, prod_at = win["checks"], win["producedAt"]
-    ack = ack_unobserved if ack_unobserved is not None else cfg["disposition"].get("acknowledgesUnobserved", [])
     ev_disp = _append(job_dir, "disposition", by, [], {"state": state, "acknowledgesUnobserved": ack})
     violations = [{"dimension": d["id"], "description": f"{d['id']} failed conform threshold"} for d in cfg["bar"]["dimensions"] if any(c["dimension"] == d["id"] and c["outcome"] == "does_not_conform" for c in checks)]
     disagreements = [{"dimension": d["id"], "checks": [i for i, c in enumerate(checks) if c["dimension"] == d["id"]], "note": "evaluators disagreed"} for d in cfg["bar"]["dimensions"] if len({c["outcome"] for c in checks if c["dimension"] == d["id"]}) > 1]
     evals_clean = [{k: v for k, v in e.items() if k in ("id", "name", "kind", "model", "script", "sameModelAsMaker")} for e in cfg["evaluators"]]
-    inputs = {"subject": {"dir": "artifact"}, "specVersion": cfg.get("specVersion", "0.9.8"), "levelClaimed": cfg["levelClaimed"], "bar": dict({k: v for k, v in cfg["bar"].items() if k != "file"}, frozenAt=st["frozenAt"]),
-              "maker": {k: v for k, v in cfg["maker"].items() if k in ("name", "kind", "version", "method", "model")}, "startedAt": st["startedAt"], "producedAt": prod_at, "instrument": cfg["instrument"],
-              "evaluators": evals_clean, "checks": checks, "controls": win["controls"], "disagreements": disagreements, "violations": violations, "separationGaps": cfg.get("separationGaps", []),
-              "retention": cfg["retention"], "external": win["external"], "disposition": {"state": state, "by": by, "at": ev_disp["at"], "acknowledgesUnobserved": ack}}
-    if cfg["levelClaimed"] in ("CL2", "CL3"):
-        inputs["spread"] = [{"dimension": d["id"], "evaluator": ev["id"], "runs": len(outs), "agreement": Counter(outs).most_common(1)[0][1]} for ev in evals_clean for d in cfg["bar"]["dimensions"] if (outs := [c["outcome"] for c in checks if c["evaluator"] == ev["id"] and c["dimension"] == d["id"]])]
-    if cfg["levelClaimed"] == "CL3":
-        inputs["demonstrations"] = st.get("demonstrations", [])
-    if cfg["levelClaimed"] == "baseline":
-        inputs["readsBeforeFreeze"] = cfg.get("readsBeforeFreeze", [])
-    (job_dir / "inputs.json").write_text(json.dumps(inputs, indent=2) + "\n", encoding="utf-8")
-    subprocess.run([sys.executable, str(VENDOR / "make_record.py"), str(job_dir / "inputs.json"), str(job_dir / "record.json"), "--log", str(log_path)], cwd=str(job_dir), check=True)
+    def _assemble():
+        inputs = {"subject": {"dir": "artifact"}, "specVersion": cfg.get("specVersion", "0.9.8"), "levelClaimed": cfg["levelClaimed"], "bar": dict({k: v for k, v in cfg["bar"].items() if k != "file"}, frozenAt=st["frozenAt"]),
+                  "maker": {k: v for k, v in cfg["maker"].items() if k in ("name", "kind", "version", "method", "model")}, "startedAt": st["startedAt"], "producedAt": prod_at, "instrument": cfg["instrument"],
+                  "evaluators": evals_clean, "checks": checks, "controls": win["controls"], "disagreements": disagreements, "violations": violations, "separationGaps": cfg.get("separationGaps", []),
+                  "retention": cfg["retention"], "external": win["external"], "disposition": {"state": state, "by": by, "at": ev_disp["at"], "acknowledgesUnobserved": ack}}
+        if cfg["levelClaimed"] in ("CL2", "CL3"):
+            inputs["spread"] = [{"dimension": d["id"], "evaluator": ev["id"], "runs": len(outs), "agreement": Counter(outs).most_common(1)[0][1]} for ev in evals_clean for d in cfg["bar"]["dimensions"] if (outs := [c["outcome"] for c in checks if c["evaluator"] == ev["id"] and c["dimension"] == d["id"]])]
+        if cfg["levelClaimed"] == "CL3":
+            inputs["demonstrations"] = st.get("demonstrations", [])
+        if cfg["levelClaimed"] == "baseline":
+            inputs["readsBeforeFreeze"] = cfg.get("readsBeforeFreeze", [])
+        (job_dir / "inputs.json").write_text(json.dumps(inputs, indent=2) + "\n", encoding="utf-8")
+        proc = subprocess.run([sys.executable, str(VENDOR / "make_record.py"), str(job_dir / "inputs.json"), str(job_dir / "record.json"), "--log", str(log_path)], cwd=str(job_dir), capture_output=True, text=True)
+        return proc.returncode, (proc.stderr.strip() or proc.stdout.strip())[-500:]
+
+    try:
+        rc, detail = _assemble()
+        if rc != 0:
+            return _emit_gap_record(job_dir, st, cfg, extra=[{"invariant": "custody-assembly", "missing": detail}])
+    except Exception as e:  # noqa: BLE001 -- §6: assembly failure becomes a diagnosable gap record
+        return _emit_gap_record(job_dir, st, cfg, extra=[{"invariant": "custody-assembly", "missing": str(e)[-500:]}])
     return verify_job(job_dir)
 
 

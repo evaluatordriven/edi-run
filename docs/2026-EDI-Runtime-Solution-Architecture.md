@@ -219,3 +219,21 @@ python3 edi.py verify <job_dir>
    - Appends the human Approver's `disposition` event to `job.jsonl`.
    - Calls `make_record.from_log(inputs_data, "job.jsonl")` to compile `<job_dir>/record.json`.
    - Executes `checker/check.py record.json --files artifact --bar bar.md --evidence evidence` and refuses to mark the run finalized unless `check.py` exits `0` (or `2` when `disposition.state == "not_yet_given"` routes `to approver`).
+
+---
+
+## 6. Design Decision: Incomplete-Run Record Emission (Fail-Stop vs. Gap-Emission)
+
+**Decision.** When a run halts or aborts before a complete, checker-passable record can be assembled (missing checks, missing disposition, cap reached mid-batch, crash), the runtime **emits a gap-listed record rather than emitting nothing**. The emitted `record.json` is marked invalid-by-design via an `x-edi-run.gaps[]` extension enumerating every unmet requirement, and `finalize` exits `1`. A run with zero gaps behaves exactly as specified in §5: full `make_record.py` assembly and a hard `check.py` gate.
+
+**Normative basis.**
+- *For emission:* `DOCTRINE.md` §0 — "the record of the work can be checked by anyone who needs to audit it," and §8 F6 (offline reconstructability). A silent fail-stop produces **no** artifact for a rejected or crashed job: the most failure-prone runs are precisely the ones an auditor cannot inspect. The doctrine's custody log (`job.jsonl`) already contains every event up to the halt; refusing to compile it discards evidence that already exists.
+- *For marking:* `SPEC.md` §4 — SPEC governs over the JSON Schema, and the checker must never read a gap-listed record as valid. The `x-edi-run.gaps` extension makes incompleteness machine-readable, so `check.py` exits `1` (or `2`) on every gap-listed record and no downstream consumer can mistake it for a passing record. This mirrors `CL3-3`'s `NOT-CHECKABLE` posture: an unverifiable claim is labeled, not suppressed.
+
+**Enforced mechanism.** `finalize` compiles the log with `make_record.py` whenever the log satisfies the assembler's minimum inputs; otherwise it invokes a thin gap-emitter that writes the partial in-toto statement plus `x-edi-run.gaps[]` (requirement id, missing field, last event hash). Either way, `check.py` runs and its exit code is final. The gap list is derived deterministically from the same invariant map in §1 — each gap names the invariant (`I-01..I-07`) whose evidence is absent. The emitter is the *only* new code this decision adds (~30 LOC); it wraps, never re-implements, the custody tools (Wrap-vs-Build, §0 baseline).
+
+**Rejected alternative — pure fail-stop** (`make_record.py` aborts, no `record.json`): honors the assembler's validity contract but breaks auditability for failed runs and converts a diagnosable halt into an undocumented one. Rejected alternative — **silent gap-filling**: emitting a structurally valid record with absent dimensions omitted or defaulted. This is prohibited outright; it would let a record pass `check.py` while hiding missing evaluation, violating `CL1-11`/`CL1-13`.
+
+**Trade-off.** The gap-emitter is a second code path into record construction — a real consistency risk, mitigated by (a) deterministic derivation from §1's invariant map, (b) `check.py` as the sole arbiter of validity on every emitted record, and (c) the extension field making the invalid state explicit rather than inferable. Accepted because the alternative (no record on failure) costs more traceability than the second path costs consistency.
+
+**Adopted:** 2026-11-17 by S2 (Owner), following the spirit review of the Plumbline→edi-run swap.
