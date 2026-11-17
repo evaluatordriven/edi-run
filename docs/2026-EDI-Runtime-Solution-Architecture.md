@@ -10,6 +10,7 @@
 Every rule in `DOCTRINE.md` and `SPEC.md` maps to a deterministic runtime gate executed by the Orchestrator before advancing state:
 
 - **I-01 · Provenance & Bar Freeze Before Work**
+  - *Seed artifacts:* a job may supply an existing draft via `seed` in `job.json` (`{dir, author, origin, note}`) holding exactly the `subjectFiles`. `freeze` verifies it and logs an `artifact-supplied` event (actor = the seed's author) **before** `bar-frozen` — the material demonstrably pre-dates the bar. The seed enters the loop as an unvalidated round-1 candidate, evaluated by the full panel like any other artifact; if it meets the bar the job ends `accepted` with zero Maker calls. The seed's author is never credited to the Maker seat: a seed-authored winner is recorded with `maker.name = seed.author, kind = "person"`, and the seed author may not serve as Evaluator (CL1-6).
   - *Normative source:* `DOCTRINE.md` §2 (4 provenance facts), §4 Principle 1, §5 Entry A/B; `SPEC.md` `CL1-1`, `CL1-2`, `CL1-3`, `BL-1`.
   - *Enforced mechanism:* `gate_freeze(job)`. For Entry A (`levelClaimed` in `CL1..CL3`), verifies `bar.md` exists, hashes it, verifies Buyer and Specialist approvals match `bar.digest` (`CL1-3`), and appends `bar-frozen` and `approval` events to `job.jsonl` **before** emitting `work-started` (`bar.frozenAt < startedAt`). For Entry B (`baseline`), requires `readsBeforeFreeze[]` (`BL-1`) and records `work-started` prior to `bar-frozen`.
 
@@ -190,11 +191,12 @@ python3 edi.py verify <job_dir>
 
 ```
 <job_dir>/
-├── job.json                  # Architect's job config: bounds, seats, levelClaimed, adapter commands
+├── job.json                  # Architect's job config: bounds, seats, levelClaimed, optional seed, optional pricing, adapter commands
 ├── inputs.json               # Base template for custody/tools/make_record.py
 ├── bar.md                    # Frozen bar document (hashed at freeze)
 ├── rubric.md                 # Frozen evaluator rubric (instrument.rubric)
 ├── method.md                 # Frozen maker instructions (maker.method)
+├── seed/                     # Optional Owner-supplied draft; hashed at freeze, logged as artifact-supplied
 ├── held_out/                 # Modes 0700 to Orchestrator/Evaluator only; NEVER passed to Maker
 │   ├── controls/             # K_clean and K_planted files per dimension
 │   └── planted/              # CL3 pre-run planted failure cases

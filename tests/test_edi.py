@@ -584,6 +584,69 @@ class TestEDIRuntime(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
+    def test_seed_artifact_owner_draft_round1(self):
+        # Full-conforming seed: accepted in round 1 with no Maker call, provenance honest
+        job = self._make_base_job(subdir="job_seed_pass")
+        (job / "seed").mkdir()
+        (job / "seed" / "memo.md").write_text("# Header\nFigure: 42% (Source: Q3, 2026-10-01)\n", encoding="utf-8")
+        cfg = json.loads((job / "job.json").read_text())
+        cfg["seed"] = {"dir": "seed", "author": "Dana Voss", "origin": "Owner draft 2026-11-16", "note": ""}
+        (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        (job / "scripts" / "maker.py").write_text("import sys\nsys.exit('Maker must not be invoked for a conforming seed')\n", encoding="utf-8")
+        loop.freeze_job(job)
+        self.assertEqual(loop.run_job(job), 0)
+        events = [json.loads(line) for line in (job / "job.jsonl").read_text().splitlines()]
+        types = [e["type"] for e in events]
+        self.assertIn("artifact-supplied", types)
+        self.assertLess(types.index("artifact-supplied"), types.index("bar-frozen"))  # material pre-dates the bar
+        self.assertEqual(events[types.index("artifact-supplied")]["actor"], "Dana Voss")
+        st = json.loads((job / "state.json").read_text())
+        self.assertEqual(list(st["rounds"].keys()), ["1"])  # one evaluation round, zero Maker calls
+        self.assertEqual(loop.finalize_job(job, state="given", by="Casey Park"), 0)
+        rec = json.loads((job / "record.json").read_text())
+        self.assertEqual(rec["predicate"]["maker"]["name"], "Dana Voss")  # credited to who made it
+        self.assertEqual(loop.verify_job(job), 0)
+
+    def test_seed_artifact_revised_through_loop(self):
+        # Incomplete seed is judged like any candidate, then revised by the Maker
+        job = self._make_base_job(subdir="job_seed_rev")
+        (job / "seed").mkdir()
+        (job / "seed" / "memo.md").write_text("# Header\nNo figure yet.\n", encoding="utf-8")
+        cfg = json.loads((job / "job.json").read_text())
+        cfg["seed"] = {"dir": "seed", "author": "Dana Voss", "origin": "Owner draft", "note": ""}
+        (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        loop.freeze_job(job)
+        self.assertEqual(loop.run_job(job), 0)
+        events = [json.loads(line) for line in (job / "job.jsonl").read_text().splitlines()]
+        seed_prod = [e for e in events if e["type"] == "artifact-produced" and e["data"].get("seed")]
+        maker_prod = [e for e in events if e["type"] == "artifact-produced" and not e["data"].get("seed")]
+        self.assertEqual(len(seed_prod), 1)
+        self.assertEqual(seed_prod[0]["actor"], "Dana Voss")
+        self.assertTrue(maker_prod)  # the Maker did run for the revision
+        st = json.loads((job / "state.json").read_text())
+        self.assertEqual(st["incumbent_round"], 2)
+        self.assertEqual(loop.finalize_job(job, state="given", by="Casey Park"), 0)
+        self.assertEqual(loop.verify_job(job), 0)
+
+    def test_seed_gates(self):
+        job = self._make_base_job(subdir="job_seed_bad1")
+        (job / "seed").mkdir()
+        (job / "seed" / "memo.md").write_text("# Header\n", encoding="utf-8")
+        (job / "seed" / "extra.txt").write_text("extra", encoding="utf-8")
+        cfg = json.loads((job / "job.json").read_text())
+        cfg["seed"] = {"dir": "seed", "author": "Dana Voss", "origin": "", "note": ""}
+        (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        with self.assertRaises(gates.GateError):
+            loop.freeze_job(job)  # seed must supply exactly subjectFiles
+        job2 = self._make_base_job(subdir="job_seed_bad2")
+        (job2 / "seed").mkdir()
+        (job2 / "seed" / "memo.md").write_text("# Header\n", encoding="utf-8")
+        cfg2 = json.loads((job2 / "job.json").read_text())
+        cfg2["seed"] = {"dir": "seed", "author": "Taylor Grant", "origin": "", "note": ""}  # == Evaluator name
+        (job2 / "job.json").write_text(json.dumps(cfg2, indent=2), encoding="utf-8")
+        with self.assertRaises(gates.GateError):
+            loop.freeze_job(job2)  # seed author cannot be an Evaluator
+
     def test_unit_post_freeze_instrument_tamper_detected(self):
         job_dir = self._make_base_job()
         loop.freeze_job(job_dir)

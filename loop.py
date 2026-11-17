@@ -62,6 +62,17 @@ def freeze_job(job_dir, started_at=None):
     if (job_dir / "job.jsonl").exists():
         raise gates.GateError("job.jsonl already exists; freeze runs once")
     _append(job_dir, "job-start", "edi-run", [], {"job": cfg["job"]})
+    seed = cfg.get("seed")
+    if seed:
+        sdir = gates.safe_rel(seed["dir"], job_dir)
+        if not sdir.is_dir():
+            raise gates.GateError(f"seed dir {seed['dir']} does not exist")
+        seed_files = sorted(str(f.relative_to(sdir)) for f in sdir.rglob("*") if f.is_file())
+        if seed_files != sorted(cfg["subjectFiles"]):
+            raise gates.GateError(f"seed must supply exactly subjectFiles {sorted(cfg['subjectFiles'])}; found {seed_files}")
+        if any(str(e["name"]).casefold() == str(seed["author"]).casefold() for e in cfg["evaluators"]):
+            raise gates.GateError("seed author cannot serve as Evaluator (CL1-6)")
+        _append(job_dir, "artifact-supplied", seed["author"], [sdir / f for f in cfg["subjectFiles"]], {"origin": seed.get("origin", ""), "note": seed.get("note", "")})
     bar_p = gates.safe_rel(cfg["bar"].get("file", "bar.md"), job_dir)
     if cfg["levelClaimed"] == "baseline":
         s_at = started_at or _append(job_dir, "work-started", cfg["maker"]["name"], [], {})["at"]
@@ -99,7 +110,7 @@ def freeze_job(job_dir, started_at=None):
                 if res.get("score") is None or float(res["score"]) >= float((d.get("scale") or {}).get("threshold", 4.0)):
                     raise gates.GateError(f"CL3 planted case did not fail on {ev['id']}/{d['id']} (CL3-1)")
                 demos.append({"dimension": d["id"], "evaluator": ev["id"], "planted": {"sha256": gates.sha256_file(p_case)}, "outcome": "does_not_conform", "at": custody_record.now()})
-    state = {"status": "frozen", "pins": pins, "startedAt": s_at, "frozenAt": ev_frz["at"], "demonstrations": demos, "incumbent_round": None, "incumbent_digest": None, "incumbent_scores": None, "last_candidate_digest": None, "defects": [], "solutions": [], "rounds": {}, "terminal_state": None, "reason": None, "cost_usd": 0.0}
+    state = {"status": "frozen", "pins": pins, "startedAt": s_at, "frozenAt": ev_frz["at"], "demonstrations": demos, "incumbent_round": None, "incumbent_digest": None, "incumbent_scores": None, "last_candidate_digest": None, "defects": [], "solutions": [], "rounds": {}, "terminal_state": None, "reason": None, "cost_usd": 0.0, "seed": {"dir": seed["dir"], "author": seed["author"]} if seed else None}
     (job_dir / "state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     return 0
 
@@ -229,24 +240,37 @@ def run_job(job_dir):
         (r_dir / "packet.json").write_text(json.dumps(pkt, indent=2) + "\n", encoding="utf-8")
         if state["incumbent_round"]:
             shutil.copytree(job_dir / "rounds" / f"round-{state['incumbent_round']:02d}" / "artifact", art_dir, dirs_exist_ok=True)
-        try:
-            mk = adapters.run_maker(cfg["maker"], r_dir / "packet.json", art_dir, cfg["subjectFiles"], job_dir, timeout=rem_s)
-            if isinstance(mk, dict) and mk.get("usage"):
-                _accrue(state, [{"evaluator": "maker", "model": cfg["maker"].get("model", {}).get("identifier") if isinstance(cfg["maker"].get("model"), dict) else None, "case": "maker", "usage": mk["usage"]}], pricing)
-        except (TimeoutError, subprocess.TimeoutExpired):
-            state.update(terminal_state="needs_owner", reason="cap_reached")
-            break
-        except gates.GateError:
-            raise  # integrity/security violations fail loud, never become dispositions
-        except Exception as e:  # Maker runtime crash is a halted run, not a traceback
-            state.update(terminal_state="needs_owner", reason="maker_failed", maker_error=str(e)[-300:])
-            break
+        maker_ran = True
+        if state.get("seed") and r == 1 and state["incumbent_round"] is None:
+            # Round 1 evaluates the Owner-supplied seed as-is: an unvalidated candidate,
+            # never credited to the Maker. If it already meets the bar, no Maker call is paid.
+            for f in cfg["subjectFiles"]:
+                dst = art_dir / f
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(job_dir / cfg["seed"]["dir"] / f, dst)
+            ev_prod = _append(job_dir, "artifact-produced", cfg["seed"]["author"], [art_dir / f for f in cfg["subjectFiles"]], {"seed": True})
+            maker_ran = False
+            state["seed_round"] = r
+        else:
+            try:
+                mk = adapters.run_maker(cfg["maker"], r_dir / "packet.json", art_dir, cfg["subjectFiles"], job_dir, timeout=rem_s)
+                if isinstance(mk, dict) and mk.get("usage"):
+                    _accrue(state, [{"evaluator": "maker", "model": cfg["maker"].get("model", {}).get("identifier") if isinstance(cfg["maker"].get("model"), dict) else None, "case": "maker", "usage": mk["usage"]}], pricing)
+            except (TimeoutError, subprocess.TimeoutExpired):
+                state.update(terminal_state="needs_owner", reason="cap_reached")
+                break
+            except gates.GateError:
+                raise  # integrity/security violations fail loud, never become dispositions
+            except Exception as e:  # Maker runtime crash is a halted run, not a traceback
+                state.update(terminal_state="needs_owner", reason="maker_failed", maker_error=str(e)[-300:])
+                break
         cand_digest = _subject_digest(art_dir, cfg["subjectFiles"], held_hashes)
         if cand_digest is None or cand_digest in (state["last_candidate_digest"], state["incumbent_digest"]):
             state.update(terminal_state="needs_owner", reason="no_artifact" if cand_digest is None else "dormant_channel")
             break
         state["last_candidate_digest"] = cand_digest
-        ev_prod = _append(job_dir, "artifact-produced", cfg["maker"]["name"], [art_dir / f for f in cfg["subjectFiles"]], {})
+        if maker_ran:
+            ev_prod = _append(job_dir, "artifact-produced", cfg["maker"]["name"], [art_dir / f for f in cfg["subjectFiles"]], {})
         checks, ctls, s_rows, exts, d_scores, defects, solutions, usages = _eval_batch(cfg, job_dir, r, art_dir, t0 + max_wall - wall_base)
         state["rounds"][str(r)] = {"producedAt": ev_prod["at"], "digest": cand_digest, "checks": checks, "controls": ctls, "scores": s_rows, "external": exts, "dim_scores": d_scores}
         _accrue(state, usages, pricing)
@@ -322,9 +346,10 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
     violations = [{"dimension": d["id"], "description": f"{d['id']} failed conform threshold"} for d in cfg["bar"]["dimensions"] if any(c["dimension"] == d["id"] and c["outcome"] == "does_not_conform" for c in checks)]
     disagreements = [{"dimension": d["id"], "checks": [i for i, c in enumerate(checks) if c["dimension"] == d["id"]], "note": "evaluators disagreed"} for d in cfg["bar"]["dimensions"] if len({c["outcome"] for c in checks if c["dimension"] == d["id"]}) > 1]
     evals_clean = [{k: v for k, v in e.items() if k in ("id", "name", "kind", "model", "script", "sameModelAsMaker")} for e in cfg["evaluators"]]
+    seed_author = cfg["seed"]["author"] if (cfg.get("seed") and st.get("seed_round") == int(win_r)) else None
     def _assemble():
         inputs = {"subject": {"dir": "artifact"}, "specVersion": cfg.get("specVersion", "0.9.8"), "levelClaimed": cfg["levelClaimed"], "bar": dict({k: v for k, v in cfg["bar"].items() if k != "file"}, frozenAt=st["frozenAt"]),
-                  "maker": {k: v for k, v in cfg["maker"].items() if k in ("name", "kind", "version", "method", "model")}, "startedAt": st["startedAt"], "producedAt": prod_at, "instrument": cfg["instrument"],
+                  "maker": ({"name": seed_author, "kind": "person", "version": cfg["seed"].get("origin", "owner-supplied"), "method": cfg["maker"]["method"], "model": None} if seed_author else {k: v for k, v in cfg["maker"].items() if k in ("name", "kind", "version", "method", "model")}), "startedAt": st["startedAt"], "producedAt": prod_at, "instrument": cfg["instrument"],
                   "evaluators": evals_clean, "checks": checks, "controls": win["controls"], "disagreements": disagreements, "violations": violations, "separationGaps": cfg.get("separationGaps", []),
                   "retention": cfg["retention"], "external": win["external"], "disposition": {"state": state, "by": by, "at": ev_disp["at"], "acknowledgesUnobserved": ack}}
         if cfg["levelClaimed"] in ("CL2", "CL3"):

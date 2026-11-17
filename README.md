@@ -21,6 +21,10 @@ python3 edi.py finalize <job_dir> --disposition given --by "Casey Park"
 python3 edi.py verify <job_dir>
 ```
 
+## Starting from an existing draft
+
+Set `seed` in `job.json` — `{"dir": "seed", "author": "Dana Voss", "origin": "Owner draft 2026-11-16"}` — where `seed/` contains exactly the `subjectFiles`. The draft is logged as `artifact-supplied` before the bar freezes, evaluated in round 1 like any candidate, and revised from there; a draft that already meets the bar finishes with zero Maker calls. The seed's author is recorded as the maker of record for that artifact and cannot serve as an Evaluator.
+
 ## Cost caps
 
 Jobs with model seats must carry a `pricing` map in `job.json` (`{"model-id": {"input_usd_per_mtok": X, "output_usd_per_mtok": Y}}` — a `"default"` entry is accepted); `freeze` refuses the job otherwise. Every model call — Maker, checks, and controls — accrues into `state.json` (`token_usage`, `cost_usd`) and the `max_cost_usd` cap is enforced. The two live examples ship with $0 placeholders so they freeze; fill in real rates before treating their cost figures as spend.
