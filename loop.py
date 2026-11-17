@@ -77,6 +77,14 @@ def freeze_job(job_dir, started_at=None):
         time.sleep(0.002)
         s_at = started_at or _append(job_dir, "work-started", cfg["maker"]["name"], [], {})["at"]
     gates.gate_freeze(cfg, job_dir, started_at=s_at)
+    model_ids = []
+    if cfg["maker"].get("kind") == "model":
+        model_ids.append((cfg["maker"].get("model") or {}).get("identifier") if isinstance(cfg["maker"].get("model"), dict) else cfg["maker"].get("model"))
+    model_ids += [(e.get("model") or {}).get("identifier") if isinstance(e.get("model"), dict) else e.get("model") for e in cfg["evaluators"] if e.get("kind") == "model"]
+    pricing_map = cfg.get("pricing", {})
+    missing = [m for m in model_ids if m and m not in pricing_map and "default" not in pricing_map]
+    if missing:
+        raise gates.GateError(f"missing pricing for model seat(s) {missing}; add a pricing map to job.json so the cost cap is enforceable")
     ho = job_dir / "held_out"
     if ho.is_dir():
         for f in ho.rglob("*"):
@@ -107,7 +115,7 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, deadline):
         for d in dims:
             did, thr = d["id"], float((scales[d["id"]] or {}).get("threshold", 4.0))
             for tag, path, exp in (("clean", clean_p, "conforms"), ("planted", planted_p, "does_not_conform")):
-                cid, res = f"K-{bid}-{ev_id}-{did}-{tag}", adapters.run_evaluator(ev, path, did, job_dir=job_dir, timeout=max(1.0, deadline - time.monotonic()), dim_cfg=d, rubric_txt=rub_txt)
+                cid, res = f"K-{bid}-{ev_id}-{did}-{tag}", adapters.run_evaluator(ev, path, did, job_dir=job_dir, timeout=max(1.0, deadline - time.time()), dim_cfg=d, rubric_txt=rub_txt)
                 sc = res.get("score")
                 if sc is None or not math.isfinite(float(sc)):
                     bad_dims.add(did)
@@ -119,11 +127,13 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, deadline):
                 controls.append(ctl)
                 scores_rows.append({"id": cid, "batch": bid, "evaluator": ev_id, "expected": exp, "score": sc_val, "threshold": thr})
                 _append(job_dir, "control", ev_id, [], ctl)
+                if ev["kind"] == "model" and res.get("_usage"):
+                    usages.append({"evaluator": ev_id, "model": ev.get("model", {}).get("identifier") if isinstance(ev.get("model"), dict) else ev.get("model"), "case": tag, "usage": res["_usage"]})
         for d in dims:
             did, sc_cfg = d["id"], scales[d["id"]]
             for run_i in range(1, int(ev.get("runs", 2 if cfg["levelClaimed"] in ("CL2", "CL3") else 1)) + 1):
                 har = job_dir / "evidence" / f"harness-{ev_id}-{bid}.json" if ev["kind"] == "model" and run_i == 1 else None
-                res = adapters.run_evaluator(ev, art_dir, did, job_dir=job_dir, harness_out=har, timeout=max(1.0, deadline - time.monotonic()), dim_cfg=d, rubric_txt=rub_txt)
+                res = adapters.run_evaluator(ev, art_dir, did, job_dir=job_dir, harness_out=har, timeout=max(1.0, deadline - time.time()), dim_cfg=d, rubric_txt=rub_txt)
                 if did in bad_dims or "unobserved" in res or res.get("score") is None:
                     u = res.get("unobserved") or {"channel": ev_id, "reason": "evaluator failed batch control (CL1-9)"}
                     chk = {"dimension": did, "evaluator": ev_id, "run": run_i, "batch": bid, "at": custody_record.now(), "outcome": "unobserved", "score": None, "failureCondition": f"score < {sc_cfg['threshold']}" if sc_cfg else d["criterion"], "evidence": None, "unobserved": u}
@@ -157,9 +167,20 @@ def _write_state(job_dir, state):
 
 def _cost_of(usage, pricing):
     u = usage or {}
-    pt, ct = float(u.get("prompt_tokens", 0) or 0), float(u.get("completion_tokens", 0) or 0)
-    rate = pricing.get("input_usd_per_mtok", 0.0), pricing.get("output_usd_per_mtok", 0.0)
-    return (pt * rate[0] + ct * rate[1]) / 1e6
+    rate_in, rate_out = float(pricing.get("input_usd_per_mtok", 0.0)), float(pricing.get("output_usd_per_mtok", 0.0))
+    if "prompt_tokens" in u or "completion_tokens" in u:
+        return (float(u.get("prompt_tokens", 0) or 0) * rate_in + float(u.get("completion_tokens", 0) or 0) * rate_out) / 1e6
+    # providers that report only a total: price it at the conservative (higher) rate
+    total = float(u.get("total_tokens", 0) or 0)
+    return total * max(rate_in, rate_out) / 1e6
+
+
+def _accrue(state, usages, pricing):
+    for u in usages:
+        key = u["model"] or u["evaluator"]
+        prev = state.get("token_usage", {}).get(key, {})
+        state["token_usage"] = {**state.get("token_usage", {}), key: {k: prev.get(k, 0) + v for k, v in u["usage"].items() if isinstance(v, (int, float))}}
+        state["cost_usd"] = round(state.get("cost_usd", 0.0) + _cost_of(u["usage"], pricing.get(key, pricing.get("default", {}))), 6)
 
 
 def _write_escalation(job_dir, state, cfg):
@@ -187,13 +208,17 @@ def run_job(job_dir):
         raise gates.GateError("frozen instruments modified after freeze (I-01/I-02)")
     if state.get("terminal_state"):
         raise gates.GateError(f"job already reached terminal state {state['terminal_state']} ({state.get('reason')}); run executes once")
-    max_rounds, max_wall, max_cost, t0 = int(cfg["bounds"]["max_rounds"]), float(cfg["bounds"]["max_wall_seconds"]), float(cfg["bounds"]["max_cost_usd"]), time.monotonic()
+    # time.time(), not monotonic: the budget must keep running while the box sleeps.
+    # Trade-off accepted and documented: an NTP step can move the budget once, which is
+    # the honest failure mode versus silently excluding suspended time.
+    max_rounds, max_wall, max_cost, t0 = int(cfg["bounds"]["max_rounds"]), float(cfg["bounds"]["max_wall_seconds"]), float(cfg["bounds"]["max_cost_usd"]), time.time()
     dims, floors = [d["id"] for d in cfg["bar"]["dimensions"]], {d["id"]: float(cfg.get("rejectFloor", (d.get("scale") or {}).get("floor", 0.0))) for d in cfg["bar"]["dimensions"]}
     held_hashes = {gates.sha256_file(p) for p in (job_dir / "held_out").rglob("*") if p.is_file()} if (job_dir / "held_out").is_dir() else set()
     pricing = cfg.get("pricing", {})
-    for r in range(1, max_rounds + 1):
+    try:
+      for r in range(1, max_rounds + 1):
         wall_base = float(state.get("wall_spent_seconds", 0.0))
-        rem_s = max_wall - wall_base - (time.monotonic() - t0)
+        rem_s = max_wall - wall_base - (time.time() - t0)
         if rem_s <= 0 or state.get("cost_usd", 0.0) >= max_cost:
             state.update(terminal_state="needs_owner", reason="cap_reached")
             break
@@ -205,7 +230,9 @@ def run_job(job_dir):
         if state["incumbent_round"]:
             shutil.copytree(job_dir / "rounds" / f"round-{state['incumbent_round']:02d}" / "artifact", art_dir, dirs_exist_ok=True)
         try:
-            adapters.run_maker(cfg["maker"], r_dir / "packet.json", art_dir, cfg["subjectFiles"], job_dir, timeout=rem_s)
+            mk = adapters.run_maker(cfg["maker"], r_dir / "packet.json", art_dir, cfg["subjectFiles"], job_dir, timeout=rem_s)
+            if isinstance(mk, dict) and mk.get("usage"):
+                _accrue(state, [{"evaluator": "maker", "model": cfg["maker"].get("model", {}).get("identifier") if isinstance(cfg["maker"].get("model"), dict) else None, "case": "maker", "usage": mk["usage"]}], pricing)
         except (TimeoutError, subprocess.TimeoutExpired):
             state.update(terminal_state="needs_owner", reason="cap_reached")
             break
@@ -222,10 +249,7 @@ def run_job(job_dir):
         ev_prod = _append(job_dir, "artifact-produced", cfg["maker"]["name"], [art_dir / f for f in cfg["subjectFiles"]], {})
         checks, ctls, s_rows, exts, d_scores, defects, solutions, usages = _eval_batch(cfg, job_dir, r, art_dir, t0 + max_wall - wall_base)
         state["rounds"][str(r)] = {"producedAt": ev_prod["at"], "digest": cand_digest, "checks": checks, "controls": ctls, "scores": s_rows, "external": exts, "dim_scores": d_scores}
-        for u in usages:
-            key = u["model"] or u["evaluator"]
-            state["token_usage"] = {**state.get("token_usage", {}), key: {k: state.get("token_usage", {}).get(key, {}).get(k, 0) + v for k, v in u["usage"].items() if isinstance(v, (int, float))}}
-            state["cost_usd"] = round(state.get("cost_usd", 0.0) + _cost_of(u["usage"], pricing.get(key, pricing.get("default", {}))), 6)
+        _accrue(state, usages, pricing)
         if any(c["outcome"] == "unobserved" for c in checks):
             if state["incumbent_round"] is None:
                 state.update(incumbent_round=r, incumbent_digest=cand_digest, incumbent_scores=d_scores)
@@ -245,12 +269,18 @@ def run_job(job_dir):
             state.update(terminal_state="accepted" if all(c["outcome"] == "conforms" for c in win_checks) else "needs_owner", reason="all_conform" if all(c["outcome"] == "conforms" for c in win_checks) else "cap_reached")
             break
         # wall clock never pauses: bank elapsed time before the next round
-        state["wall_spent_seconds"] = wall_base + (time.monotonic() - t0)
-        t0 = time.monotonic()
+        state["wall_spent_seconds"] = wall_base + (time.time() - t0)
+        t0 = time.time()
         _write_state(job_dir, state)
-    if state.get("terminal_state") == "needs_owner":
-        _write_escalation(job_dir, state, cfg)
-    (job_dir / "state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    except gates.GateError:
+        raise  # integrity/security violations fail loud
+    except Exception as e:  # any runtime defect still leaves a saved, named end state
+        state.update(terminal_state="needs_owner", reason="runtime_error", runtime_error=str(e)[-300:])
+    finally:
+        state["wall_spent_seconds"] = float(state.get("wall_spent_seconds", 0.0)) + (time.time() - t0)
+        if state.get("terminal_state") == "needs_owner":
+            _write_escalation(job_dir, state, cfg)
+        _write_state(job_dir, state)
     return {"accepted": 0, "rejected": 1, "needs_owner": 2}[state["terminal_state"]]
 
 

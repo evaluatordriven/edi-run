@@ -136,5 +136,15 @@
     "state": "given",
     "by": "Casey Park",
     "acknowledgesUnobserved": []
+  },
+  "pricing": {
+    "qwen/qwen3-32b": {
+      "input_usd_per_mtok": 0,
+      "output_usd_per_mtok": 0
+    },
+    "anthropic/claude-opus-5.5": {
+      "input_usd_per_mtok": 0,
+      "output_usd_per_mtok": 0
+    }
   }
 }

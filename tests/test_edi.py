@@ -40,7 +40,7 @@ class _MockLLMHandler(http.server.BaseHTTPRequestHandler):
         if "ROUND PACKET" in usr:
             reply = '```json\n{"files": {"memo.md": "# Header\\nFigure: 42% (Source: Q3, 2026-10-01)\\n"}}\n```'
         else:
-            score = 5.0 if ("# Header" in usr and "Source:" in usr) or ("# Header" in usr and '"id": "D1"' in usr) else 1.0
+            score = 1.0 if "No header and no figure" in usr else (5.0 if ("# Header" in usr and "Source:" in usr) or ("# Header" in usr and '"id": "D1"' in usr) else 1.0)
             reply = json.dumps({"score": score, "observation": "quoted text", "remedy": "fix it" if score < 4.0 else ""})
         resp = {"model": body.get("model", "mock-model"), "usage": {"total_tokens": 10}, "choices": [{"message": {"content": reply}}]}
         raw = json.dumps(resp).encode("utf-8")
@@ -521,20 +521,68 @@ class TestEDIRuntime(unittest.TestCase):
         leak.write_text(
             "import json, os, sys\n"
             "bad = [k for k in os.environ if any(s in k.upper() for s in ('KEY', 'TOKEN', 'SECRET', 'PASSWORD'))]\n"
-            "sys.stderr.write(','.join(bad))\n"
-            "print(json.dumps({'score': 5.0, 'observation': 'env checked', 'remedy': ''}))\n",
+            "print(json.dumps({'score': 5.0, 'observation': 'LEAK:' + ','.join(bad), 'remedy': ''}))\n",
             encoding="utf-8",
         )
         (self.tmp / "target.txt").write_text("# Header\n", encoding="utf-8")
         ev = {"id": "E9", "name": "Env Check", "kind": "script", "model": None, "script": {"name": "leak_eval.py", "author": "X", "digest": {"sha256": "0" * 64}}, "command": [sys.executable, str(leak)]}
         res = adapters.run_evaluator(ev, self.tmp / "target.txt", "D1")
         self.assertNotIn("unobserved", res)
+        self.assertEqual(res["observation"], "LEAK:")  # the script DID inspect its env and saw nothing
         # held_out locked down at freeze
         job = self._make_base_job(subdir="job_ho_mode")
         loop.freeze_job(job)
         ho = job / "held_out"
         self.assertEqual(oct(ho.stat().st_mode & 0o777), "0o700")
         self.assertEqual(oct((ho / "controls" / "clean.md").stat().st_mode & 0o777), "0o600")
+
+    def test_evaluator_crash_halts_cleanly_and_run_once(self):
+        # an evaluator that prints non-JSON must not traceback the run
+        job = self._make_base_job(subdir="job_evalcrash")
+        loop.freeze_job(job)
+        ev = job / "scripts" / "eval_e1.py"
+        ev.write_text("import sys\nsys.stdout.write('I am not json')\n", encoding="utf-8")
+        self.assertEqual(loop.run_job(job), 2)
+        st = json.loads((job / "state.json").read_text())
+        self.assertEqual((st["terminal_state"], st["reason"]), ("needs_owner", "no_observation"))
+        self.assertTrue((job / "escalation.json").is_file())
+        with self.assertRaises(gates.GateError):  # crashed run is still run-once
+            loop.run_job(job)
+
+    def test_pricing_required_at_freeze_and_full_cost_accounting(self):
+        # a job with model seats and no pricing map is refused at freeze
+        job = self._make_base_job(subdir="job_noprice")
+        cfg = json.loads((job / "job.json").read_text())
+        cfg["evaluators"] = [dict(cfg["evaluators"][0], kind="model", url="https://example.invalid/v1",
+                                  model={"family": "m", "identifier": "model-x", "endpoint": "example.invalid", "readOnly": True})]
+        (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        with self.assertRaises(gates.GateError):
+            loop.freeze_job(job)
+        # full accounting: mock-LLM job with pricing accrues maker + check + control usage
+        server = http.server.HTTPServer(("127.0.0.1", 0), _MockLLMHandler)
+        port = server.server_port
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        try:
+            job2 = self._make_base_job(subdir="job_priced")
+            cfg2 = json.loads((job2 / "job.json").read_text())
+            cfg2["pricing"] = {"default": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}}
+            url = f"http://127.0.0.1:{port}/v1/chat/completions"  # localhost http exempt
+            cfg2["maker"] = {"name": "HttpMaker", "kind": "model", "version": "1", "method": {"file": "method.md"},
+                             "url": url, "model": {"family": "mock", "identifier": "mock-1", "endpoint": "127.0.0.1", "readOnly": False}}
+            cfg2["evaluators"] = [{"id": "EH", "name": "HttpEval", "kind": "model", "url": url, "runs": 1,
+                                   "model": {"family": "mock", "identifier": "mock-eval", "endpoint": "127.0.0.1", "readOnly": True}}]
+            (job2 / "job.json").write_text(json.dumps(cfg2, indent=2), encoding="utf-8")
+            loop.freeze_job(job2)
+            self.assertEqual(loop.run_job(job2), 0)
+            st = json.loads((job2 / "state.json").read_text())
+            self.assertGreater(st["cost_usd"], 0.0)  # maker + checks + controls all metered
+            self.assertIn("mock-1", st["token_usage"])
+            self.assertIn("mock-eval", st["token_usage"])
+        finally:
+            _MockLLMHandler.mode = "ok"
+            server.shutdown()
+            server.server_close()
 
     def test_unit_post_freeze_instrument_tamper_detected(self):
         job_dir = self._make_base_job()
