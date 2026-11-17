@@ -23,6 +23,11 @@ jobs:
     # repeatedly killed queued jobs at ~15m with zero steps (2026-11-17). A local
     # runner picks up instantly and removes the queue from the critical path.
     runs-on: [self-hosted, macOS, ARM64]
+    env:
+      # setup-python defaults its tool cache to /Users/runner (the hosted-runner user);
+      # that home does not exist on this machine, so pin the cache to the runner dir.
+      RUNNER_TOOL_CACHE: /Users/smoitozo/actions-runner/_work/_tool
+      AGENT_TOOLSDIRECTORY: /Users/smoitozo/actions-runner/_work/_tool
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
