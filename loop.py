@@ -59,7 +59,7 @@ def freeze_job(job_dir, started_at=None):
     gates.gate_bounds(cfg)
     gates.gate_seats(cfg, job_dir)
     model_ids = []
-    if cfg["maker"].get("kind") == "model":
+    if cfg["maker"].get("kind") in ("model", "agent"):
         model_ids.append((cfg["maker"].get("model") or {}).get("identifier") if isinstance(cfg["maker"].get("model"), dict) else cfg["maker"].get("model"))
     model_ids += [(e.get("model") or {}).get("identifier") if isinstance(e.get("model"), dict) else e.get("model") for e in cfg["evaluators"] if e.get("kind") == "model"]
     pricing_map = cfg.get("pricing", {})
@@ -272,7 +272,12 @@ def run_job(job_dir):
             try:
                 mk = adapters.run_maker(cfg["maker"], r_dir / "packet.json", art_dir, cfg["subjectFiles"], job_dir, timeout=rem_s)
                 if isinstance(mk, dict) and mk.get("usage"):
-                    _accrue(state, [{"evaluator": "maker", "model": cfg["maker"].get("model", {}).get("identifier") if isinstance(cfg["maker"].get("model"), dict) else None, "case": "maker", "usage": mk["usage"]}], pricing)
+                    mk_id = cfg["maker"].get("model", {}).get("identifier") if isinstance(cfg["maker"].get("model"), dict) else None
+                    if "agent_calls" in mk["usage"]:
+                        rows = [{"evaluator": "maker", "model": c.get("model") or mk_id, "case": "agent", "usage": c.get("usage") or {}} for c in mk["usage"]["agent_calls"]]
+                    else:
+                        rows = [{"evaluator": "maker", "model": mk_id, "case": "maker", "usage": mk["usage"]}]
+                    _accrue(state, rows, pricing)
             except (TimeoutError, subprocess.TimeoutExpired):
                 state.update(terminal_state="needs_owner", reason="cap_reached")
                 break
@@ -372,7 +377,7 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
     seed_author = cfg["seed"]["author"] if (cfg.get("seed") and st.get("seed_round") == int(win_r)) else None
     def _assemble():
         inputs = {"subject": {"dir": "artifact"}, "specVersion": cfg.get("specVersion", "0.9.8"), "levelClaimed": cfg["levelClaimed"], "bar": dict({k: v for k, v in cfg["bar"].items() if k != "file"}, frozenAt=st["frozenAt"]),
-                  "maker": ({"name": seed_author, "kind": "person", "version": cfg["seed"].get("origin", "owner-supplied"), "method": cfg["maker"]["method"], "model": None} if seed_author else {k: v for k, v in cfg["maker"].items() if k in ("name", "kind", "version", "method", "model")}), "startedAt": st["startedAt"], "producedAt": prod_at, "instrument": cfg["instrument"],
+                  "maker": ({"name": seed_author, "kind": "person", "version": cfg["seed"].get("origin", "owner-supplied"), "method": cfg["maker"]["method"], "model": None} if seed_author else {**{k: v for k, v in cfg["maker"].items() if k in ("name", "kind", "version", "method", "model")}, **({"kind": "model"} if cfg["maker"].get("kind") == "agent" else {})}), "startedAt": st["startedAt"], "producedAt": prod_at, "instrument": cfg["instrument"],
                   "evaluators": evals_clean, "checks": checks, "controls": win["controls"], "disagreements": disagreements, "violations": violations, "separationGaps": cfg.get("separationGaps", []),
                   "retention": cfg["retention"], "external": win["external"], "disposition": {"state": state, "by": by, "at": ev_disp["at"], "acknowledgesUnobserved": ack}}
         if cfg["levelClaimed"] in ("CL2", "CL3"):
