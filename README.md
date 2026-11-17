@@ -21,6 +21,12 @@ python3 edi.py finalize <job_dir> --disposition given --by "Casey Park"
 python3 edi.py verify <job_dir>
 ```
 
+## Doctrine conformance
+
+edi-run implements `evaluatordriven/doctrine` **v0.2.1** (ratified 2026-11-02). Notable rule implementations: a verdict rests on at least two scored runs per dimension (D4.5; freeze refuses fewer); the next round's packet carries every known defect with the round that measured it, and any packet text matching held-out material is replaced with `[withheld: matches held-out material]` and counted (D4.9 — held-out material is filtered out of the Maker's input, never fatal); `escalation.json` carries what was tried (`tried`) and why no observable answer exists (`why`, D4.11); a gate refusal mid-run halts as `integrity_error`, never mislabelled as an interruption.
+
+Agent Makers at every level require `maker.sandbox` (`{"type": "sandbox-exec"}` on macOS, `{"type": "bwrap"}` on Linux) — the runtime itself launches the agent under that confinement, denying `held_out/`, the custody log, scores, evidence, and secret files (including `~/.hermes/.env`); freeze refuses if the sandbox type is unavailable on the host. The agent's model calls go through the loop-hosted proxy, which answers 403 to any model other than the declared `maker.model.identifier` (logged, never metered; the full proxy log persists beside the round as `proxy-usage.jsonl`). Disclosed limits: the needle-based held-out filter catches contiguous fragments (including case and whitespace variants), not paraphrases; a keyless open endpoint named in `maker.url` remains a theoretical exfiltration channel for a hostile agent, since the sandbox cannot distinguish it from the proxy's loopback traffic.
+
 ## Maker seats
 
 Three Maker kinds in `job.json`:
@@ -49,6 +55,8 @@ A run that halts without a Pareto-best artifact, or whose record assembly fails,
 ## CI
 
 GitHub Actions runs the suite on ubuntu (3.10, 3.12) and macOS (3.12). The macOS matrix is a single leg on purpose: the hosted macOS runner queue has repeatedly cancelled queued jobs at ~15 minutes with zero steps executed, and fewer macOS legs means fewer queue rolls. Every macOS failure to date has been a queue kill, not a test failure.
+
+Note: the `live-llm-job` example's committed record predates the two-scored-runs rule (D4.5) and still verifies under the current checker; regenerating it requires paid model calls and is pending Owner approval. Its `job.json` already carries the conforming `runs: 2`.
 
 ## Verification & Tests
 

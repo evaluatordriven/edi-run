@@ -1,5 +1,5 @@
 """Seat execution adapters (script subprocess + stdlib OpenAI-compatible HTTP client). Standard library only."""
-import http.server, json, os, pathlib, re, shutil, subprocess, tempfile, threading, urllib.parse, urllib.request
+import http.server, json, os, pathlib, re, shutil, subprocess, tempfile, threading, urllib.error, urllib.parse, urllib.request
 import gates
 
 
@@ -33,11 +33,47 @@ def _chat_json(url, model_id, sys_prompt, user_prompt, key_env="OPENROUTER_API_K
     return json.loads(m.group(1) if m else txt), host, raw
 
 
+def sandbox_prefix(stype, jd, sb_p):
+    """The sandbox argv prefix for one launch, shared by the launcher and the
+    capability probe so the probe exercises the exact flag shape used at runtime."""
+    if stype == "sandbox-exec":
+        profile = sb_p / "agent.sb"
+        return ["sandbox-exec", "-f", str(profile)]
+    if stype == "bwrap":
+        cmd = ["bwrap", "--die-with-parent", "--unshare-pid", "--dev-bind", "/", "/",
+               "--tmpfs", str(jd)]
+        if (jd / "scripts").is_dir():
+            cmd += ["--ro-bind", str(jd / "scripts"), str(jd / "scripts")]
+        cmd += ["--tmpfs", str(pathlib.Path.home() / ".ssh"),
+                "--ro-bind", "/dev/null", str(pathlib.Path.home() / ".hermes" / ".env"),
+                "--bind", str(sb_p), str(sb_p)]
+        return cmd
+    return None
+
+
+def sandbox_usable(stype, jd=None, sb_p=None):
+    """True when the declared sandbox can actually launch here, not merely when the
+    binary exists (Ubuntu hosted runners ship bwrap but forbid user namespaces).
+    Probes with the real flag shape via sandbox_prefix."""
+    if stype == "sandbox-exec":
+        return bool(shutil.which("sandbox-exec"))
+    if stype == "bwrap":
+        if not shutil.which("bwrap"):
+            return False
+        with tempfile.TemporaryDirectory(prefix="edi_bwrap_probe_") as pd:
+            probe_jd, probe_sb = pathlib.Path(pd) / "job", pathlib.Path(pd) / "sb"
+            probe_jd.mkdir(), probe_sb.mkdir()
+            probe = subprocess.run(sandbox_prefix(stype, probe_jd, probe_sb) + ["true"],
+                                   capture_output=True, timeout=30)
+            return probe.returncode == 0
+    return False
+
+
 def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: float = 60):
     mk_usage = None
     out_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="edi_maker_") as sb:
-        sb_p, sb_art = pathlib.Path(sb), pathlib.Path(sb) / "artifact"
+        sb_p, sb_art = pathlib.Path(sb).resolve(), pathlib.Path(sb).resolve() / "artifact"
         sb_art.mkdir()
         for sf in (sf for sf in subject_files if gates.safe_rel(sf, out_dir).is_file()):
             dst = gates.safe_rel(sf, sb_art)
@@ -61,9 +97,19 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 def do_POST(self):
                     body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
                     req = json.loads(body.decode("utf-8")) if body else {}
+                    declared = (maker_cfg.get("model") or {}).get("identifier")
+                    if req.get("model") != declared:
+                        calls.append({"host": None, "model": req.get("model"), "usage": None, "refused": "undeclared model"})
+                        self.send_response(403)
+                        self.end_headers()
+                        return
                     headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})}
-                    with urllib.request.urlopen(urllib.request.Request(upstream, data=body, headers=headers, method="POST"), timeout=max(1.0, float(timeout))) as resp:
-                        out, host = resp.read(), urllib.parse.urlparse(resp.geturl()).hostname or ""
+                    try:
+                        with urllib.request.urlopen(urllib.request.Request(upstream, data=body, headers=headers, method="POST"), timeout=max(1.0, float(timeout))) as resp:
+                            out, host = resp.read(), urllib.parse.urlparse(resp.geturl()).hostname or ""
+                    except urllib.error.HTTPError as e:
+                        calls.append({"host": urllib.parse.urlparse(upstream).hostname, "model": req.get("model"), "usage": None, "upstream_error": e.code})
+                        out = json.dumps({"error": {"code": e.code}}).encode("utf-8")
                     try:
                         resp_json = json.loads(out.decode("utf-8"))
                         calls.append({"host": host, "model": req.get("model"), "usage": resp_json.get("usage")})
@@ -81,12 +127,47 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(sb_p), "LANG": os.environ.get("LANG", "en_US.UTF-8"),
                        "AGENT_PROXY_URL": f"http://127.0.0.1:{srv.server_port}/v1/chat/completions", "AGENT_MODEL": maker_cfg.get("model", {}).get("identifier", "")}
                 cmd = _resolve_cmd(list(maker_cfg["command"]), job_dir)
+                stype = (maker_cfg.get("sandbox") or {}).get("type")
+                jd = pathlib.Path(job_dir).resolve()  # seatbelt matches canonical paths only
+                home = pathlib.Path.home()
+                if stype not in ("sandbox-exec", "bwrap"):
+                    raise gates.GateError(f"unknown sandbox type {stype}; supported: sandbox-exec (macOS), bwrap (Linux)")
+                if stype == "sandbox-exec":
+                    q = chr(34)  # seatbelt profiles quote paths with double quotes
+                    # Reads: default-allow except held-out material, the custody/evidence files
+                    # (the Maker works from the packet, not the log), and secret files.
+                    # Writes: confined to the agent workspace. Network stays open so the agent
+                    # can reach the local proxy; it holds no key and the proxy rejects
+                    # undeclared models (keyless-open-endpoint exfil is a disclosed limit).
+                    (sb_p / "agent.sb").write_text(
+                        "(version 1)(allow default)\n"
+                        "(deny file-write*)\n"
+                        f"(allow file-write* (subpath {q}{sb_p}{q}))\n"
+                        f"(deny file-read* (subpath {q}{jd / 'held_out'}{q}))\n"
+                        f"(deny file-read* (subpath {q}{jd / 'evidence'}{q}))\n"
+                        f"(deny file-read* (literal {q}{jd / 'job.jsonl'}{q}))\n"
+                        f"(deny file-read* (literal {q}{jd / 'scores.jsonl'}{q}))\n"
+                        f"(deny file-read* (literal {q}{jd / 'job.json'}{q}))\n"
+                        f"(deny file-read* (subpath {q}{home / '.ssh'}{q}))\n"
+                        f"(deny file-read* (literal {q}{home / '.hermes' / '.env'}{q}))\n",
+                        encoding="utf-8")
+                # bwrap: keep the network namespace (the agent must reach the loop-local
+                # proxy); the whole job dir is masked with a tmpfs -- held_out, evidence,
+                # and the custody files live inside it -- then the agent's own scripts
+                # subtree is bound back read-only. The packet is read from the workspace copy.
+                cmd = (sandbox_prefix(stype, jd, sb_p) or []) + cmd
                 proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
                 if proc.returncode != 0:
-                    raise RuntimeError(f"Agent Maker failed ({proc.returncode}): {proc.stderr.strip()}")
+                    raise RuntimeError(f"Agent Maker failed ({proc.returncode}): {proc.stderr.strip()} | cmd[0:4]={cmd[:4]}")
                 if not any(gates.safe_rel(sf, sb_art).is_file() for sf in subject_files):
                     raise RuntimeError("Agent Maker returned no subject files")
                 mk_usage = {"agent_calls": calls}  # metered per-call by the loop
+                round_dir = pathlib.Path(out_dir).resolve().parent.parent
+                if round_dir.is_dir():
+                    # accumulate, not clobber: every round's proxy log must survive for audit
+                    with (round_dir / "proxy-usage.jsonl").open("a", encoding="utf-8") as f:
+                        for c in calls:
+                            f.write(json.dumps(c) + "\n")
             finally:
                 srv.shutdown()
                 srv.server_close()

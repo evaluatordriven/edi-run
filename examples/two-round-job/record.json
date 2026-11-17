@@ -16,7 +16,7 @@
       "digest": {
         "sha256": "d572545a4dfb3f63d1a104930e96e53d01b8c7015ec78c42ba978fcb26e1117e"
       },
-      "frozenAt": "2026-11-17T00:01:31.786643Z",
+      "frozenAt": "2026-11-17T19:57:09.049940Z",
       "author": "Jordan Blake",
       "dimensions": [
         {
@@ -48,7 +48,7 @@
         {
           "role": "buyer",
           "by": "Casey Park",
-          "at": "2026-11-17T00:01:31.787664Z",
+          "at": "2026-11-17T19:57:09.051360Z",
           "barDigest": {
             "sha256": "d572545a4dfb3f63d1a104930e96e53d01b8c7015ec78c42ba978fcb26e1117e"
           },
@@ -57,7 +57,7 @@
         {
           "role": "specialist",
           "by": "Riley Moss",
-          "at": "2026-11-17T00:01:31.788620Z",
+          "at": "2026-11-17T19:57:09.053137Z",
           "barDigest": {
             "sha256": "d572545a4dfb3f63d1a104930e96e53d01b8c7015ec78c42ba978fcb26e1117e"
           },
@@ -77,8 +77,8 @@
       },
       "model": null
     },
-    "startedAt": "2026-11-17T00:01:31.791957Z",
-    "producedAt": "2026-11-17T00:01:35.195664Z",
+    "startedAt": "2026-11-17T19:57:09.065115Z",
+    "producedAt": "2026-11-17T19:57:11.197653Z",
     "instrument": {
       "rubric": {
         "sha256": "cc53dfc9ebe9dc704fbf781dae33383e1cdcf2d40d3a289c21ee9e658ac854c0"
@@ -104,7 +104,7 @@
     ],
     "checks": [
       {
-        "at": "2026-11-17T00:01:35.201868Z",
+        "at": "2026-11-17T19:57:12.446182Z",
         "batch": "B2",
         "dimension": "D1",
         "evaluator": "E1",
@@ -119,7 +119,22 @@
         "unobserved": null
       },
       {
-        "at": "2026-11-17T00:01:35.206934Z",
+        "at": "2026-11-17T19:57:12.687825Z",
+        "batch": "B2",
+        "dimension": "D1",
+        "evaluator": "E1",
+        "evidence": {
+          "name": "reading-D1-E1-r2-run2.json",
+          "sha256": "5b0d3eceeec786ef13cba080265dba55d2c56fc6b3b93408e96bcaf1a65b4bbf"
+        },
+        "failureCondition": "score < 4.0",
+        "outcome": "conforms",
+        "run": 2,
+        "score": 5.0,
+        "unobserved": null
+      },
+      {
+        "at": "2026-11-17T19:57:12.926563Z",
         "batch": "B2",
         "dimension": "D2",
         "evaluator": "E1",
@@ -132,6 +147,21 @@
         "run": 1,
         "score": 5.0,
         "unobserved": null
+      },
+      {
+        "at": "2026-11-17T19:57:13.191815Z",
+        "batch": "B2",
+        "dimension": "D2",
+        "evaluator": "E1",
+        "evidence": {
+          "name": "reading-D2-E1-r2-run2.json",
+          "sha256": "d82e516025114499c87c7aca492c4150cb1f08f67a6313490b8f5437de000f84"
+        },
+        "failureCondition": "score < 4.0",
+        "outcome": "conforms",
+        "run": 2,
+        "score": 5.0,
+        "unobserved": null
       }
     ],
     "controls": [
@@ -142,8 +172,8 @@
         },
         "dimension": "D1",
         "evaluator": "E1",
-        "id": "K-B2-E1-D1-clean",
         "expected": "conforms",
+        "id": "K-B2-E1-D1-clean",
         "outcome": "conforms"
       },
       {
@@ -153,8 +183,8 @@
         },
         "dimension": "D1",
         "evaluator": "E1",
-        "id": "K-B2-E1-D1-planted",
         "expected": "does_not_conform",
+        "id": "K-B2-E1-D1-planted",
         "outcome": "does_not_conform"
       },
       {
@@ -164,8 +194,8 @@
         },
         "dimension": "D2",
         "evaluator": "E1",
-        "id": "K-B2-E1-D2-clean",
         "expected": "conforms",
+        "id": "K-B2-E1-D2-clean",
         "outcome": "conforms"
       },
       {
@@ -175,8 +205,8 @@
         },
         "dimension": "D2",
         "evaluator": "E1",
-        "id": "K-B2-E1-D2-planted",
         "expected": "does_not_conform",
+        "id": "K-B2-E1-D2-planted",
         "outcome": "does_not_conform"
       }
     ],
@@ -192,7 +222,7 @@
       "acknowledgesUnobserved": [],
       "state": "given",
       "by": "Casey Park",
-      "at": "2026-11-17T00:01:35.227255Z"
+      "at": "2026-11-17T19:57:13.257085Z"
     }
   }
 }

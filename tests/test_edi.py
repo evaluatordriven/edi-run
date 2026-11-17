@@ -17,6 +17,26 @@ import gates  # noqa: E402
 import loop  # noqa: E402
 import check as custody_check  # vendored custody checker; resolves via loop.py's vendor path insert  # noqa: E402
 
+def _sandbox_type():
+    if sys.platform == "darwin" and shutil.which("sandbox-exec"):
+        return "sandbox-exec"
+    if sys.platform.startswith("linux") and shutil.which("bwrap"):
+        # bwrap needs unprivileged user namespaces; some hosts (Ubuntu hosted runners)
+        # ship the binary but forbid them. Probe with the same flag shape the real
+        # sandbox uses (tmpfs mounts included), and show the probe stderr on failure.
+        with tempfile.TemporaryDirectory(prefix="edi_bwrap_probe_") as pd:
+            probe = subprocess.run(
+                ["bwrap", "--die-with-parent", "--unshare-pid", "--dev-bind", "/", "/",
+                 "--tmpfs", pd, "true"],
+                capture_output=True, timeout=30)
+            if probe.returncode == 0:
+                return "bwrap"
+            print("bwrap probe failed:", probe.stderr.decode()[:200], flush=True)
+    return None
+
+
+_SANDBOX_TYPE = _sandbox_type()
+
 
 def sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
@@ -176,7 +196,7 @@ class TestEDIRuntime(unittest.TestCase):
                         "digest": {"sha256": sha256_bytes(eval_script.read_bytes())},
                     },
                     "command": [sys.executable, str(eval_script)],
-                    "runs": 2 if level in ("CL2", "CL3") else 1,
+                    "runs": 2,
                 }
             ],
             "controls": {"clean": "held_out/controls/clean.md", "planted": "held_out/controls/planted.md"},
@@ -570,7 +590,7 @@ class TestEDIRuntime(unittest.TestCase):
             url = f"http://127.0.0.1:{port}/v1/chat/completions"  # localhost http exempt
             cfg2["maker"] = {"name": "HttpMaker", "kind": "model", "version": "1", "method": {"file": "method.md"},
                              "url": url, "model": {"family": "mock", "identifier": "mock-1", "endpoint": "127.0.0.1", "readOnly": False}}
-            cfg2["evaluators"] = [{"id": "EH", "name": "HttpEval", "kind": "model", "url": url, "runs": 1,
+            cfg2["evaluators"] = [{"id": "EH", "name": "HttpEval", "kind": "model", "url": url, "runs": 2,
                                    "model": {"family": "mock", "identifier": "mock-eval", "endpoint": "127.0.0.1", "readOnly": True}}]
             (job2 / "job.json").write_text(json.dumps(cfg2, indent=2), encoding="utf-8")
             loop.freeze_job(job2)
@@ -707,6 +727,8 @@ class TestEDIRuntime(unittest.TestCase):
             loop.run_job(job)
 
     def test_agent_maker_proxy_key_and_metering(self):
+        if _SANDBOX_TYPE is None:
+            self.skipTest("no OS sandbox available on this host")
         # The agent Maker calls models only through the local proxy: no key in its env,
         # every upstream call metered, files handed back like a chat Maker's.
         server = http.server.HTTPServer(("127.0.0.1", 0), _MockLLMHandler)
@@ -738,6 +760,7 @@ class TestEDIRuntime(unittest.TestCase):
             cfg["maker"] = {"name": "Agent Maker", "kind": "agent", "version": "1.0.0", "method": {"file": "method.md"},
                             "url": f"http://127.0.0.1:{port}/v1/chat/completions",
                             "model": {"family": "mock", "identifier": "mock-agent", "endpoint": "127.0.0.1", "readOnly": False},
+                            "sandbox": {"type": _SANDBOX_TYPE},
                             "command": [sys.executable, str(agent)]}
             (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
             loop.freeze_job(job)
@@ -757,6 +780,8 @@ class TestEDIRuntime(unittest.TestCase):
             server.server_close()
 
     def test_agent_maker_failures(self):
+        if _SANDBOX_TYPE is None:
+            self.skipTest("no OS sandbox available on this host")
         # nonzero exit and empty output both halt as maker_failed; timeout kills
         job = self._make_base_job(subdir="job_agent_fail")
         agent = job / "scripts" / "agent_fail.py"
@@ -764,6 +789,7 @@ class TestEDIRuntime(unittest.TestCase):
         cfg = json.loads((job / "job.json").read_text())
         cfg["maker"] = {"name": "Agent Maker", "kind": "agent", "version": "1", "method": {"file": "method.md"},
                         "url": "https://example.invalid/v1", "model": {"family": "m", "identifier": "m1", "endpoint": "example.invalid", "readOnly": False},
+                        "sandbox": {"type": _SANDBOX_TYPE},
                         "command": [sys.executable, str(agent)]}
         cfg["pricing"] = {"default": {"input_usd_per_mtok": 0, "output_usd_per_mtok": 0}}
         (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
@@ -813,7 +839,7 @@ class TestEDIRuntime(unittest.TestCase):
         cfg["evaluators"].append({
             "id": "E2", "name": "SecondEval", "kind": "script", "model": None,
             "script": {"name": "eval_e2.py", "author": "Samira Patel", "digest": {"sha256": sha256_bytes(eval_s2.read_bytes())}},
-            "command": [sys.executable, str(eval_s2), "--always-low"], "runs": 1,
+            "command": [sys.executable, str(eval_s2), "--always-low"], "runs": 2,
         })
         (job_dis / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         loop.freeze_job(job_dis)

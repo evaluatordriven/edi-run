@@ -3,5 +3,6 @@
   "mode": "pass_r2",
   "best_artifact_digest": null,
   "defects": [],
-  "workable_solutions": []
+  "workable_solutions": [],
+  "withheld": 0
 }

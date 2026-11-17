@@ -123,6 +123,7 @@ def freeze_job(job_dir, started_at=None):
 
 
 def _eval_batch(cfg, job_dir, round_n, art_dir, deadline):
+    (job_dir / "evidence").mkdir(parents=True, exist_ok=True)
     bid, dims = f"B{round_n}", cfg["bar"]["dimensions"]
     scales, ordered = {d["id"]: d.get("scale") for d in dims}, sorted(cfg["evaluators"], key=lambda e: 0 if e["kind"] == "script" else 1)
     checks, controls, scores_rows, externals, per_dim, defects, solutions, usages = [], [], [], [], {d["id"]: [] for d in dims}, [], [], []
@@ -149,7 +150,7 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, deadline):
                     usages.append({"evaluator": ev_id, "model": ev.get("model", {}).get("identifier") if isinstance(ev.get("model"), dict) else ev.get("model"), "case": tag, "usage": res["_usage"]})
         for d in dims:
             did, sc_cfg = d["id"], scales[d["id"]]
-            for run_i in range(1, int(ev.get("runs", 2 if cfg["levelClaimed"] in ("CL2", "CL3") else 1)) + 1):
+            for run_i in range(1, int(ev.get("runs", 2)) + 1):
                 har = job_dir / "evidence" / f"harness-{ev_id}-{bid}.json" if ev["kind"] == "model" and run_i == 1 else None
                 res = adapters.run_evaluator(ev, art_dir, did, job_dir=job_dir, harness_out=har, timeout=max(1.0, deadline - time.time()), dim_cfg=d, rubric_txt=rub_txt)
                 if did in bad_dims or "unobserved" in res or res.get("score") is None:
@@ -164,7 +165,7 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, deadline):
                     chk = {"dimension": did, "evaluator": ev_id, "run": run_i, "batch": bid, "at": custody_record.now(), "outcome": out, "score": score, "failureCondition": f"score < {sc_cfg['threshold']}", "evidence": {"name": ev_name, "sha256": gates.sha256_file(job_dir / "evidence" / ev_name)}, "unobserved": None, **({"endpoint": res["_endpoint"]} if res.get("_endpoint") else {})}
                     per_dim[did].append(score)
                     if out == "does_not_conform":
-                        defects.append({"dimension": did, "evaluator": ev_id, "score": score, "observation": res.get("observation", ""), "remedy": res.get("remedy", "")})
+                        defects.append({"round": round_n, "dimension": did, "evaluator": ev_id, "score": score, "observation": res.get("observation", ""), "remedy": res.get("remedy", "")})
                     else:
                         solutions.append({"dimension": did, "evaluator": ev_id, "score": score, "round": round_n})
                 chk["at"] = _append(job_dir, "check", ev_id, [], chk)["at"]
@@ -211,23 +212,41 @@ def _write_escalation(job_dir, state, cfg):
             "maker_failed": [("fix-maker", "The Maker command failed; state.json maker_error has the stderr tail"), ("abandon", "Finalize with --disposition declined")],
             "interrupted": [("inspect-state", "The run was interrupted (Ctrl-C or SIGTERM); the log holds every completed event"), ("abandon", "Finalize with --disposition declined")],
             "runtime_error": [("inspect-state", "A runtime defect halted the job; state.json runtime_error has the detail"), ("abandon", "Finalize with --disposition declined")],
+            "integrity_error": [("inspect-state", "A gate refused to continue; state.json integrity_error names the check and why"), ("abandon", "Finalize with --disposition declined")],
             "all_conform": [("finalize", "Finalize with --disposition given to bind the Owner disposition")]}
-    rec = {"terminalState": state.get("terminal_state"), "reason": reason, "incumbentRound": state.get("incumbent_round"),
+    rounds = state.get("rounds", {})
+    tried = [{"round": int(k), "digest": v["digest"], "dimScores": v["dim_scores"]} for k, v in sorted(rounds.items(), key=lambda kv: int(kv[0]))]
+    why = {"reason": reason, "detail": state.get("integrity_error") or state.get("maker_error") or state.get("runtime_error")}
+    if reason == "dimension_tradeoff" and len(tried) >= 2 and state.get("incumbent_scores"):
+        inc_s, last = state["incumbent_scores"], tried[-1]["dimScores"]
+        why.update(improved=[d for d in last if last[d] > inc_s[d]], regressed=[d for d in last if last[d] < inc_s[d]])
+    if reason == "no_observation":
+        why["unobserved"] = sorted({(c["evaluator"], c["dimension"]) for v in rounds.values() for c in v["checks"] if c["outcome"] == "unobserved"})
+    rec = {"terminalState": state.get("terminal_state"), "reason": reason, "incumbentRound": state.get("incumbent_round"), "tried": tried, "why": why,
            "options": [{"id": o[0], "action": o[1]} for o in opts.get(reason, [("inspect-state", "Read state.json and evidence/ before deciding")])],
            "recommendation": {"cap_reached": "accept-incumbent if the incumbent meets the bar on inspection, else raise-bounds",
                               "no_observation": "inspect-evidence first; accept-incumbent only with explicit --ack-unobserved",
                               "no_artifact": "fix-maker", "dormant_channel": "vary-method", "dimension_tradeoff": "owner-ruling",
-                              "maker_failed": "fix-maker", "interrupted": "inspect-state", "runtime_error": "inspect-state", "all_conform": "finalize"}.get(reason, "inspect-state")}
+                              "maker_failed": "fix-maker", "interrupted": "inspect-state", "runtime_error": "inspect-state", "integrity_error": "inspect-state", "all_conform": "finalize"}.get(reason, "inspect-state")}
     (job_dir / "escalation.json").write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
 
 
 def run_job(job_dir):
     job_dir = pathlib.Path(job_dir).resolve()
     cfg, state = json.loads((job_dir / "job.json").read_text(encoding="utf-8")), json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
-    if gates.gate_instruments(cfg, job_dir) != state["pins"]:
-        raise gates.GateError("frozen instruments modified after freeze (I-01/I-02)")
-    if state.get("terminal_state"):
-        raise gates.GateError(f"job already reached terminal state {state['terminal_state']} ({state.get('reason')}); run executes once")
+    try:
+        if gates.gate_instruments(cfg, job_dir) != state["pins"]:
+            raise gates.GateError("frozen instruments modified after freeze (I-01/I-02)")
+        if state.get("terminal_state"):
+            raise gates.GateError(f"job already reached terminal state {state['terminal_state']} ({state.get('reason')}); run executes once")
+    except gates.GateError as e:
+        if not state.get("terminal_state"):
+            # D4.11: a pre-run integrity refusal leaves a named end state and an escalation
+            # package. An already-terminal job keeps its recorded end state untouched.
+            state.update(terminal_state="needs_owner", reason="integrity_error", integrity_error=str(e)[-300:])
+            _write_escalation(job_dir, state, cfg)
+            _write_state(job_dir, state)
+        raise
     # time.time(), not monotonic: the budget must keep running while the box sleeps.
     # Trade-off accepted and documented: an NTP step can move the budget once, which is
     # the honest failure mode versus silently excluding suspended time.
@@ -249,7 +268,10 @@ def run_job(job_dir):
             break
         r_dir, art_dir = job_dir / "rounds" / f"round-{r:02d}", job_dir / "rounds" / f"round-{r:02d}" / "artifact"
         r_dir.mkdir(parents=True, exist_ok=True)
-        pkt = {"round": r, "mode": cfg.get("mode", "pass_r2"), "best_artifact_digest": state["incumbent_digest"], "defects": state["defects"], "workable_solutions": state["solutions"]}
+        needles = gates.held_out_needles(job_dir)
+        pk_def, w1 = gates.scrub_held_out(list(state["defects"]) + list(state.get("rejected_defects", [])), needles)
+        pk_sol, w2 = gates.scrub_held_out(state["solutions"], needles)
+        pkt = {"round": r, "mode": cfg.get("mode", "pass_r2"), "best_artifact_digest": state["incumbent_digest"], "defects": pk_def, "workable_solutions": pk_sol, "withheld": w1 + w2}
         gates.gate_packet(pkt, job_dir, state["incumbent_digest"])
         (r_dir / "packet.json").write_text(json.dumps(pkt, indent=2) + "\n", encoding="utf-8")
         if state["incumbent_round"]:
@@ -274,7 +296,7 @@ def run_job(job_dir):
                 if isinstance(mk, dict) and mk.get("usage"):
                     mk_id = cfg["maker"].get("model", {}).get("identifier") if isinstance(cfg["maker"].get("model"), dict) else None
                     if "agent_calls" in mk["usage"]:
-                        rows = [{"evaluator": "maker", "model": c.get("model") or mk_id, "case": "agent", "usage": c.get("usage") or {}} for c in mk["usage"]["agent_calls"]]
+                        rows = [{"evaluator": "maker", "model": c.get("model") or mk_id, "case": "agent", "usage": c.get("usage") or {}} for c in mk["usage"]["agent_calls"] if not c.get("refused")]
                     else:
                         rows = [{"evaluator": "maker", "model": mk_id, "case": "maker", "usage": mk["usage"]}]
                     _accrue(state, rows, pricing)
@@ -304,7 +326,9 @@ def run_job(job_dir):
         inc = state["incumbent_scores"]
         if inc is None or (any(d_scores[d] > inc[d] for d in dims) and not any(d_scores[d] < inc[d] for d in dims)):
             state.update(incumbent_round=r, incumbent_digest=cand_digest, incumbent_scores=d_scores, defects=defects, solutions=solutions)
-        elif any(d_scores[d] > inc[d] for d in dims) and any(d_scores[d] < inc[d] for d in dims):
+        else:
+            state["rejected_defects"] = list(state.get("rejected_defects", [])) + list(defects)
+        if inc is not None and any(d_scores[d] > inc[d] for d in dims) and any(d_scores[d] < inc[d] for d in dims):
             state.update(terminal_state="needs_owner", reason="dimension_tradeoff")
             break
         if any(state["incumbent_scores"][d] < floors[d] for d in dims):
@@ -318,7 +342,8 @@ def run_job(job_dir):
         state["wall_spent_seconds"] = wall_base + (time.time() - t0)
         t0 = time.time()
         _write_state(job_dir, state)
-    except gates.GateError:
+    except gates.GateError as e:
+        state.update(terminal_state="needs_owner", reason="integrity_error", integrity_error=str(e)[-300:])
         raise  # integrity/security violations fail loud (finally still records the halt)
     except KeyboardInterrupt:
         state.update(terminal_state="needs_owner", reason="interrupted")  # Ctrl-C / SIGINT
@@ -360,8 +385,9 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
     shutil.rmtree(art_dst, ignore_errors=True)
     shutil.copytree(job_dir / "rounds" / f"round-{int(win_r):02d}" / "artifact", art_dst)
     (job_dir / "scores.jsonl").write_text("\n".join(json.dumps(r) for r in win["scores"]) + "\n", encoding="utf-8")
+    seed_author = cfg["seed"]["author"] if (cfg.get("seed") and st.get("seed_round") == int(win_r)) else None
     if win_r != max_r:
-        ev_prod = _append(job_dir, "artifact-produced", cfg["maker"]["name"], [art_dst / f for f in cfg["subjectFiles"]], {})
+        ev_prod = _append(job_dir, "artifact-produced", seed_author or cfg["maker"]["name"], [art_dst / f for f in cfg["subjectFiles"]], {"seed": True} if seed_author else {})
         checks = [dict(c, at=_append(job_dir, "check", c["evaluator"], [], c)["at"]) for c in win["checks"]]
         for k in win["controls"]:
             _append(job_dir, "control", k["evaluator"], [], {ki: vi for ki, vi in k.items() if ki not in ("expected", "outcome")})
@@ -374,7 +400,6 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
     violations = [{"dimension": d["id"], "description": f"{d['id']} failed conform threshold"} for d in cfg["bar"]["dimensions"] if any(c["dimension"] == d["id"] and c["outcome"] == "does_not_conform" for c in checks)]
     disagreements = [{"dimension": d["id"], "checks": [i for i, c in enumerate(checks) if c["dimension"] == d["id"]], "note": "evaluators disagreed"} for d in cfg["bar"]["dimensions"] if len({c["outcome"] for c in checks if c["dimension"] == d["id"]}) > 1]
     evals_clean = [{k: v for k, v in e.items() if k in ("id", "name", "kind", "model", "script", "sameModelAsMaker")} for e in cfg["evaluators"]]
-    seed_author = cfg["seed"]["author"] if (cfg.get("seed") and st.get("seed_round") == int(win_r)) else None
     def _assemble():
         inputs = {"subject": {"dir": "artifact"}, "specVersion": cfg.get("specVersion", "0.9.8"), "levelClaimed": cfg["levelClaimed"], "bar": dict({k: v for k, v in cfg["bar"].items() if k != "file"}, frozenAt=st["frozenAt"]),
                   "maker": ({"name": seed_author, "kind": "person", "version": cfg["seed"].get("origin", "owner-supplied"), "method": cfg["maker"]["method"], "model": None} if seed_author else {**{k: v for k, v in cfg["maker"].items() if k in ("name", "kind", "version", "method", "model")}, **({"kind": "model"} if cfg["maker"].get("kind") == "agent" else {})}), "startedAt": st["startedAt"], "producedAt": prod_at, "instrument": cfg["instrument"],

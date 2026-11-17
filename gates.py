@@ -76,10 +76,16 @@ def gate_seats(cfg, job_dir, approver_by=None):
     app_by = approver_by if approver_by is not None else disp.get("by", "")
     rf = ((cfg.get("instrument") or {}).get("runner") or {}).get("file")
     r_sha = sha256_file(safe_rel(rf, job_dir)) if rf and (job_dir / rf).is_file() else None
-    evals, mk_mod = cfg.get("evaluators") or [], (maker.get("model") if maker.get("kind") == "model" else None)
+    evals, mk_mod = cfg.get("evaluators") or [], (maker.get("model") if maker.get("kind") in ("model", "agent") else None)
     if not evals:
         raise GateError("at least one evaluator is required")
     for e in evals:
+        try:
+            runs_n = int(e.get("runs", 2))
+        except (TypeError, ValueError):
+            raise GateError(f"evaluator {e.get('id')} runs must be an integer >= 2 (D4.5)")
+        if runs_n < 2:
+            raise GateError(f"evaluator {e.get('id')} runs < 2; a verdict rests on at least two scored runs (D4.5)")
         names = [e.get("name", "")]
         if e.get("kind") == "script":
             sc = e.get("script") or {}
@@ -94,11 +100,18 @@ def gate_seats(cfg, job_dir, approver_by=None):
                 raise GateError(f"evaluator {e.get('id')} readOnly or sameModelAsMaker invalid (CL1-6/CL2-2)")
         if any(same(n, who) for n in names for who in (maker.get("name", ""), bar.get("author", ""))) or (app_by and same(e.get("name", ""), app_by)):
             raise GateError(f"evaluator {e.get('id')} violates seat separation (CL1-6)")
+    if maker.get("kind") == "agent":
+        stype = (maker.get("sandbox") or {}).get("type")
+        if not stype:
+            raise GateError("agent Maker requires maker.sandbox {type: sandbox-exec|bwrap}; the runtime must confine the agent (D3.held-out, ruling R3)")
+        import adapters as _adapters
+        if not _adapters.sandbox_usable(stype):
+            raise GateError(f"maker.sandbox type {stype} cannot launch on this host (missing binary or user namespaces forbidden); refusing to run an unconfined agent (ruling R3)")
     if cfg.get("levelClaimed") in ("CL2", "CL3"):
         mk_name = maker.get("name", "")
         if any(same(a.get("by", ""), mk_name) for a in bar.get("approvals") or []) or same(bar.get("author", ""), mk_name):
             raise GateError("CL2/CL3 forbids maker from authoring or approving the bar (CL2-3a)")
-        if maker.get("kind") == "model":
+        if maker.get("kind") in ("model", "agent"):
             if not isinstance(mk_mod, dict) or not (mk_mod.get("family") and mk_mod.get("endpoint")):
                 raise GateError("model maker requires maker.model block (CL2-3b)")
             m_fam, m_ep, m_evs = mk_mod["family"].casefold(), mk_mod["endpoint"], [e for e in evals if e.get("kind") == "model"]
@@ -111,14 +124,72 @@ def gate_seats(cfg, job_dir, approver_by=None):
                 raise GateError("CL2 forbids >50% of evaluators sharing maker's model family (CL2-3c)")
 
 
+def _canon(s):
+    return " ".join(s.casefold().split())
+
+
+def held_out_needles(job_dir):
+    """D4.9 needle set: full-file digests plus every >=16-char sliding window of every
+    held-out line, whitespace-canonicalized. Whitespace/case obfuscation cannot slip a
+    contiguous fragment past this set; paraphrase remains a disclosed tripwire limit."""
+    held_dir, needles = job_dir / "held_out", set()
+    pub = _canon("".join((job_dir / f).read_text(encoding="utf-8", errors="ignore") for f in ("bar.md", "method.md") if (job_dir / f).is_file()))
+    marker = _canon(WITHHELD)
+    for p in (p for p in (held_dir.rglob("*") if held_dir.is_dir() else []) if p.is_file()):
+        needles.add(sha256_file(p).casefold())
+        for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+            c = _canon(ln)
+            if len(c) < 16 or c in pub:
+                continue
+            for i in range(0, max(1, len(c) - 15)):
+                w = c[i:i + 16]
+                if w not in marker:
+                    needles.add(w)
+    return {n for n in needles if not (len(n) >= 16 and n in marker)}
+
+
+WITHHELD = "[withheld: matches held-out material]"
+
+
+def _scrub_value(v, needles):
+    return isinstance(v, str) and v and any(nd in _canon(v) for nd in needles if len(nd) >= 16)
+
+
+def _scrub_walk(v, needles):
+    if isinstance(v, str):
+        return (WITHHELD, 1) if _scrub_value(v, needles) else (v, 0)
+    if isinstance(v, dict):
+        n = 0
+        out = {}
+        for k, sv in v.items():
+            out[k], w = _scrub_walk(sv, needles)
+            n += w
+        return out, n
+    if isinstance(v, list):
+        out, n = [], 0
+        for sv in v:
+            nv, w = _scrub_walk(sv, needles)
+            out.append(nv); n += w
+        return out, n
+    return v, 0
+
+
+def scrub_held_out(items, needles):
+    """Return (items with matching text replaced anywhere in the structure, count withheld) — D4.9 filters, never forwards."""
+    out, n = [], 0
+    for it in items:
+        it, w = _scrub_walk(it, needles)
+        n += w
+        out.append(it)
+    return out, n
+
+
 def gate_packet(packet, job_dir, expected_incumbent_digest):
     if packet.get("best_artifact_digest") != expected_incumbent_digest:
         raise GateError("Maker packet best_artifact_digest does not match Pareto-best incumbent (I-04/I-06)")
-    low, held_dir = json.dumps(packet, sort_keys=True).casefold(), job_dir / "held_out"
+    low, held_dir = _canon(json.dumps(packet, sort_keys=True)), job_dir / "held_out"
     if any(k in low for k in ("held_out", "scores.jsonl", "job.jsonl")):
         raise GateError("held-out path marker leaked into Maker packet (I-04)")
-    pub = "".join((job_dir / f).read_text(encoding="utf-8", errors="ignore").casefold() for f in ("bar.md", "method.md") if (job_dir / f).is_file())
-    for p in (p for p in (held_dir.rglob("*") if held_dir.is_dir() else []) if p.is_file()):
-        lines = [ln.strip().casefold()[:24] for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines() if len(ln.strip()) >= 16 and ln.strip().casefold()[:24] not in pub]
-        if sha256_file(p).casefold() in low or any(s in low for s in lines):
-            raise GateError(f"held-out content or digest from {p.name} leaked into Maker packet (I-04)")
+    for nd in held_out_needles(job_dir):
+        if nd in low:
+            raise GateError("held-out content or digest leaked into Maker packet (I-04)")
