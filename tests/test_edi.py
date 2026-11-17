@@ -45,11 +45,10 @@ class TestEDIRuntime(unittest.TestCase):
         runner_path.write_text("# Runner\nedi-run v1\n", encoding="utf-8")
 
         clean_ctl = job_dir / "held_out" / "controls" / "clean.md"
-        clean_ctl.write_text("# Header\nFigure: 42% (Source: Q3 Report, 2026-10-01)\n", encoding="utf-8")
+        clean_ctl.write_text("# Header\nHeld-out reference control figure: 99% (Source: Control Audit, 2026-01-01)\n", encoding="utf-8")
         planted_ctl = job_dir / "held_out" / "controls" / "planted.md"
         planted_ctl.write_text("No header and no figure here.\n", encoding="utf-8")
 
-        # Maker script: reads packet.json and writes artifact/memo.md
         maker_script = job_dir / "scripts" / "maker.py"
         maker_script.write_text(
             "import json, pathlib, sys\n"
@@ -57,6 +56,8 @@ class TestEDIRuntime(unittest.TestCase):
             "out = pathlib.Path(sys.argv[2]) / 'memo.md'\n"
             "r = pkt['round']\n"
             "mode = pkt.get('mode', 'pass_r2')\n"
+            "if pathlib.Path('held_out').exists() or pathlib.Path('../held_out').exists():\n"
+            "    sys.exit('Maker sandbox leak: held_out visible')\n"
             "if mode == 'pass_r2':\n"
             "    txt = '# Header\\nNo figure yet.\\n' if r == 1 else '# Header\\nFigure: 42% (Source: Q3, 2026-10-01)\\n'\n"
             "elif mode == 'dormant':\n"
@@ -69,7 +70,6 @@ class TestEDIRuntime(unittest.TestCase):
             encoding="utf-8",
         )
 
-        # Evaluator script E1: checks D1 and D2
         eval_script = job_dir / "scripts" / "eval_e1.py"
         eval_script.write_text(
             "import json, pathlib, sys\n"
@@ -150,28 +150,25 @@ class TestEDIRuntime(unittest.TestCase):
         import gates
         job_dir = self._make_base_job()
         cfg = json.loads((job_dir / "job.json").read_text())
-        # Negative 1: bar frozenAt >= startedAt on CL1
         with self.assertRaises(gates.GateError):
             gates.gate_freeze(cfg, job_dir, started_at="2026-10-05T08:00:00Z")
-        # Negative 2: missing specialist approval
         bad_cfg = json.loads(json.dumps(cfg))
         bad_cfg["bar"]["approvals"] = [a for a in bad_cfg["bar"]["approvals"] if a["role"] != "specialist"]
         with self.assertRaises(gates.GateError):
             gates.gate_freeze(bad_cfg, job_dir, started_at="2026-10-05T10:00:00Z")
-        # Positive
         gates.gate_freeze(cfg, job_dir, started_at="2026-10-05T10:00:00Z")
 
     def test_i03_seat_separation_and_cl2_model_family(self):
         import gates
         job_dir = self._make_base_job(level="CL2")
         cfg = json.loads((job_dir / "job.json").read_text())
-        # Negative 1: Maker == Evaluator
         bad1 = json.loads(json.dumps(cfg))
         bad1["evaluators"][0]["name"] = bad1["maker"]["name"]
         with self.assertRaises(gates.GateError):
             gates.gate_seats(bad1, job_dir)
+        with self.assertRaises(gates.GateError):
+            gates.gate_seats(cfg, job_dir, approver_by="Taylor Grant")
 
-        # Negative 2: CL2 model Maker and model Evaluator share family/endpoint
         bad2 = json.loads(json.dumps(cfg))
         bad2["maker"]["kind"] = "model"
         bad2["maker"]["model"] = {"family": "gpt", "identifier": "gpt-4o", "endpoint": "api.openai.com", "readOnly": False}
@@ -182,7 +179,6 @@ class TestEDIRuntime(unittest.TestCase):
         with self.assertRaises(gates.GateError):
             gates.gate_seats(bad2, job_dir)
 
-        # Positive CL2: model Evaluator differs in both family and endpoint
         good2 = json.loads(json.dumps(bad2))
         good2["evaluators"][0]["model"] = {"family": "claude", "identifier": "claude-3-7-sonnet", "endpoint": "api.anthropic.com", "readOnly": True}
         gates.gate_seats(good2, job_dir)
@@ -191,21 +187,19 @@ class TestEDIRuntime(unittest.TestCase):
         import gates
         job_dir = self._make_base_job()
         cfg = json.loads((job_dir / "job.json").read_text())
-        # Negative bounds: missing max_cost_usd
         bad_bounds = json.loads(json.dumps(cfg))
         del bad_bounds["bounds"]["max_cost_usd"]
         with self.assertRaises(gates.GateError):
             gates.gate_bounds(bad_bounds)
 
-        # Negative packet: contains held-out path or sha256 digest
         clean_hash = sha256_bytes((job_dir / "held_out" / "controls" / "clean.md").read_bytes())
-        leaked_pkt = {"round": 1, "best_artifact_digest": None, "defects": [f"Failed on {clean_hash}"]}
+        leaked_pkt = {"round": 1, "best_artifact_digest": None, "defects": [f"Failed on {clean_hash.upper()}"]}
         with self.assertRaises(gates.GateError):
             gates.gate_packet(leaked_pkt, job_dir, expected_incumbent_digest=None)
 
-        leaked_path_pkt = {"round": 1, "best_artifact_digest": None, "defects": ["See held_out/controls/clean.md"]}
+        leaked_txt_pkt = {"round": 1, "best_artifact_digest": None, "defects": ["Held-out reference control figure: 99%"]}
         with self.assertRaises(gates.GateError):
-            gates.gate_packet(leaked_path_pkt, job_dir, expected_incumbent_digest=None)
+            gates.gate_packet(leaked_txt_pkt, job_dir, expected_incumbent_digest=None)
 
     def test_i02_i05_failed_control_voids_evaluator_checks_to_unobserved(self):
         import loop
@@ -216,8 +210,9 @@ class TestEDIRuntime(unittest.TestCase):
         (job_dir / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
         loop.freeze_job(job_dir)
+        self.assertTrue((job_dir / "job.jsonl").is_file())
         rc = loop.run_job(job_dir)
-        self.assertEqual(rc, 2)  # needs_owner due to unobserved checks
+        self.assertEqual(rc, 2)
         rc_fin = loop.finalize_job(job_dir, state="given", by="Casey Park", ack_unobserved=["D1", "D2"])
         self.assertEqual(rc_fin, 0)
         rec = json.loads((job_dir / "record.json").read_text())
@@ -227,7 +222,6 @@ class TestEDIRuntime(unittest.TestCase):
 
     def test_i06_pareto_tradeoff_and_dormant_channel(self):
         import loop
-        # Case 1: Dormant channel (Round 2 produces identical sha256 to Round 1)
         job_dormant = self._make_base_job(rounds_behavior="dormant")
         loop.freeze_job(job_dormant)
         rc1 = loop.run_job(job_dormant)
@@ -236,7 +230,6 @@ class TestEDIRuntime(unittest.TestCase):
         self.assertEqual(state1["terminal_state"], "needs_owner")
         self.assertEqual(state1["reason"], "dormant_channel")
 
-        # Case 2: Pareto trade-off (Round 2 fixes D2 but breaks D1)
         job_trade = self._make_base_job(rounds_behavior="tradeoff", subdir="job_trade")
         loop.freeze_job(job_trade)
         rc2 = loop.run_job(job_trade)
@@ -244,7 +237,6 @@ class TestEDIRuntime(unittest.TestCase):
         state2 = json.loads((job_trade / "state.json").read_text())
         self.assertEqual(state2["terminal_state"], "needs_owner")
         self.assertEqual(state2["reason"], "dimension_tradeoff")
-        # Incumbent must remain Round 1
         self.assertEqual(state2["incumbent_round"], 1)
 
     def test_i07_incumbent_promotion_when_later_round_regresses(self):
@@ -252,13 +244,11 @@ class TestEDIRuntime(unittest.TestCase):
         job_reg = self._make_base_job(rounds_behavior="regress_r2")
         loop.freeze_job(job_reg)
         rc = loop.run_job(job_reg)
-        self.assertEqual(rc, 2)  # cap reached, neither passed all, R1 > R2
+        self.assertEqual(rc, 2)
         state = json.loads((job_reg / "state.json").read_text())
         self.assertEqual(state["incumbent_round"], 1)
-        # Finalize with not_yet_given -> check.py should verify OK (verdict OK, routing 'to approver')
         rc_fin = loop.finalize_job(job_reg, state="not_yet_given", by="Casey Park")
         self.assertEqual(rc_fin, 0)
-        # Artifact on disk must be Round 1's memo.md ('# Header\nNo figure yet.\n')
         self.assertTrue((job_reg / "artifact" / "memo.md").read_text().startswith("# Header"))
 
     def test_end_to_end_two_round_acceptance_and_custody_verification(self):
@@ -271,6 +261,10 @@ class TestEDIRuntime(unittest.TestCase):
         ):
             proc = subprocess.run(cmd, capture_output=True, text=True)
             self.assertEqual(proc.returncode, exp, f"cmd {cmd} failed:\nSTDOUT:{proc.stdout}\nSTDERR:{proc.stderr}")
+        rec = json.loads((job_ok / "record.json").read_text())
+        subj_hashes = {s["digest"]["sha256"] for s in rec["subject"]}
+        ctl_hashes = {k["case"]["sha256"] for k in rec["predicate"]["controls"]}
+        self.assertTrue(subj_hashes.isdisjoint(ctl_hashes))
 
 
 if __name__ == "__main__":

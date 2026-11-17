@@ -16,7 +16,7 @@
       "digest": {
         "sha256": "d572545a4dfb3f63d1a104930e96e53d01b8c7015ec78c42ba978fcb26e1117e"
       },
-      "frozenAt": "2026-10-05T09:00:00Z",
+      "frozenAt": "2026-11-17T00:01:31.786643Z",
       "author": "Jordan Blake",
       "dimensions": [
         {
@@ -48,7 +48,7 @@
         {
           "role": "buyer",
           "by": "Casey Park",
-          "at": "2026-10-05T09:00:00.001000Z",
+          "at": "2026-11-17T00:01:31.787664Z",
           "barDigest": {
             "sha256": "d572545a4dfb3f63d1a104930e96e53d01b8c7015ec78c42ba978fcb26e1117e"
           },
@@ -57,7 +57,7 @@
         {
           "role": "specialist",
           "by": "Riley Moss",
-          "at": "2026-10-05T09:00:00.002000Z",
+          "at": "2026-11-17T00:01:31.788620Z",
           "barDigest": {
             "sha256": "d572545a4dfb3f63d1a104930e96e53d01b8c7015ec78c42ba978fcb26e1117e"
           },
@@ -77,8 +77,8 @@
       },
       "model": null
     },
-    "startedAt": "2026-11-16T23:35:19.401145Z",
-    "producedAt": "2026-11-16T23:35:21.421145Z",
+    "startedAt": "2026-11-17T00:01:31.791957Z",
+    "producedAt": "2026-11-17T00:01:35.195664Z",
     "instrument": {
       "rubric": {
         "sha256": "cc53dfc9ebe9dc704fbf781dae33383e1cdcf2d40d3a289c21ee9e658ac854c0"
@@ -104,13 +104,13 @@
     ],
     "checks": [
       {
-        "at": "2026-11-16T23:35:21.431145Z",
+        "at": "2026-11-17T00:01:35.201868Z",
         "batch": "B2",
         "dimension": "D1",
         "evaluator": "E1",
         "evidence": {
           "name": "reading-D1-E1-r2-run1.json",
-          "sha256": "52d506e1aa0d45e75385abc0e290419d8d78ee9fc936a0975ec7b9f967e073d9"
+          "sha256": "462dcb997f37099b98a8a1e6ee750f65ed06bc4289f7b0721f8f54fe84d3020a"
         },
         "failureCondition": "score < 4.0",
         "outcome": "conforms",
@@ -119,13 +119,13 @@
         "unobserved": null
       },
       {
-        "at": "2026-11-16T23:35:21.441145Z",
+        "at": "2026-11-17T00:01:35.206934Z",
         "batch": "B2",
         "dimension": "D2",
         "evaluator": "E1",
         "evidence": {
           "name": "reading-D2-E1-r2-run1.json",
-          "sha256": "52d506e1aa0d45e75385abc0e290419d8d78ee9fc936a0975ec7b9f967e073d9"
+          "sha256": "6216199487c16f61469306f11a479a7a78e10a0c5cb1d972c5b12ae519f8de8c"
         },
         "failureCondition": "score < 4.0",
         "outcome": "conforms",
@@ -138,11 +138,12 @@
       {
         "batch": "B2",
         "case": {
-          "sha256": "32484219eeb870f4ba52ae95dac8391f4d8bb53df6c56ead94976598844e2793"
+          "sha256": "047ad9e70418d55dff397f662d8f0d4f838642eb0545f72e5324d1247fa343c5"
         },
+        "dimension": "D1",
         "evaluator": "E1",
+        "id": "K-B2-E1-D1-clean",
         "expected": "conforms",
-        "id": "K-B2-E1-clean",
         "outcome": "conforms"
       },
       {
@@ -150,9 +151,32 @@
         "case": {
           "sha256": "840b7e2cbc05439388b23cabec87bbd485e279b391365509afee154e534d40b2"
         },
+        "dimension": "D1",
         "evaluator": "E1",
+        "id": "K-B2-E1-D1-planted",
         "expected": "does_not_conform",
-        "id": "K-B2-E1-planted",
+        "outcome": "does_not_conform"
+      },
+      {
+        "batch": "B2",
+        "case": {
+          "sha256": "047ad9e70418d55dff397f662d8f0d4f838642eb0545f72e5324d1247fa343c5"
+        },
+        "dimension": "D2",
+        "evaluator": "E1",
+        "id": "K-B2-E1-D2-clean",
+        "expected": "conforms",
+        "outcome": "conforms"
+      },
+      {
+        "batch": "B2",
+        "case": {
+          "sha256": "840b7e2cbc05439388b23cabec87bbd485e279b391365509afee154e534d40b2"
+        },
+        "dimension": "D2",
+        "evaluator": "E1",
+        "id": "K-B2-E1-D2-planted",
+        "expected": "does_not_conform",
         "outcome": "does_not_conform"
       }
     ],
@@ -168,7 +192,7 @@
       "acknowledgesUnobserved": [],
       "state": "given",
       "by": "Casey Park",
-      "at": "2026-11-16T23:35:22.446145Z"
+      "at": "2026-11-17T00:01:35.227255Z"
     }
   }
 }

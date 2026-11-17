@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """CLI entrypoint for edi-run (freeze, run, finalize, verify). Standard library only."""
-import argparse
-import pathlib
-import sys
+import argparse, pathlib, sys
 import loop
 
 
@@ -13,7 +11,7 @@ def main():
         sub.add_parser(name).add_argument("job_dir", type=pathlib.Path)
     fin = sub.add_parser("finalize")
     fin.add_argument("job_dir", type=pathlib.Path)
-    fin.add_argument("--disposition", default="given", choices=("given", "not_yet_given", "declined"))
+    fin.add_argument("--disposition", required=True, choices=("given", "not_yet_given", "declined"))
     fin.add_argument("--by", required=True)
     fin.add_argument("--ack-unobserved", default="")
     a = ap.parse_args()

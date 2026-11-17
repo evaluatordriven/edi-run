@@ -1,6 +1,14 @@
 {
   "status": "frozen",
-  "startedAt": "2026-11-16T23:35:19.401145Z",
+  "pins": {
+    "bar": "d572545a4dfb3f63d1a104930e96e53d01b8c7015ec78c42ba978fcb26e1117e",
+    "method": "de40e6acbc453b1930a21b59e20abf4f0647dd2d6263d45179b0a6c97fb5cd0f",
+    "rubric": "cc53dfc9ebe9dc704fbf781dae33383e1cdcf2d40d3a289c21ee9e658ac854c0",
+    "runner": "afb1c8553cd023331888911faa008a864fa5bce49792de62bd9803b068692b7c"
+  },
+  "startedAt": "2026-11-17T00:01:31.791957Z",
+  "frozenAt": "2026-11-17T00:01:31.786643Z",
+  "demonstrations": [],
   "incumbent_round": 2,
   "incumbent_digest": "71e397e2e28c523b0dea5442c69b3a5ed0a09c3c4ac2f16b63e7dc080ecf9f4f",
   "incumbent_scores": {
@@ -12,7 +20,7 @@
   "solutions": [],
   "rounds": {
     "1": {
-      "producedAt": "2026-11-16T23:35:20.401145Z",
+      "producedAt": "2026-11-17T00:01:34.573732Z",
       "digest": "1423eda209fcca1162b0f95ea117baa1c33078a7c4e677f70b226eb23d4b9524",
       "checks": [
         {
@@ -20,13 +28,13 @@
           "evaluator": "E1",
           "run": 1,
           "batch": "B1",
-          "at": "2026-11-16T23:35:20.411145Z",
+          "at": "2026-11-17T00:01:34.786063Z",
           "outcome": "conforms",
           "score": 5.0,
           "failureCondition": "score < 4.0",
           "evidence": {
             "name": "reading-D1-E1-r1-run1.json",
-            "sha256": "037faa87bcb896ab7bc30832baf29b4f305a78d3ac59e98010b11032762ad0ed"
+            "sha256": "6192bd8aba9285390351d632d88f81f67d753fa71371f9d92d878d153044310e"
           },
           "unobserved": null
         },
@@ -35,32 +43,56 @@
           "evaluator": "E1",
           "run": 1,
           "batch": "B1",
-          "at": "2026-11-16T23:35:20.421145Z",
+          "at": "2026-11-17T00:01:34.833716Z",
           "outcome": "does_not_conform",
           "score": 1.0,
           "failureCondition": "score < 4.0",
           "evidence": {
             "name": "reading-D2-E1-r1-run1.json",
-            "sha256": "2f4fb1a105d27d8d0a9697c6b8e604ec22769b2d5910bb65647380fb2cb1ae2f"
+            "sha256": "3cfadf4f1a20c0934485f9055ea35184cd9323135f2559e409ca79e8f6d03b2b"
           },
           "unobserved": null
         }
       ],
       "controls": [
         {
-          "id": "K-B1-E1-clean",
+          "id": "K-B1-E1-D1-clean",
           "batch": "B1",
           "evaluator": "E1",
+          "dimension": "D1",
           "case": {
-            "sha256": "32484219eeb870f4ba52ae95dac8391f4d8bb53df6c56ead94976598844e2793"
+            "sha256": "047ad9e70418d55dff397f662d8f0d4f838642eb0545f72e5324d1247fa343c5"
           },
           "expected": "conforms",
           "outcome": "conforms"
         },
         {
-          "id": "K-B1-E1-planted",
+          "id": "K-B1-E1-D1-planted",
           "batch": "B1",
           "evaluator": "E1",
+          "dimension": "D1",
+          "case": {
+            "sha256": "840b7e2cbc05439388b23cabec87bbd485e279b391365509afee154e534d40b2"
+          },
+          "expected": "does_not_conform",
+          "outcome": "does_not_conform"
+        },
+        {
+          "id": "K-B1-E1-D2-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "dimension": "D2",
+          "case": {
+            "sha256": "047ad9e70418d55dff397f662d8f0d4f838642eb0545f72e5324d1247fa343c5"
+          },
+          "expected": "conforms",
+          "outcome": "conforms"
+        },
+        {
+          "id": "K-B1-E1-D2-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "dimension": "D2",
           "case": {
             "sha256": "840b7e2cbc05439388b23cabec87bbd485e279b391365509afee154e534d40b2"
           },
@@ -70,18 +102,36 @@
       ],
       "scores": [
         {
-          "id": "K-B1-E1-clean",
+          "id": "K-B1-E1-D1-clean",
           "batch": "B1",
           "evaluator": "E1",
           "expected": "conforms",
-          "outcome": "conforms"
+          "score": 5.0,
+          "threshold": 4.0
         },
         {
-          "id": "K-B1-E1-planted",
+          "id": "K-B1-E1-D1-planted",
           "batch": "B1",
           "evaluator": "E1",
           "expected": "does_not_conform",
-          "outcome": "does_not_conform"
+          "score": 1.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E1-D2-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "conforms",
+          "score": 5.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E1-D2-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "does_not_conform",
+          "score": 1.0,
+          "threshold": 4.0
         }
       ],
       "external": [],
@@ -91,7 +141,7 @@
       }
     },
     "2": {
-      "producedAt": "2026-11-16T23:35:21.421145Z",
+      "producedAt": "2026-11-17T00:01:34.883056Z",
       "digest": "71e397e2e28c523b0dea5442c69b3a5ed0a09c3c4ac2f16b63e7dc080ecf9f4f",
       "checks": [
         {
@@ -99,13 +149,13 @@
           "evaluator": "E1",
           "run": 1,
           "batch": "B2",
-          "at": "2026-11-16T23:35:21.431145Z",
+          "at": "2026-11-17T00:01:35.076223Z",
           "outcome": "conforms",
           "score": 5.0,
           "failureCondition": "score < 4.0",
           "evidence": {
             "name": "reading-D1-E1-r2-run1.json",
-            "sha256": "52d506e1aa0d45e75385abc0e290419d8d78ee9fc936a0975ec7b9f967e073d9"
+            "sha256": "462dcb997f37099b98a8a1e6ee750f65ed06bc4289f7b0721f8f54fe84d3020a"
           },
           "unobserved": null
         },
@@ -114,32 +164,56 @@
           "evaluator": "E1",
           "run": 1,
           "batch": "B2",
-          "at": "2026-11-16T23:35:21.441145Z",
+          "at": "2026-11-17T00:01:35.122487Z",
           "outcome": "conforms",
           "score": 5.0,
           "failureCondition": "score < 4.0",
           "evidence": {
             "name": "reading-D2-E1-r2-run1.json",
-            "sha256": "52d506e1aa0d45e75385abc0e290419d8d78ee9fc936a0975ec7b9f967e073d9"
+            "sha256": "6216199487c16f61469306f11a479a7a78e10a0c5cb1d972c5b12ae519f8de8c"
           },
           "unobserved": null
         }
       ],
       "controls": [
         {
-          "id": "K-B2-E1-clean",
+          "id": "K-B2-E1-D1-clean",
           "batch": "B2",
           "evaluator": "E1",
+          "dimension": "D1",
           "case": {
-            "sha256": "32484219eeb870f4ba52ae95dac8391f4d8bb53df6c56ead94976598844e2793"
+            "sha256": "047ad9e70418d55dff397f662d8f0d4f838642eb0545f72e5324d1247fa343c5"
           },
           "expected": "conforms",
           "outcome": "conforms"
         },
         {
-          "id": "K-B2-E1-planted",
+          "id": "K-B2-E1-D1-planted",
           "batch": "B2",
           "evaluator": "E1",
+          "dimension": "D1",
+          "case": {
+            "sha256": "840b7e2cbc05439388b23cabec87bbd485e279b391365509afee154e534d40b2"
+          },
+          "expected": "does_not_conform",
+          "outcome": "does_not_conform"
+        },
+        {
+          "id": "K-B2-E1-D2-clean",
+          "batch": "B2",
+          "evaluator": "E1",
+          "dimension": "D2",
+          "case": {
+            "sha256": "047ad9e70418d55dff397f662d8f0d4f838642eb0545f72e5324d1247fa343c5"
+          },
+          "expected": "conforms",
+          "outcome": "conforms"
+        },
+        {
+          "id": "K-B2-E1-D2-planted",
+          "batch": "B2",
+          "evaluator": "E1",
+          "dimension": "D2",
           "case": {
             "sha256": "840b7e2cbc05439388b23cabec87bbd485e279b391365509afee154e534d40b2"
           },
@@ -149,18 +223,36 @@
       ],
       "scores": [
         {
-          "id": "K-B2-E1-clean",
+          "id": "K-B2-E1-D1-clean",
           "batch": "B2",
           "evaluator": "E1",
           "expected": "conforms",
-          "outcome": "conforms"
+          "score": 5.0,
+          "threshold": 4.0
         },
         {
-          "id": "K-B2-E1-planted",
+          "id": "K-B2-E1-D1-planted",
           "batch": "B2",
           "evaluator": "E1",
           "expected": "does_not_conform",
-          "outcome": "does_not_conform"
+          "score": 1.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B2-E1-D2-clean",
+          "batch": "B2",
+          "evaluator": "E1",
+          "expected": "conforms",
+          "score": 5.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B2-E1-D2-planted",
+          "batch": "B2",
+          "evaluator": "E1",
+          "expected": "does_not_conform",
+          "score": 1.0,
+          "threshold": 4.0
         }
       ],
       "external": [],
@@ -171,5 +263,6 @@
     }
   },
   "terminal_state": "accepted",
-  "reason": "all_conform"
+  "reason": "all_conform",
+  "cost_usd": 0.0
 }

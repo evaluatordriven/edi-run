@@ -1,2 +1,2 @@
-# Q3 Vendor Memo
-Renewal savings: 18% (Source: Finance Ledger, 2026-10-01).
+# Held-Out Calibration Sample
+Benchmark figure: 91% (Source: Internal Control Calibration, 2026-01-15).
