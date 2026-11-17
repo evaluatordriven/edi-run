@@ -1,146 +1,144 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1360" height="1740" viewBox="0 0 1360 1740" font-family="Helvetica,Arial,sans-serif">
-<rect width="1360" height="1740" fill="#FAFBFD"/>
-<text x="1320" y="46" font-size="30" font-weight="bold" fill="#1A2733" text-anchor="end">edi-run — how every loop scenario flows</text>
-<text x="220" y="40" font-size="20" font-weight="bold" fill="#5A6B7B">FREEZE</text>
-<text x="640" y="540" font-size="20" font-weight="bold" fill="#5A6B7B">LOOP (deterministic, one process)</text>
-<text x="1090" y="540" font-size="20" font-weight="bold" fill="#5A6B7B">TERMINAL &amp; RECORD</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1430" height="1740" viewBox="0 0 1430 1740" font-family="Helvetica,Arial,sans-serif">
+<rect width="1430" height="1740" fill="#FAFBFD"/>
+<text x="1390" y="40" font-size="30" font-weight="bold" fill="#1A2733" text-anchor="end">edi-run — how every loop scenario flows</text>
+<text x="220" y="105" font-size="20" font-weight="bold" fill="#5A6B7B" text-anchor="middle">FREEZE</text>
+<text x="640" y="630" font-size="20" font-weight="bold" fill="#5A6B7B" text-anchor="middle">LOOP (deterministic, one process)</text>
+<text x="1090" y="810" font-size="20" font-weight="bold" fill="#5A6B7B" text-anchor="middle">TERMINAL and RECORD</text>
 <defs><marker id="ah" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#33414E"/></marker></defs>
-<polyline points="220,150 220,200" fill="none" stroke="#3B6EA5" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<polyline points="220,310 164,310 164,360 170,360" fill="none" stroke="#B33A3A" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<polyline points="220,310 318,310 318,460 220,460" fill="none" stroke="#2C5F8A" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<polyline points="220,550 220,600" fill="none" stroke="#2C5F8A" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<polyline points="360,630 480,630" fill="none" stroke="#6B4FA1" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<polyline points="640,680 640,740" fill="none" stroke="#6B4FA1" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<polyline points="640,840 640,900" fill="none" stroke="#6B4FA1" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<polyline points="800,935 420,935 420,1230 360,1230" fill="none" stroke="#2E7D32" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<polyline points="640,970 640,1040" fill="none" stroke="#6B4FA1" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<polyline points="480,1085 420,1085 420,620 480,620" fill="none" stroke="#6B4FA1" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<polyline points="800,1085 920,1085" fill="none" stroke="#B33A3A" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<polyline points="800,620 980,620 980,1040" fill="none" stroke="#B33A3A" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<polyline points="800,790 1120,790 1120,1040" fill="none" stroke="#B33A3A" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<polyline points="360,1230 860,1230 860,1305 920,1305" fill="none" stroke="#2C5F8A" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<polyline points="1090,1170 1090,1260" fill="none" stroke="#B33A3A" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<polyline points="1090,1350 1005,1350 1005,1420 1090,1420" fill="none" stroke="#2E7D32" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<polyline points="1090,1350 1175,1350 1175,1560 1090,1560" fill="none" stroke="#B26A1B" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<polyline points="920,1305 420,1305 420,1455 360,1455" fill="none" stroke="#B33A3A" stroke-width="3" stroke-dasharray="0" marker-end="url(#ah)"/>
-<rect x="80" y="80" width="280" height="70" rx="10" fill="#EAF2FB" stroke="#3B6EA5" stroke-width="2.5"/>
-<text x="220.0" y="108" font-size="19" font-weight="bold" fill="#3B6EA5" text-anchor="middle">job.json</text>
-<text x="220.0" y="132" font-size="15" fill="#2A3742" text-anchor="middle">bounds · seats · seed?</text>
-<text x="220.0" y="152" font-size="15" fill="#2A3742" text-anchor="middle">pricing? · method</text>
-<rect x="80" y="200" width="280" height="110" rx="10" fill="#EAF2FB" stroke="#3B6EA5" stroke-width="2.5"/>
-<text x="220.0" y="228" font-size="19" font-weight="bold" fill="#3B6EA5" text-anchor="middle">GATES (freeze)</text>
-<text x="220.0" y="252" font-size="15" fill="#2A3742" text-anchor="middle">bounds · seats · instruments</text>
-<text x="220.0" y="272" font-size="15" fill="#2A3742" text-anchor="middle">pricing (model seats)</text>
-<text x="220.0" y="292" font-size="15" fill="#2A3742" text-anchor="middle">seed files+author seats</text>
-<text x="220.0" y="312" font-size="15" fill="#2A3742" text-anchor="middle">approvals vs bar digest</text>
-<rect x="80" y="360" width="180" height="60" rx="10" fill="#FBE9E9" stroke="#B33A3A" stroke-width="2.5"/>
-<text x="170.0" y="388" font-size="19" font-weight="bold" fill="#B33A3A" text-anchor="middle">REFUSED</text>
-<text x="170.0" y="412" font-size="15" fill="#2A3742" text-anchor="middle">nothing written</text>
-<rect x="80" y="460" width="280" height="90" rx="10" fill="#EAF2FB" stroke="#3B6EA5" stroke-width="2.5"/>
-<text x="220.0" y="488" font-size="19" font-weight="bold" fill="#3B6EA5" text-anchor="middle">CUSTODY LOG OPENS</text>
-<text x="220.0" y="512" font-size="15" fill="#2A3742" text-anchor="middle">job-start · artifact-supplied</text>
-<text x="220.0" y="532" font-size="15" fill="#2A3742" text-anchor="middle">(seed, pre-freeze)</text>
-<text x="220.0" y="552" font-size="15" fill="#2A3742" text-anchor="middle">bar-frozen · work-started</text>
-<rect x="80" y="600" width="280" height="60" rx="10" fill="#E4EEF7" stroke="#2C5F8A" stroke-width="2.5"/>
-<text x="220.0" y="628" font-size="19" font-weight="bold" fill="#2C5F8A" text-anchor="middle">FROZEN</text>
-<text x="220.0" y="652" font-size="15" fill="#2A3742" text-anchor="middle">bar digest pinned</text>
-<rect x="480" y="560" width="320" height="120" rx="10" fill="#F3EEFA" stroke="#6B4FA1" stroke-width="2.5"/>
-<text x="640.0" y="588" font-size="19" font-weight="bold" fill="#6B4FA1" text-anchor="middle">ROUND r (1..N)</text>
-<text x="640.0" y="612" font-size="15" fill="#2A3742" text-anchor="middle">r=1 seed job: copy seed,</text>
-<text x="640.0" y="632" font-size="15" fill="#2A3742" text-anchor="middle">log artifact-produced</text>
-<text x="640.0" y="652" font-size="15" fill="#2A3742" text-anchor="middle">(author = seed author)</text>
-<text x="640.0" y="672" font-size="15" fill="#2A3742" text-anchor="middle">else: Maker call (script/model/agent)</text>
-<rect x="480" y="740" width="320" height="100" rx="10" fill="#F3EEFA" stroke="#6B4FA1" stroke-width="2.5"/>
-<text x="640.0" y="768" font-size="19" font-weight="bold" fill="#6B4FA1" text-anchor="middle">EVALUATOR PANEL</text>
-<text x="640.0" y="792" font-size="15" fill="#2A3742" text-anchor="middle">every rubric dimension</text>
-<text x="640.0" y="812" font-size="15" fill="#2A3742" text-anchor="middle">+ held-out &amp; planted controls</text>
-<text x="640.0" y="832" font-size="15" fill="#2A3742" text-anchor="middle">scores kept per dimension</text>
-<rect x="480" y="900" width="320" height="70" rx="10" fill="#FFF7E6" stroke="#B28A2E" stroke-width="2.5"/>
-<text x="640.0" y="928" font-size="19" font-weight="bold" fill="#B28A2E" text-anchor="middle">ALL DIMENSIONS CONFORMED?</text>
-<text x="640.0" y="952" font-size="15" fill="#2A3742" text-anchor="middle">(no averaging, ever)</text>
-<rect x="480" y="1040" width="320" height="90" rx="10" fill="#F3EEFA" stroke="#6B4FA1" stroke-width="2.5"/>
-<text x="640.0" y="1068" font-size="19" font-weight="bold" fill="#6B4FA1" text-anchor="middle">PARETO COMPARE</text>
-<text x="640.0" y="1092" font-size="15" fill="#2A3742" text-anchor="middle">better on >=1 dimension</text>
-<text x="640.0" y="1112" font-size="15" fill="#2A3742" text-anchor="middle">AND worse on none -></text>
-<text x="640.0" y="1132" font-size="15" fill="#2A3742" text-anchor="middle">becomes incumbent, next round</text>
-<rect x="80" y="1200" width="280" height="60" rx="10" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2.5"/>
-<text x="220.0" y="1228" font-size="19" font-weight="bold" fill="#2E7D32" text-anchor="middle">ACCEPTED (exit 0)</text>
-<text x="220.0" y="1252" font-size="15" fill="#2A3742" text-anchor="middle">loop ends</text>
-<rect x="920" y="1040" width="340" height="130" rx="10" fill="#FBE9E9" stroke="#B33A3A" stroke-width="2.5"/>
-<text x="1090.0" y="1068" font-size="19" font-weight="bold" fill="#B33A3A" text-anchor="middle">NEEDS_OWNER (exit 2)</text>
-<text x="1090.0" y="1092" font-size="15" fill="#2A3742" text-anchor="middle">maker_failed · no_artifact</text>
-<text x="1090.0" y="1112" font-size="15" fill="#2A3742" text-anchor="middle">dormant_channel · cap_reached</text>
-<text x="1090.0" y="1132" font-size="15" fill="#2A3742" text-anchor="middle">no_observation · runtime_error</text>
-<text x="1090.0" y="1152" font-size="15" fill="#2A3742" text-anchor="middle">interrupted (Ctrl-C/SIGTERM, anywhere)</text>
-<rect x="920" y="1260" width="340" height="90" rx="10" fill="#E4EEF7" stroke="#2C5F8A" stroke-width="2.5"/>
-<text x="1090.0" y="1288" font-size="19" font-weight="bold" fill="#2C5F8A" text-anchor="middle">FINALIZE (once only)</text>
-<text x="1090.0" y="1312" font-size="15" fill="#2A3742" text-anchor="middle">integrity gate first:</text>
-<text x="1090.0" y="1332" font-size="15" fill="#2A3742" text-anchor="middle">verify full custody chain</text>
-<text x="1090.0" y="1352" font-size="15" fill="#2A3742" text-anchor="middle">refuses double disposition</text>
-<rect x="920" y="1420" width="340" height="70" rx="10" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2.5"/>
-<text x="1090.0" y="1448" font-size="19" font-weight="bold" fill="#2E7D32" text-anchor="middle">record.json (exit 0)</text>
-<text x="1090.0" y="1472" font-size="15" fill="#2A3742" text-anchor="middle">disposition given / declined</text>
-<rect x="920" y="1560" width="340" height="80" rx="10" fill="#FDF3E0" stroke="#B26A1B" stroke-width="2.5"/>
-<text x="1090.0" y="1588" font-size="19" font-weight="bold" fill="#B26A1B" text-anchor="middle">GAP RECORD (exit 1)</text>
-<text x="1090.0" y="1612" font-size="15" fill="#2A3742" text-anchor="middle">x-edi-run.gaps[] names</text>
-<text x="1090.0" y="1632" font-size="15" fill="#2A3742" text-anchor="middle">exactly what never happened</text>
-<rect x="80" y="1420" width="280" height="70" rx="10" fill="#FBE9E9" stroke="#B33A3A" stroke-width="2.5"/>
-<text x="220.0" y="1448" font-size="19" font-weight="bold" fill="#B33A3A" text-anchor="middle">GateError (loud fail)</text>
-<text x="220.0" y="1472" font-size="15" fill="#2A3742" text-anchor="middle">tampered chain / bad check</text>
-<text x="220.0" y="1492" font-size="15" fill="#2A3742" text-anchor="middle">NO record written</text>
-<circle cx="220" cy="175" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="220" y="181" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">1</text>
-<text x="220" y="149" font-size="15" fill="#33414E" text-anchor="middle">config in</text>
-<circle cx="164" cy="335" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="164" y="341" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">2</text>
-<text x="164" y="309" font-size="15" fill="#33414E" text-anchor="middle">any gate refuses</text>
-<circle cx="318" cy="385" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="318" y="391" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">3</text>
-<text x="318" y="359" font-size="15" fill="#33414E" text-anchor="middle">all gates pass</text>
-<circle cx="220" cy="575" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="220" y="581" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">4</text>
-<text x="220" y="549" font-size="15" fill="#33414E" text-anchor="middle">log chain begins</text>
-<circle cx="420" cy="630" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="420" y="636" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">5</text>
-<text x="420" y="604" font-size="15" fill="#33414E" text-anchor="middle">run: loop starts</text>
-<circle cx="640" cy="710" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="640" y="716" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">6</text>
-<text x="640" y="684" font-size="15" fill="#33414E" text-anchor="middle">packet -> panel</text>
-<circle cx="640" cy="870" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="640" y="876" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">7</text>
-<text x="640" y="844" font-size="15" fill="#33414E" text-anchor="middle">scores</text>
-<circle cx="420" cy="1082" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="420" y="1088" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">8</text>
-<text x="420" y="1056" font-size="15" fill="#33414E" text-anchor="middle">YES — all conformed</text>
-<circle cx="640" cy="1005" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="640" y="1011" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">9</text>
-<text x="640" y="979" font-size="15" fill="#33414E" text-anchor="middle">NO — not yet</text>
-<circle cx="420" cy="852" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="420" y="858" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">10</text>
-<text x="434" y="838" font-size="15" fill="#33414E" text-anchor="middle">better: incumbent, next round</text>
-<circle cx="860" cy="1085" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="860" y="1091" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">11</text>
-<text x="860" y="1059" font-size="15" fill="#33414E" text-anchor="middle">not better -> dormant</text>
-<circle cx="980" cy="830" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="980" y="836" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">12</text>
-<text x="980" y="804" font-size="15" fill="#33414E" text-anchor="middle">maker failed · no artifact · timeout</text>
-<circle cx="1120" cy="915" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="1120" y="921" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">13</text>
-<text x="1120" y="889" font-size="15" fill="#33414E" text-anchor="middle">evaluator crash · unobserved controls</text>
-<circle cx="860" cy="1268" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="860" y="1274" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">14</text>
-<text x="860" y="1242" font-size="15" fill="#33414E" text-anchor="middle">finalize (owner decision)</text>
-<circle cx="1090" cy="1215" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="1090" y="1221" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">15</text>
-<text x="1090" y="1189" font-size="15" fill="#33414E" text-anchor="middle">escalation.json written</text>
-<circle cx="1005" cy="1385" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="1005" y="1391" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">16</text>
-<text x="1005" y="1359" font-size="15" fill="#33414E" text-anchor="middle">disposition recorded</text>
-<circle cx="1175" cy="1455" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="1175" y="1461" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">17</text>
-<text x="1175" y="1429" font-size="15" fill="#33414E" text-anchor="middle">incomplete run</text>
-<circle cx="420" cy="1380" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
-<text x="420" y="1386" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">18</text>
-<text x="420" y="1354" font-size="15" fill="#33414E" text-anchor="middle">chain verify fails</text>
-<text x="80" y="1660" font-size="16" fill="#5A6B7B">Freeze writes nothing until every gate passes. The loop is one process making one blocking call per seat — no watchers, no hand-offs. Every arrow above is a hash-chained event in job.jsonl.</text>
+<polyline points="220,190 220,250" fill="none" stroke="#2C5F8A" stroke-width="3" marker-end="url(#ah)"/>
+<polyline points="164,380 164,420" fill="none" stroke="#B33A3A" stroke-width="3" marker-end="url(#ah)"/>
+<polyline points="318,380 318,540" fill="none" stroke="#2C5F8A" stroke-width="3" marker-end="url(#ah)"/>
+<polyline points="220,640 220,690" fill="none" stroke="#2C5F8A" stroke-width="3" marker-end="url(#ah)"/>
+<polyline points="360,720 480,720" fill="none" stroke="#6B4FA1" stroke-width="3" marker-end="url(#ah)"/>
+<polyline points="640,770 640,830" fill="none" stroke="#6B4FA1" stroke-width="3" marker-end="url(#ah)"/>
+<polyline points="640,930 640,990" fill="none" stroke="#6B4FA1" stroke-width="3" marker-end="url(#ah)"/>
+<polyline points="800,1025 920,1025" fill="none" stroke="#2E7D32" stroke-width="3" marker-end="url(#ah)"/>
+<polyline points="640,1060 640,1120" fill="none" stroke="#6B4FA1" stroke-width="3" marker-end="url(#ah)"/>
+<polyline points="480,1165 430,1165 430,760 480,760" fill="none" stroke="#6B4FA1" stroke-width="3" marker-end="url(#ah)"/>
+<polyline points="800,1165 860,1165 860,895 920,895" fill="none" stroke="#B33A3A" stroke-width="3" marker-end="url(#ah)"/>
+<polyline points="800,680 1000,680 1000,830" fill="none" stroke="#B33A3A" stroke-width="3" marker-end="url(#ah)"/>
+<polyline points="800,880 920,880" fill="none" stroke="#B33A3A" stroke-width="3" marker-end="url(#ah)"/>
+<polyline points="1090,1070 1090,1140" fill="none" stroke="#2C5F8A" stroke-width="3" marker-end="url(#ah)"/>
+<polyline points="1260,900 1320,900 1320,1185 1260,1185" fill="none" stroke="#B33A3A" stroke-width="3" marker-end="url(#ah)"/>
+<polyline points="980,1230 980,1320" fill="none" stroke="#2E7D32" stroke-width="3" marker-end="url(#ah)"/>
+<polyline points="1240,1230 1240,1460" fill="none" stroke="#B26A1B" stroke-width="3" marker-end="url(#ah)"/>
+<polyline points="960,1230 960,1265 430,1265 430,1595 360,1595" fill="none" stroke="#B33A3A" stroke-width="3" marker-end="url(#ah)"/>
+<rect x="80" y="120" width="280" height="70" rx="10" fill="#EAF2FB" stroke="#3B6EA5" stroke-width="2.5"/>
+<text x="220.0" y="148" font-size="19" font-weight="bold" fill="#3B6EA5" text-anchor="middle">job.json</text>
+<text x="220.0" y="172" font-size="15" fill="#2A3742" text-anchor="middle">bounds · seats · seed?</text>
+<text x="220.0" y="192" font-size="15" fill="#2A3742" text-anchor="middle">pricing? · method</text>
+<rect x="80" y="250" width="280" height="130" rx="10" fill="#EAF2FB" stroke="#3B6EA5" stroke-width="2.5"/>
+<text x="220.0" y="278" font-size="19" font-weight="bold" fill="#3B6EA5" text-anchor="middle">GATES (freeze)</text>
+<text x="220.0" y="302" font-size="15" fill="#2A3742" text-anchor="middle">bounds · seats · instruments</text>
+<text x="220.0" y="322" font-size="15" fill="#2A3742" text-anchor="middle">pricing (model seats)</text>
+<text x="220.0" y="342" font-size="15" fill="#2A3742" text-anchor="middle">seed files + author seats</text>
+<text x="220.0" y="362" font-size="15" fill="#2A3742" text-anchor="middle">approvals vs bar digest</text>
+<rect x="80" y="420" width="180" height="60" rx="10" fill="#FBE9E9" stroke="#B33A3A" stroke-width="2.5"/>
+<text x="170.0" y="448" font-size="19" font-weight="bold" fill="#B33A3A" text-anchor="middle">REFUSED</text>
+<text x="170.0" y="472" font-size="15" fill="#2A3742" text-anchor="middle">nothing written</text>
+<rect x="80" y="540" width="280" height="100" rx="10" fill="#EAF2FB" stroke="#3B6EA5" stroke-width="2.5"/>
+<text x="220.0" y="568" font-size="19" font-weight="bold" fill="#3B6EA5" text-anchor="middle">CUSTODY LOG OPENS</text>
+<text x="220.0" y="592" font-size="15" fill="#2A3742" text-anchor="middle">job-start · artifact-supplied</text>
+<text x="220.0" y="612" font-size="15" fill="#2A3742" text-anchor="middle">(seed, pre-freeze)</text>
+<text x="220.0" y="632" font-size="15" fill="#2A3742" text-anchor="middle">bar-frozen · work-started</text>
+<rect x="80" y="690" width="280" height="60" rx="10" fill="#E4EEF7" stroke="#2C5F8A" stroke-width="2.5"/>
+<text x="220.0" y="718" font-size="19" font-weight="bold" fill="#2C5F8A" text-anchor="middle">FROZEN</text>
+<text x="220.0" y="742" font-size="15" fill="#2A3742" text-anchor="middle">bar digest pinned</text>
+<rect x="480" y="650" width="320" height="120" rx="10" fill="#F3EEFA" stroke="#6B4FA1" stroke-width="2.5"/>
+<text x="640.0" y="678" font-size="19" font-weight="bold" fill="#6B4FA1" text-anchor="middle">ROUND r (1..N)</text>
+<text x="640.0" y="702" font-size="15" fill="#2A3742" text-anchor="middle">r=1 seed job: copy seed,</text>
+<text x="640.0" y="722" font-size="15" fill="#2A3742" text-anchor="middle">log artifact-produced</text>
+<text x="640.0" y="742" font-size="15" fill="#2A3742" text-anchor="middle">(author = seed author)</text>
+<text x="640.0" y="762" font-size="15" fill="#2A3742" text-anchor="middle">else: Maker (script/model/agent)</text>
+<rect x="480" y="830" width="320" height="100" rx="10" fill="#F3EEFA" stroke="#6B4FA1" stroke-width="2.5"/>
+<text x="640.0" y="858" font-size="19" font-weight="bold" fill="#6B4FA1" text-anchor="middle">EVALUATOR PANEL</text>
+<text x="640.0" y="882" font-size="15" fill="#2A3742" text-anchor="middle">every rubric dimension</text>
+<text x="640.0" y="902" font-size="15" fill="#2A3742" text-anchor="middle">+ held-out and planted controls</text>
+<text x="640.0" y="922" font-size="15" fill="#2A3742" text-anchor="middle">scores kept per dimension</text>
+<rect x="480" y="990" width="320" height="70" rx="10" fill="#FFF7E6" stroke="#B28A2E" stroke-width="2.5"/>
+<text x="640.0" y="1018" font-size="19" font-weight="bold" fill="#B28A2E" text-anchor="middle">ALL DIMENSIONS CONFORMED?</text>
+<text x="640.0" y="1042" font-size="15" fill="#2A3742" text-anchor="middle">(no averaging, ever)</text>
+<rect x="480" y="1120" width="320" height="80" rx="10" fill="#F3EEFA" stroke="#6B4FA1" stroke-width="2.5"/>
+<text x="640.0" y="1148" font-size="19" font-weight="bold" fill="#6B4FA1" text-anchor="middle">PARETO COMPARE</text>
+<text x="640.0" y="1172" font-size="15" fill="#2A3742" text-anchor="middle">better on >=1 dimension</text>
+<text x="640.0" y="1192" font-size="15" fill="#2A3742" text-anchor="middle">AND worse on none -> incumbent</text>
+<rect x="920" y="830" width="340" height="130" rx="10" fill="#FBE9E9" stroke="#B33A3A" stroke-width="2.5"/>
+<text x="1090.0" y="858" font-size="19" font-weight="bold" fill="#B33A3A" text-anchor="middle">NEEDS_OWNER (exit 2)</text>
+<text x="1090.0" y="882" font-size="15" fill="#2A3742" text-anchor="middle">maker_failed · no_artifact</text>
+<text x="1090.0" y="902" font-size="15" fill="#2A3742" text-anchor="middle">dormant_channel · cap_reached</text>
+<text x="1090.0" y="922" font-size="15" fill="#2A3742" text-anchor="middle">no_observation · runtime_error</text>
+<text x="1090.0" y="942" font-size="15" fill="#2A3742" text-anchor="middle">interrupted (Ctrl-C/SIGTERM)</text>
+<rect x="920" y="1010" width="340" height="60" rx="10" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2.5"/>
+<text x="1090.0" y="1038" font-size="19" font-weight="bold" fill="#2E7D32" text-anchor="middle">ACCEPTED (exit 0)</text>
+<text x="1090.0" y="1062" font-size="15" fill="#2A3742" text-anchor="middle">loop ends</text>
+<rect x="920" y="1140" width="340" height="90" rx="10" fill="#E4EEF7" stroke="#2C5F8A" stroke-width="2.5"/>
+<text x="1090.0" y="1168" font-size="19" font-weight="bold" fill="#2C5F8A" text-anchor="middle">FINALIZE (once only)</text>
+<text x="1090.0" y="1192" font-size="15" fill="#2A3742" text-anchor="middle">integrity gate: verify chain,</text>
+<text x="1090.0" y="1212" font-size="15" fill="#2A3742" text-anchor="middle">refuse double disposition</text>
+<rect x="920" y="1320" width="280" height="70" rx="10" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2.5"/>
+<text x="1060.0" y="1348" font-size="19" font-weight="bold" fill="#2E7D32" text-anchor="middle">record.json (exit 0)</text>
+<text x="1060.0" y="1372" font-size="15" fill="#2A3742" text-anchor="middle">disposition given / declined</text>
+<rect x="920" y="1460" width="340" height="80" rx="10" fill="#FDF3E0" stroke="#B26A1B" stroke-width="2.5"/>
+<text x="1090.0" y="1488" font-size="19" font-weight="bold" fill="#B26A1B" text-anchor="middle">GAP RECORD (exit 1)</text>
+<text x="1090.0" y="1512" font-size="15" fill="#2A3742" text-anchor="middle">x-edi-run.gaps[] names</text>
+<text x="1090.0" y="1532" font-size="15" fill="#2A3742" text-anchor="middle">exactly what never happened</text>
+<rect x="80" y="1560" width="280" height="70" rx="10" fill="#FBE9E9" stroke="#B33A3A" stroke-width="2.5"/>
+<text x="220.0" y="1588" font-size="19" font-weight="bold" fill="#B33A3A" text-anchor="middle">GateError (loud fail)</text>
+<text x="220.0" y="1612" font-size="15" fill="#2A3742" text-anchor="middle">tampered chain / bad check</text>
+<text x="220.0" y="1632" font-size="15" fill="#2A3742" text-anchor="middle">NO record written</text>
+<circle cx="220" cy="220" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="220" y="226" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">1</text>
+<text x="240" y="221" font-size="15" fill="#33414E" text-anchor="start">config in</text>
+<circle cx="164" cy="400" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="164" y="406" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">2</text>
+<text x="184" y="391" font-size="15" fill="#33414E" text-anchor="start">gate refuses</text>
+<circle cx="318" cy="460" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="318" y="466" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">3</text>
+<text x="338" y="437" font-size="15" fill="#33414E" text-anchor="start">all gates pass</text>
+<circle cx="220" cy="665" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="220" y="671" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">4</text>
+<text x="240" y="661" font-size="15" fill="#33414E" text-anchor="start">log chain begins</text>
+<circle cx="420" cy="720" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="420" y="726" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">5</text>
+<text x="420" y="746" font-size="15" fill="#33414E" text-anchor="middle">run starts</text>
+<circle cx="640" cy="800" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="640" y="806" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">6</text>
+<text x="660" y="801" font-size="15" fill="#33414E" text-anchor="start">packet to panel</text>
+<circle cx="640" cy="960" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="640" y="966" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">7</text>
+<text x="660" y="961" font-size="15" fill="#33414E" text-anchor="start">scores per dimension</text>
+<circle cx="830" cy="1025" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="830" y="1031" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">8</text>
+<text x="880" y="1001" font-size="15" fill="#33414E" text-anchor="middle">YES: all conformed</text>
+<circle cx="640" cy="1090" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="640" y="1096" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">9</text>
+<text x="660" y="1095" font-size="15" fill="#33414E" text-anchor="start">not yet</text>
+<circle cx="430" cy="960" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="430" y="966" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">10</text>
+<text x="415" y="967" font-size="15" fill="#33414E" text-anchor="end">better: next round</text>
+<circle cx="860" cy="1080" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="860" y="1086" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">11</text>
+<text x="845" y="1105" font-size="15" fill="#33414E" text-anchor="end">dormant channel</text>
+<circle cx="1000" cy="755" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="1000" y="761" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">12</text>
+<text x="1020" y="760" font-size="15" fill="#33414E" text-anchor="start">maker failed / no artifact</text>
+<circle cx="860" cy="880" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="860" y="886" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">13</text>
+<text x="860" y="856" font-size="15" fill="#33414E" text-anchor="middle">unobserved / evaluator crash</text>
+<circle cx="1090" cy="1105" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="1090" y="1111" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">14</text>
+<text x="1110" y="1110" font-size="15" fill="#33414E" text-anchor="start">owner decision</text>
+<circle cx="1320" cy="1042" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="1320" y="1048" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">15</text>
+<text x="1320" y="876" font-size="15" fill="#33414E" text-anchor="middle">to finalize</text>
+<circle cx="980" cy="1275" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="980" y="1281" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">16</text>
+<text x="1000" y="1280" font-size="15" fill="#33414E" text-anchor="start">disposition recorded</text>
+<circle cx="1240" cy="1400" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="1240" y="1406" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">17</text>
+<text x="1240" y="1424" font-size="15" fill="#33414E" text-anchor="middle">incomplete run</text>
+<circle cx="430" cy="1400" r="16" fill="#1A2733" stroke="#FFFFFF" stroke-width="2.5"/>
+<text x="430" y="1406" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">18</text>
+<text x="450" y="1405" font-size="15" fill="#33414E" text-anchor="start">chain verify fails</text>
+<text x="80" y="1700" font-size="16" fill="#5A6B7B">Freeze writes nothing until every gate passes. The loop is one process making one blocking call per seat — no watchers, no hand-offs. Every arrow is a hash-chained event in job.jsonl.</text>
 </svg>
