@@ -17,10 +17,15 @@ def _load_key(env_name="OPENROUTER_API_KEY"):
     return ""
 
 
-def _chat_json(url, model_id, sys_prompt, user_prompt, key_env="OPENROUTER_API_KEY", timeout=60):
+def _require_https(url):
+    """Credentials never travel over plain http; loopback is exempt (recheck H1)."""
     u = urllib.parse.urlparse(url)
     if u.scheme != "https" and u.hostname not in ("localhost", "127.0.0.1", "::1"):
         raise ValueError(f"refusing to send credentials over non-https endpoint: {url}")
+
+
+def _chat_json(url, model_id, sys_prompt, user_prompt, key_env="OPENROUTER_API_KEY", timeout=60):
+    _require_https(url)
     key = _load_key(key_env)
     headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})}
     extra = {"reasoning": {"effort": "low"}} if "openrouter.ai" in url else {}
@@ -55,7 +60,7 @@ def sandbox_prefix(stype, jd, sb_p):
         # out is the relay to the proxy's Unix socket. Every job's controls are masked
         # (round-2 B): control sets are reused across jobs under one jobs root.
         home = pathlib.Path.home().resolve()  # seatbelt/bwrap match canonical paths only
-        cmd = ["bwrap", "--die-with-parent", "--unshare-pid", "--unshare-net",
+        cmd = ["bwrap", "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-net",
                "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
                "--tmpfs", str(jd)]
         for ho in sorted(set(jd.parent.glob("*/held_out")) | set(jd.parent.rglob("held_out"))):  # every job's controls, any depth
@@ -130,7 +135,14 @@ _RELAY = (
     "    while True:\n"
     "        c, _ = srv.accept()\n"
     "        u = socket.socket(socket.AF_UNIX)\n"
-    "        u.connect(sock_path)\n"
+    "        for _ in range(60):\n"  # the proxy socket may not exist yet at first accept
+    "            try:\n"
+    "                u.connect(sock_path)\n"
+    "                break\n"
+    "            except OSError:\n"
+    "                import time; time.sleep(0.05)\n"
+    "        else:\n"
+    "            c.close(); continue\n"  # never kill the serve loop (recheck #6)
     "        threading.Thread(target=pipe, args=(c, u), daemon=True).start()\n"
     "        threading.Thread(target=pipe, args=(u, c), daemon=True).start()\n"
     "threading.Thread(target=serve, daemon=True).start()\n"
@@ -170,6 +182,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
             # credentials, and every token is metered toward the cost cap.
             usage_log = sb_p / "proxy-usage.jsonl"
             upstream = maker_cfg["url"]
+            _require_https(upstream)  # the proxy holds the key: no plain http (recheck H1)
             key = _load_key(maker_cfg.get("apiKeyEnv", "OPENROUTER_API_KEY"))
             calls = []
 
@@ -269,7 +282,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 # subtree is bound back read-only. The packet is read from the workspace copy.
                 relay = [sys.executable, "-I", "-c", _RELAY, str(sb_p / "proxy.sock"), str(inner_port)] if stype == "bwrap" else []
                 cmd = (sandbox_prefix(stype, jd, sb_p) or []) + relay + cmd
-                proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
+                proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)), stdin=subprocess.DEVNULL)  # no inherited tty: no TIOCSTI keystroke injection (recheck #5)
                 if proc.returncode != 0:
                     raise RuntimeError(f"Agent Maker failed ({proc.returncode}): {proc.stderr.strip()} | cmd[0:4]={cmd[:4]}")
                 if not any(gates.safe_rel(sf, sb_art).is_file() for sf in subject_files):
@@ -286,7 +299,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 srv.server_close()
         elif "command" in maker_cfg:
             cmd, env = _resolve_cmd(list(maker_cfg["command"]), job_dir), {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": tempfile.gettempdir()}
-            proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)))
+            proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)), stdin=subprocess.DEVNULL)  # no inherited tty: no TIOCSTI keystroke injection (recheck #5)
             if proc.returncode != 0:
                 raise RuntimeError(f"Maker failed ({proc.returncode}): {proc.stderr.strip()}")
         else:

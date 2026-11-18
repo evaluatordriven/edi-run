@@ -135,7 +135,7 @@ def held_out_needles(job_dir):
     """D4.9 needle set: full-file digests plus every WINDOW-character window of every held-out
     line (case/whitespace-canonicalized), minus any window that also occurs in bar.md or
     method.md -- wording the Maker is already given is not held-out (D3.held-out). Disclosed
-    limits: paraphrase, and held-out lines shorter than WINDOW, are not matched."""
+    limits: paraphrase is not matched; held-out lines shorter than WINDOW are matched whole-line."""
     held_dir, needles = job_dir / "held_out", set()
     pub = _canon("\n".join((job_dir / f).read_text(encoding="utf-8", errors="ignore") for f in ("bar.md", "method.md") if (job_dir / f).is_file()))
     marker = _canon(WITHHELD)
@@ -143,6 +143,12 @@ def held_out_needles(job_dir):
         needles.add(sha256_file(p).casefold())
         for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines():
             c = _canon(ln)
+            if 0 < len(c) < WINDOW:
+                # short held-out lines never yield a full window — take the whole
+                # canonical line as one needle (round-2 recheck #3)
+                if c not in pub and c not in marker:
+                    needles.add(c)
+                continue
             for i in range(0, len(c) - WINDOW + 1):
                 w = c[i:i + WINDOW]
                 if w not in pub and w not in marker:

@@ -113,6 +113,30 @@ class FindingH_UnresolvedHome(_R2Base):
         self.assertIn("aws=DENIED", self._memo_tail(job))
 
 
+class FindingI_ShortLineNeedle(_R2Base):
+    def test_i_short_held_out_lines_are_whole_line_needles(self):
+        """Recheck #3: a held-out line shorter than WINDOW (e.g. 29 chars) yielded no
+        32-char window and passed the filter untouched -- for script/model Makers
+        the filter is the ONLY exclusion mechanism."""
+        job = self.tmp / "job-short"
+        (job / "held_out").mkdir(parents=True)
+        (job / "held_out" / "key.txt").write_text("No header and no figure here.\n")
+        needles = gates.held_out_needles(job)
+        self.assertIn(gates._canon("No header and no figure here."), needles)
+
+
+class FindingJ_HttpUpstream(_R2Base):
+    def test_j_agent_proxy_refuses_plain_http_upstream(self):
+        """Recheck H1: the proxy holds the key; a configured http:// upstream
+        (loopback-range 127.0.0.2 is NOT exempt) must be refused, not served."""
+        import adapters
+        for url in ("http://127.0.0.2/v1", "http://example.invalid/v1"):
+            with self.assertRaises(ValueError):
+                adapters._require_https(url)
+        adapters._require_https("https://example.invalid/v1")  # control: accepted
+        adapters._require_https("http://127.0.0.1/v1")  # loopback exempt
+
+
 class FindingF_AgentTmpdir(_R2Base):
     def test_f_the_sandboxed_agent_has_a_usable_temp_root(self):
         """Deep-review P1: writes are workspace-confined, so tempfile must resolve
