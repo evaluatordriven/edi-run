@@ -113,6 +113,59 @@ class FindingH_UnresolvedHome(_R2Base):
         self.assertIn("aws=DENIED", self._memo_tail(job))
 
 
+class FindingI_ShortLineNeedle(_R2Base):
+    def test_i_short_held_out_lines_are_whole_line_needles(self):
+        """Recheck #3: a held-out line shorter than WINDOW (e.g. 29 chars) yielded no
+        32-char window and passed the filter untouched -- for script/model Makers
+        the filter is the ONLY exclusion mechanism."""
+        job = self.tmp / "job-short"
+        (job / "held_out").mkdir(parents=True)
+        (job / "held_out" / "key.txt").write_text("No header and no figure here.\n")
+        windows, digests, lines = gates.held_out_needles(job)
+        self.assertIn(gates._canon("No header and no figure here."), lines)
+        # frontier-review blocker regression: short common words must NOT become
+        # substring needles (they scrubbed legitimate feedback and GateError-ed legal packets)
+        (job / "held_out" / "labels.txt").write_text("yes\nno\nN/A\nStep 1\n")
+        _, _, short = gates.held_out_needles(job)
+        self.assertEqual(short, {gates._canon("No header and no figure here.")})  # <MIN_LINE skipped
+        item = {"feedback": "The script prints yes at the end. We note the northern approach; do not reformat."}
+        out, _ = gates.scrub_held_out([item], gates.held_out_needles(job))
+        self.assertNotIn(gates.WITHHELD, out[0]["feedback"])  # no false-positive scrub
+        # the 29-char line IS matched, but only whole-line: mid-word echoes survive,
+        # a line-echo is redacted
+        short_line = "No header and no figure here."
+        out2, w2 = gates.scrub_held_out(
+            [{"a": "Overall there was " + short_line + " in the control."}],
+            gates.held_out_needles(job))
+        self.assertEqual(w2, 1)
+        self.assertIn(gates.WITHHELD, out2[0]["a"])
+        out3, w3 = gates.scrub_held_out(
+            [{"a": "the no-header and no-figure here-abouts clause"}],
+            gates.held_out_needles(job))
+        self.assertEqual(w3, 0)  # word-boundary respected: mid-word echo survives
+        # verification follow-ups: punctuation- and quote-delimited echoes are leaks too
+        out4, w4 = gates.scrub_held_out(
+            [{"a": "the verdict was '" + short_line + "', so revise."}],
+            gates.held_out_needles(job))
+        self.assertEqual(w4, 1)
+        out5, w5 = gates.scrub_held_out(
+            [{"a": "Summary: " + short_line + "."}],
+            gates.held_out_needles(job))
+        self.assertEqual(w5, 1)
+
+
+class FindingJ_HttpUpstream(_R2Base):
+    def test_j_agent_proxy_refuses_plain_http_upstream(self):
+        """Recheck H1: the proxy holds the key; a configured http:// upstream
+        (loopback-range 127.0.0.2 is NOT exempt) must be refused, not served."""
+        import adapters
+        for url in ("http://127.0.0.2/v1", "http://example.invalid/v1"):
+            with self.assertRaises(ValueError):
+                adapters._require_https(url)
+        adapters._require_https("https://example.invalid/v1")  # control: accepted
+        adapters._require_https("http://127.0.0.1/v1")  # loopback exempt
+
+
 class FindingF_AgentTmpdir(_R2Base):
     def test_f_the_sandboxed_agent_has_a_usable_temp_root(self):
         """Deep-review P1: writes are workspace-confined, so tempfile must resolve
