@@ -461,6 +461,33 @@ class TestEDIRuntime(unittest.TestCase):
         st_s = json.loads((job_slow / "state.json").read_text())
         self.assertEqual((st_s["terminal_state"], st_s["reason"]), ("needs_owner", "maker_failed"))
 
+    def test_meter_chain_amendments_and_tamper_refusal(self):
+        # the usage log is the spend source of truth: hash-chained, append-only,
+        # amendment rows mark discarded rounds without rewriting history
+        import metering
+        job = self._make_base_job(subdir="job_meter")
+        m = metering.Meter(job, pricing={"default": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}}, bounds={"max_cost_usd": 10.0})
+        r1 = m.meter_call("maker", "m1", "https://x/v1", None, usage={"prompt_tokens": 1000, "completion_tokens": 500})
+        r2 = m.meter_call("evaluator:E1", "m1", "https://x/v1", None, usage={"prompt_tokens": 100, "completion_tokens": 0})
+        self.assertAlmostEqual(m.accrued(), (1600 / 1e6), places=9)  # 1500 + 100 tokens
+        m.verify()  # chain intact
+        # amendment marks rows as discarded: they stop counting, history intact
+        m.amend([r1["digest"]], note="discarded round")
+        self.assertAlmostEqual(m.accrued(), (100 / 1e6), places=9)  # only the un-amended row remains
+        m.verify()
+        # tamper is refused at verify: a hand-edited log cannot re-accrue
+        rows = [json.loads(ln) for ln in (job / "usage.jsonl").read_text().splitlines()]
+        rows[0]["cost"] = 99.0
+        (job / "usage.jsonl").write_text("".join(json.dumps(r, sort_keys=True) + "\n" for r in rows))
+        m2 = metering.Meter(job, pricing={}, bounds={})
+        with self.assertRaises(ValueError):
+            m2.verify()
+        # the cap fires BEFORE the call that would breach it (C4): accrued spend
+        # alone above the cap trips the check with no call in flight
+        m3 = metering.Meter(job, pricing={"default": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}}, bounds={"max_cost_usd": 0.00005})
+        with self.assertRaises(metering.CapExceeded):
+            m3.check_cap("{}")
+
     def test_gap_emission_assembly_failure_and_emitter_can_fail(self):
         # §6 path 2: inputs assembly failure becomes a gap-listed record, exit 1.
         job_rej = self._make_base_job(subdir="job_gap_asm")
@@ -539,9 +566,11 @@ class TestEDIRuntime(unittest.TestCase):
         cfg["bounds"]["max_cost_usd"] = 0.01
         (job2 / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         loop.freeze_job(job2)
-        st = json.loads((job2 / "state.json").read_text())
-        st["cost_usd"] = 0.5
-        (job2 / "state.json").write_text(json.dumps(st, indent=2), encoding="utf-8")
+        # preset spend through the durable meter: state cost_usd is now derived
+        # from usage.jsonl, so prior spend is seeded where it is authoritative
+        from metering import Meter
+        m = Meter(job2, pricing=cfg.get("pricing"), bounds=cfg.get("bounds"))
+        m._append({"kind": "call", "who": "maker", "model": "test", "endpoint": "x", "usage": {}, "cost": 0.5})
         self.assertEqual(loop.run_job(job2), 2)
         st2 = json.loads((job2 / "state.json").read_text())
         self.assertEqual((st2["terminal_state"], st2["reason"]), ("needs_owner", "cap_reached"))

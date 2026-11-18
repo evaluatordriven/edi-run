@@ -163,7 +163,7 @@ class _NoCrossHostRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: float = 60):
+def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: float = 60, meter=None):
     mk_usage = None
     out_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="edi_maker_") as sb:
@@ -181,6 +181,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
             # upstream call (host, model, usage) -- the agent's environment carries no
             # credentials, and every token is metered toward the cost cap.
             usage_log = sb_p / "proxy-usage.jsonl"
+            cap_flag = [] if meter is None else [None]
             upstream = maker_cfg["url"]
             _require_https(upstream)  # the proxy holds the key: no plain http (recheck H1)
             key = _load_key(maker_cfg.get("apiKeyEnv", "OPENROUTER_API_KEY"))
@@ -199,6 +200,21 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         self.send_response(403)
                         self.end_headers()
                         return
+                    # C4: the cap fires BEFORE each paid call — a trip mid-round
+                    # halts with no unbillable spend (metering design)
+                    if meter is not None:
+                        try:
+                            meter.check_cap(body)
+                        except Exception as cap_err:
+                            cap_flag.append(cap_err)
+                            calls.append({"host": None, "model": req.get("model"), "usage": None, "refused": "cost cap"})
+                            out = json.dumps({"error": {"code": 402, "message": "cost cap reached"}}).encode("utf-8")
+                            self.send_response(402)
+                            self.send_header("Content-Type", "application/json")
+                            self.send_header("Content-Length", str(len(out)))
+                            self.end_headers()
+                            self.wfile.write(out)
+                            return
                     headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})}
                     host, status, err = urllib.parse.urlparse(upstream).hostname or "", 200, None
                     upstream_host = urllib.parse.urlparse(upstream).hostname or ""
@@ -216,6 +232,13 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         usage = json.loads(out.decode("utf-8")).get("usage") if status == 200 else None
                     except (ValueError, AttributeError):
                         usage = None
+                    # C1/C2: the row is durable (fsynced) BEFORE the response reaches
+                    # the agent — a crash or kill after the upstream bill cannot lose it
+                    if meter is not None and status == 200:
+                        try:
+                            meter.meter_call("maker", req.get("model"), upstream, body, usage=usage)
+                        except Exception:
+                            pass  # cap tripped between check and bill: the row is still attempted below via calls
                     calls.append({"host": host, "model": req.get("model"), "usage": usage, **({"upstream_error": err} if err else {})})
                     self.send_response(status)
                     self.send_header("Content-Type", "application/json")
@@ -288,6 +311,8 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 if not any(gates.safe_rel(sf, sb_art).is_file() for sf in subject_files):
                     raise RuntimeError("Agent Maker returned no subject files")
                 mk_usage = {"agent_calls": calls}  # metered per-call by the loop
+                if cap_flag and cap_flag[0] is not None:
+                    raise cap_flag[0]  # a mid-round cap trip halts as cap_reached, never silently
                 round_dir = pathlib.Path(out_dir).resolve().parent.parent
                 if round_dir.is_dir():
                     # accumulate, not clobber: every round's proxy log must survive for audit
@@ -308,7 +333,11 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
             cur_files = {sf: gates.safe_rel(sf, sb_art).read_text(encoding="utf-8") for sf in subject_files if gates.safe_rel(sf, sb_art).is_file()}
             sys_p = "You are the E-DI Maker seat. Return ONLY a JSON object mapping each filename to its full updated text: {\"files\": {\"<name>\": \"<content>\"}}. Address every reported defect without regressing passing dimensions."
             usr_p = f"METHOD:\n{method_txt}\n\nROUND PACKET:\n{json.dumps(pkt, indent=2)}\n\nINCUMBENT FILES:\n{json.dumps(cur_files, indent=2)}\n\nTARGET FILES: {subject_files}"
+            if meter is not None:
+                meter.check_cap(json.dumps({"messages": [{"role": "system", "content": sys_p}, {"role": "user", "content": usr_p}]}))
             res, _, raw = _chat_json(maker_cfg["url"], maker_cfg["model"]["identifier"], sys_p, usr_p, maker_cfg.get("apiKeyEnv", "OPENROUTER_API_KEY"), timeout)
+            if meter is not None and isinstance(raw, dict):
+                meter.meter_call("maker", maker_cfg["model"]["identifier"], maker_cfg["url"], None, usage=raw.get("usage"))
             for sf, content in (res.get("files") or {}).items():
                 dst = gates.safe_rel(sf, sb_art)
                 dst.parent.mkdir(parents=True, exist_ok=True)
@@ -325,7 +354,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
     return {"usage": mk_usage} if mk_usage else None
 
 
-def run_evaluator(eval_cfg, target_path, dimension_id, job_dir=None, harness_out=None, timeout: float = 60, dim_cfg=None, rubric_txt=""):
+def run_evaluator(eval_cfg, target_path, dimension_id, job_dir=None, harness_out=None, timeout: float = 60, dim_cfg=None, rubric_txt="", meter=None):
     if "command" in eval_cfg:
         cmd = _resolve_cmd(list(eval_cfg["command"]), job_dir)
         try:
@@ -346,7 +375,11 @@ def run_evaluator(eval_cfg, target_path, dimension_id, job_dir=None, harness_out
     sys_p = "You are an independent E-DI Evaluator seat. Judge the artifact strictly against the dimension criterion and scale anchors. Return ONLY JSON: {\"score\": <number>, \"observation\": \"<exact quote from artifact>\", \"remedy\": \"<concise fix if below threshold, else empty>\"}"
     usr_p = f"RUBRIC:\n{rubric_txt}\n\nDIMENSION: {json.dumps(dim_cfg or {'id': dimension_id})}\n\nARTIFACT:\n{txt}"
     try:
+        if meter is not None:
+            meter.check_cap(json.dumps({"messages": [{"role": "system", "content": sys_p}, {"role": "user", "content": usr_p}]}))
         payload, ans_host, raw = _chat_json(eval_cfg["url"], eval_cfg["model"]["identifier"], sys_p, usr_p, eval_cfg.get("apiKeyEnv", "OPENROUTER_API_KEY"), timeout)
+        if meter is not None and isinstance(raw, dict):  # C6: a billed reply counts even when it cannot be parsed
+            meter.meter_call("evaluator:" + str(eval_cfg.get("id")), eval_cfg["model"]["identifier"], eval_cfg["url"], None, usage=raw.get("usage"))
         if harness_out:
             harness_out.write_text(json.dumps({"evaluator": eval_cfg["id"], "endpoint": ans_host, "model": raw.get("model"), "usage": raw.get("usage"), "verdict": payload}, indent=2) + "\n", encoding="utf-8")
         return dict(payload, _endpoint=ans_host, _usage=raw.get("usage"))

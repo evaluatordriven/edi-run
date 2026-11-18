@@ -2,6 +2,7 @@
 from collections import Counter
 import json, math, os, pathlib, shutil, signal, subprocess, sys, time
 import adapters, gates
+from metering import Meter, CapExceeded
 
 VENDOR = pathlib.Path(__file__).resolve().parent / "vendor"
 sys.path.insert(0, str(VENDOR))
@@ -145,7 +146,7 @@ def freeze_job(job_dir, started_at=None):
     return 0
 
 
-def _eval_batch(cfg, job_dir, round_n, art_dir, deadline):
+def _eval_batch(cfg, job_dir, round_n, art_dir, deadline, meter=None):
     (job_dir / "evidence").mkdir(parents=True, exist_ok=True)
     bid, dims = f"B{round_n}", cfg["bar"]["dimensions"]
     scales, ordered = {d["id"]: d.get("scale") for d in dims}, sorted(cfg["evaluators"], key=lambda e: 0 if e["kind"] == "script" else 1)
@@ -157,7 +158,7 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, deadline):
         for d in dims:
             did, thr = d["id"], float((scales[d["id"]] or {}).get("threshold", 4.0))
             for tag, path, exp in (("clean", clean_p, "conforms"), ("planted", planted_p, "does_not_conform")):
-                cid, res = f"K-{bid}-{ev_id}-{did}-{tag}", adapters.run_evaluator(ev, path, did, job_dir=job_dir, timeout=max(1.0, deadline - time.time()), dim_cfg=d, rubric_txt=rub_txt)
+                cid, res = f"K-{bid}-{ev_id}-{did}-{tag}", adapters.run_evaluator(ev, path, did, job_dir=job_dir, timeout=max(1.0, deadline - time.time()), dim_cfg=d, rubric_txt=rub_txt, meter=meter)
                 sc = res.get("score")
                 if sc is None or not math.isfinite(float(sc)):
                     bad_dims.add(did)
@@ -175,7 +176,7 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, deadline):
             did, sc_cfg = d["id"], scales[d["id"]]
             for run_i in range(1, int(ev.get("runs", 2)) + 1):
                 har = job_dir / "evidence" / f"harness-{ev_id}-{bid}.json" if ev["kind"] == "model" and run_i == 1 else None
-                res = adapters.run_evaluator(ev, art_dir, did, job_dir=job_dir, harness_out=har, timeout=max(1.0, deadline - time.time()), dim_cfg=d, rubric_txt=rub_txt)
+                res = adapters.run_evaluator(ev, art_dir, did, job_dir=job_dir, harness_out=har, timeout=max(1.0, deadline - time.time()), dim_cfg=d, rubric_txt=rub_txt, meter=meter)
                 if did in bad_dims or "unobserved" in res or res.get("score") is None:
                     u = res.get("unobserved") or {"channel": ev_id, "reason": "evaluator failed batch control (CL1-9)"}
                     chk = {"dimension": did, "evaluator": ev_id, "run": run_i, "batch": bid, "at": custody_record.now(), "outcome": "unobserved", "score": None, "failureCondition": f"score < {sc_cfg['threshold']}" if sc_cfg else d["criterion"], "evidence": None, "unobserved": u}
@@ -277,6 +278,11 @@ def run_job(job_dir):
     dims, floors = [d["id"] for d in cfg["bar"]["dimensions"]], {d["id"]: float(cfg.get("rejectFloor", (d.get("scale") or {}).get("floor", 0.0))) for d in cfg["bar"]["dimensions"]}
     held_hashes = {gates.sha256_file(p) for p in (job_dir / "held_out").rglob("*") if p.is_file()} if (job_dir / "held_out").is_dir() else set()
     pricing = cfg.get("pricing", {})
+    # the spend source of truth: durable, hash-chained usage rows (C1-C7). A
+    # pre-existing log is verified before anything accrues onto it.
+    meter = Meter(job_dir, pricing=pricing, bounds=cfg.get("bounds"))
+    if (job_dir / "usage.jsonl").is_file():
+        meter.verify()
     prev_term = None
     if hasattr(signal, "SIGTERM"):
         def _on_term(signum, frame):
@@ -286,6 +292,7 @@ def run_job(job_dir):
       for r in range(1, max_rounds + 1):
         wall_base = float(state.get("wall_spent_seconds", 0.0))
         rem_s = max_wall - wall_base - (time.time() - t0)
+        state["cost_usd"] = round(meter.accrued(), 6)  # derived from the durable usage log
         if rem_s <= 0 or state.get("cost_usd", 0.0) >= max_cost:
             state.update(terminal_state="needs_owner", reason="cap_reached")
             break
@@ -315,7 +322,7 @@ def run_job(job_dir):
             state["seed_round"] = r
         else:
             try:
-                mk = adapters.run_maker(cfg["maker"], r_dir / "packet.json", art_dir, cfg["subjectFiles"], job_dir, timeout=rem_s)
+                mk = adapters.run_maker(cfg["maker"], r_dir / "packet.json", art_dir, cfg["subjectFiles"], job_dir, timeout=rem_s, meter=meter)
                 if isinstance(mk, dict) and mk.get("usage"):
                     mk_id = cfg["maker"].get("model", {}).get("identifier") if isinstance(cfg["maker"].get("model"), dict) else None
                     if "agent_calls" in mk["usage"]:
@@ -323,9 +330,13 @@ def run_job(job_dir):
                     else:
                         rows = [{"evaluator": "maker", "model": mk_id, "case": "maker", "usage": mk["usage"]}]
                     _accrue(state, rows, pricing)
+                    state["cost_usd"] = round(meter.accrued(), 6)
             except (TimeoutError, subprocess.TimeoutExpired):
                 state.update(terminal_state="needs_owner", reason="maker_failed",
                              maker_error="maker wall-clock deadline exceeded (max_wall_seconds=%s)" % (cfg.get("bounds") or {}).get("max_wall_seconds"))
+                break
+            except CapExceeded:
+                state.update(terminal_state="needs_owner", reason="cap_reached")  # a mid-round cap trip is the same terminal as a boundary trip
                 break
             except gates.GateError:
                 raise  # integrity/security violations fail loud, never become dispositions
@@ -339,9 +350,14 @@ def run_job(job_dir):
         state["last_candidate_digest"] = cand_digest
         if maker_ran:
             ev_prod = _append(job_dir, "artifact-produced", cfg["maker"]["name"], [art_dir / f for f in cfg["subjectFiles"]], {})
-        checks, ctls, s_rows, exts, d_scores, defects, solutions, usages = _eval_batch(cfg, job_dir, r, art_dir, t0 + max_wall - wall_base)
+        try:
+            checks, ctls, s_rows, exts, d_scores, defects, solutions, usages = _eval_batch(cfg, job_dir, r, art_dir, t0 + max_wall - wall_base, meter=meter)
+        except CapExceeded:
+            state.update(terminal_state="needs_owner", reason="cap_reached")  # emitted checks stay; the round never becomes incumbent
+            break
         state["rounds"][str(r)] = {"producedAt": ev_prod["at"], "digest": cand_digest, "checks": checks, "controls": ctls, "scores": s_rows, "external": exts, "dim_scores": d_scores}
         _accrue(state, usages, pricing)
+        state["cost_usd"] = round(meter.accrued(), 6)  # the meter is authoritative; _accrue's figure is display-only
         if any(c["outcome"] == "unobserved" for c in checks):
             if state["incumbent_round"] is None:
                 state.update(incumbent_round=r, incumbent_digest=cand_digest, incumbent_scores=d_scores)
@@ -378,6 +394,9 @@ def run_job(job_dir):
             signal.signal(signal.SIGTERM, prev_term)
         if state.get("terminal_state") is None:  # SIGTERM / hard interruption of any kind
             state.update(terminal_state="needs_owner", reason="interrupted")
+        # the meter is authoritative at EVERY exit: a crash or timeout after
+        # metered calls still shows their spend (C1/C2)
+        state["cost_usd"] = round(meter.accrued(), 6)
         state["wall_spent_seconds"] = float(state.get("wall_spent_seconds", 0.0)) + (time.time() - t0)
         if state.get("terminal_state") == "needs_owner":
             _write_escalation(job_dir, state, cfg)
