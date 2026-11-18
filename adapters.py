@@ -33,6 +33,14 @@ def _chat_json(url, model_id, sys_prompt, user_prompt, key_env="OPENROUTER_API_K
     return json.loads(m.group(1) if m else txt), host, raw
 
 
+# Home credential-dotfile family denied to the agent on BOTH platforms (one
+# list, consumed by the seatbelt profile and the bwrap masks -- they must not
+# drift; round-2 close-out #1).
+_HOME_DOTFILE_DIRS = ("config", "aws", "gnupg", "kube", "docker")
+_HOME_DOTFILE_FILES = ("netrc", "git-credentials", "zsh_history", "bash_history", "wget-hsts", "npmrc", "pypirc",
+                       "gitcookies", "dockercfg", "yarnrc.yml", "pgpass", "my.cnf", "vault-token", "s3cfg", "boto", "hgrc")
+
+
 def sandbox_prefix(stype, jd, sb_p):
     """The sandbox argv prefix for one launch, shared by the launcher and the
     capability probe so the probe exercises the exact flag shape used at runtime.
@@ -46,7 +54,7 @@ def sandbox_prefix(stype, jd, sb_p):
         # is ever created on the host. Own network namespace (round-2 E): the only way
         # out is the relay to the proxy's Unix socket. Every job's controls are masked
         # (round-2 B): control sets are reused across jobs under one jobs root.
-        home = pathlib.Path.home()
+        home = pathlib.Path.home().resolve()  # seatbelt/bwrap match canonical paths only
         cmd = ["bwrap", "--die-with-parent", "--unshare-pid", "--unshare-net",
                "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
                "--tmpfs", str(jd)]
@@ -59,6 +67,15 @@ def sandbox_prefix(stype, jd, sb_p):
             cmd += ["--tmpfs", str(home / ".ssh")]
         if (home / ".hermes" / ".env").is_file():
             cmd += ["--ro-bind", "/dev/null", str(home / ".hermes" / ".env")]
+        # credential-dotfile parity with the macOS profile (round-2 close-out #1)
+        for n in _HOME_DOTFILE_DIRS:
+            d = home / ("." + n)
+            if d.is_dir():
+                cmd += ["--tmpfs", str(d)]
+        for n in _HOME_DOTFILE_FILES:
+            f = home / ("." + n)
+            if f.is_file():
+                cmd += ["--ro-bind", "/dev/null", str(f)]
         return cmd + ["--bind", str(sb_p), str(sb_p)]
     return None
 
@@ -210,16 +227,16 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 cmd = _resolve_cmd(list(maker_cfg["command"]), job_dir)
                 stype = (maker_cfg.get("sandbox") or {}).get("type")
                 jd = pathlib.Path(job_dir).resolve()  # seatbelt matches canonical paths only
-                home = pathlib.Path.home()
+                home = pathlib.Path.home().resolve()  # seatbelt matches canonical paths only
                 if stype not in ("sandbox-exec", "bwrap"):
                     raise gates.GateError(f"unknown sandbox type {stype}; supported: sandbox-exec (macOS), bwrap (Linux)")
                 if stype == "sandbox-exec":
                     q = chr(34)  # seatbelt profiles quote paths with double quotes
                     # Reads: default-allow except held-out material, the custody/evidence files
                     # (the Maker works from the packet, not the log), and secret files.
-                    # Writes: confined to the agent workspace. Network stays open so the agent
-                    # can reach the local proxy; it holds no key and the proxy rejects
-                    # undeclared models (keyless-open-endpoint exfil is a disclosed limit).
+                    # Writes: confined to the agent workspace. Network is denied except
+                    # loopback to the local proxy; the agent holds no key and the proxy
+                    # rejects undeclared models (see README for the disclosed limits).
                     (sb_p / "agent.sb").write_text(
                         "(version 1)(allow default)\n"
                         "(deny file-write*)\n"
@@ -235,18 +252,19 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         # read what the deny list does not name (round-2 adversarial #7)
                         + "".join(
                             f"(deny file-read* (subpath {q}{home / ('.' + n)}{q}))\n"
-                            for n in ("config", "aws", "netrc", "git-credentials", "gnupg", "kube", "docker", "config/gcloud")
+                            for n in _HOME_DOTFILE_DIRS
                         )
                         + "".join(
                             f"(deny file-read* (literal {q}{home / ('.' + n)}{q}))\n"
-                            for n in ("zsh_history", "bash_history", "netrc", "wget-hsts", "npmrc", "pypirc")
+                            for n in _HOME_DOTFILE_FILES
                         )
                         + "(deny file-read* (regex #\"/held_out(\\.|/|$)\"))\n"
                         "(deny network*)\n"
                         f"(allow network-outbound (remote ip {q}localhost:{srv.server_port}{q}))\n",
                         encoding="utf-8")
-                # bwrap: keep the network namespace (the agent must reach the loop-local
-                # proxy); the whole job dir is masked with a tmpfs -- held_out, evidence,
+                # bwrap: fresh network namespace (round-2 E) -- the only network path is
+                # the relay to the proxy's Unix socket; the whole job dir is masked with
+                # a tmpfs -- held_out, evidence,
                 # and the custody files live inside it -- then the agent's own scripts
                 # subtree is bound back read-only. The packet is read from the workspace copy.
                 relay = [sys.executable, "-I", "-c", _RELAY, str(sb_p / "proxy.sock"), str(inner_port)] if stype == "bwrap" else []

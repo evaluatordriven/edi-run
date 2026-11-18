@@ -139,4 +139,4 @@ deletes anything without the Owner's explicit ruling naming the action.
 3. RESOLVED (2026-11-17, round-2 briefing): build `edi.py freeze --dry-run` in the
    runtime rather than a second preflight inside the skill; `preflight.py` stays a thin
    wrapper around it. Land the sandbox fixes first — a freeze-time sandbox check that
-   writes to the host is a defect the dry-run must not inherit. that flag.
+   writes to the host is a defect the dry-run must not inherit.
