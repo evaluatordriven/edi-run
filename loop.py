@@ -282,7 +282,10 @@ def run_job(job_dir):
     # pre-existing log is verified before anything accrues onto it.
     meter = Meter(job_dir, pricing=pricing, bounds=cfg.get("bounds"))
     if (job_dir / "usage.jsonl").is_file():
-        meter.verify()
+        try:
+            meter.verify()
+        except ValueError as e:
+            raise gates.GateError(f"usage.jsonl failed chain verification: {e} (spend integrity)")
     prev_term = None
     if hasattr(signal, "SIGTERM"):
         def _on_term(signum, frame):

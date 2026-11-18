@@ -12,6 +12,7 @@ import json
 import math
 import os
 import pathlib
+import threading
 import time
 
 
@@ -40,15 +41,19 @@ class Meter:
         self.path = pathlib.Path(job_dir) / "usage.jsonl"
         self.pricing = pricing or {}
         self.max_cost = float((bounds or {}).get("max_cost_usd", math.inf))
+        self._lock = threading.Lock()  # the bwrap proxy is threaded; appends must serialize
         self._rows = self._load()
 
     # -- chain ---------------------------------------------------------------
     def _load(self):
         rows = []
         if self.path.is_file():
-            for ln in self.path.read_text(encoding="utf-8").splitlines():
+            for i, ln in enumerate(self.path.read_text(encoding="utf-8").splitlines()):
                 if ln.strip():
-                    rows.append(json.loads(ln))
+                    try:
+                        rows.append(json.loads(ln))
+                    except ValueError as e:
+                        raise ValueError(f"usage.jsonl line {i+1} is torn or not valid JSON — refusing to accrue onto a damaged log") from e
         return rows
 
     def verify(self):
@@ -81,6 +86,10 @@ class Meter:
 
     # -- writes --------------------------------------------------------------
     def _append(self, row):
+        with self._lock:
+            return self._append_locked(row)
+
+    def _append_locked(self, row):
         row["ts"] = row.get("ts") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         row["prev"] = self._rows[-1]["digest"] if self._rows else ""
         digest = _row_digest({k: v for k, v in row.items() if k != "digest"})
@@ -107,7 +116,7 @@ class Meter:
             raise CapExceeded(f"cost cap reached: ${accrued:.6f} accrued >= ${self.max_cost:.6f} cap")
         est = self.estimate(body) if body is not None else 0.0
         last = float(self._rows[-1].get("cost", 0.0)) if self._rows and self._rows[-1].get("kind") == "call" else 0.0
-        if accrued + max(est, last) >= self.max_cost and self._rows:
+        if accrued + max(est, last) >= self.max_cost:
             raise CapExceeded(f"next call would breach the cap: ${accrued:.6f} + est ${max(est, last):.6f} >= ${self.max_cost:.6f}")
 
     def estimate(self, body):
@@ -128,7 +137,8 @@ class Meter:
             usage = (response.get("usage") or {}) if "usage" in response else {}
         cost = cost_of(usage or {}, self.pricing.get(model, self.pricing.get("default", {})))
         row = self._append({"kind": "call", "who": who, "model": model, "endpoint": endpoint,
-                            "usage": usage or {}, "cost": round(cost, 10)})
+                            "usage": usage or {}, "cost": round(cost, 10),
+                            **({} if usage else {"usage_missing": True})})  # a billed reply with no envelope meters a flagged $0 row — never silently free
         return row
 
     def amend(self, digests, note=""):

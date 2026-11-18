@@ -24,7 +24,7 @@ def _require_https(url):
         raise ValueError(f"refusing to send credentials over non-https endpoint: {url}")
 
 
-def _chat_json(url, model_id, sys_prompt, user_prompt, key_env="OPENROUTER_API_KEY", timeout=60):
+def _chat_json(url, model_id, sys_prompt, user_prompt, key_env="OPENROUTER_API_KEY", timeout=60, meter=None, who=None):
     _require_https(url)
     key = _load_key(key_env)
     headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})}
@@ -33,6 +33,10 @@ def _chat_json(url, model_id, sys_prompt, user_prompt, key_env="OPENROUTER_API_K
     body = json.dumps({"model": model_id, "temperature": 0.0, **extra, "messages": [{"role": "system", "content": sys_prompt}, {"role": "user", "content": u_txt}]}).encode("utf-8")
     with urllib.request.urlopen(urllib.request.Request(url, data=body, headers=headers, method="POST"), timeout=max(1.0, float(timeout))) as resp:
         raw, host = json.loads(resp.read().decode("utf-8")), urllib.parse.urlparse(resp.geturl()).hostname or ""
+    # C6/C7: the meter fires on the BILLED ENVELOPE, before any content parse —
+    # a reply the seat cannot parse was still billed and must still accrue
+    if meter is not None:
+        meter.meter_call(who or "seat", model_id, url, None, usage=raw.get("usage"))
     txt = raw["choices"][0]["message"]["content"].strip()
     m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", txt, re.S) or re.search(r"(\{.*\})", txt, re.S)
     return json.loads(m.group(1) if m else txt), host, raw
@@ -237,8 +241,15 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                     if meter is not None and status == 200:
                         try:
                             meter.meter_call("maker", req.get("model"), upstream, body, usage=usage)
-                        except Exception:
-                            pass  # cap tripped between check and bill: the row is still attempted below via calls
+                        except Exception as meter_err:
+                            # a meter failure must NOT serve an unmetered billed call (fsync discipline)
+                            out = json.dumps({"error": {"code": 503, "message": "meter unavailable"}}).encode("utf-8")
+                            self.send_response(503)
+                            self.send_header("Content-Type", "application/json")
+                            self.send_header("Content-Length", str(len(out)))
+                            self.end_headers()
+                            self.wfile.write(out)
+                            return
                     calls.append({"host": host, "model": req.get("model"), "usage": usage, **({"upstream_error": err} if err else {})})
                     self.send_response(status)
                     self.send_header("Content-Type", "application/json")
@@ -281,6 +292,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         f"(deny file-read* (subpath {q}{jd / 'evidence'}{q}))\n"
                         f"(deny file-read* (literal {q}{jd / 'job.jsonl'}{q}))\n"
                         f"(deny file-read* (literal {q}{jd / 'scores.jsonl'}{q}))\n"
+                        f"(deny file-read* (literal {q}{jd / 'usage.jsonl'}{q}))\n"  # spend telemetry never leaks into the seat
                         f"(deny file-read* (literal {q}{jd / 'job.json'}{q}))\n"
                         f"(deny file-read* (subpath {q}{home / '.ssh'}{q}))\n"
                         f"(deny file-read* (literal {q}{home / '.hermes' / '.env'}{q}))\n"
@@ -306,13 +318,13 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 relay = [sys.executable, "-I", "-c", _RELAY, str(sb_p / "proxy.sock"), str(inner_port)] if stype == "bwrap" else []
                 cmd = (sandbox_prefix(stype, jd, sb_p) or []) + relay + cmd
                 proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)), stdin=subprocess.DEVNULL)  # no inherited tty: no TIOCSTI keystroke injection (recheck #5)
+                if cap_flag and cap_flag[0] is not None:
+                    raise cap_flag[0]  # a mid-round cap trip halts as cap_reached, never as maker_failed
                 if proc.returncode != 0:
                     raise RuntimeError(f"Agent Maker failed ({proc.returncode}): {proc.stderr.strip()} | cmd[0:4]={cmd[:4]}")
                 if not any(gates.safe_rel(sf, sb_art).is_file() for sf in subject_files):
                     raise RuntimeError("Agent Maker returned no subject files")
                 mk_usage = {"agent_calls": calls}  # metered per-call by the loop
-                if cap_flag and cap_flag[0] is not None:
-                    raise cap_flag[0]  # a mid-round cap trip halts as cap_reached, never silently
                 round_dir = pathlib.Path(out_dir).resolve().parent.parent
                 if round_dir.is_dir():
                     # accumulate, not clobber: every round's proxy log must survive for audit
@@ -335,9 +347,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
             usr_p = f"METHOD:\n{method_txt}\n\nROUND PACKET:\n{json.dumps(pkt, indent=2)}\n\nINCUMBENT FILES:\n{json.dumps(cur_files, indent=2)}\n\nTARGET FILES: {subject_files}"
             if meter is not None:
                 meter.check_cap(json.dumps({"messages": [{"role": "system", "content": sys_p}, {"role": "user", "content": usr_p}]}))
-            res, _, raw = _chat_json(maker_cfg["url"], maker_cfg["model"]["identifier"], sys_p, usr_p, maker_cfg.get("apiKeyEnv", "OPENROUTER_API_KEY"), timeout)
-            if meter is not None and isinstance(raw, dict):
-                meter.meter_call("maker", maker_cfg["model"]["identifier"], maker_cfg["url"], None, usage=raw.get("usage"))
+            res, _, raw = _chat_json(maker_cfg["url"], maker_cfg["model"]["identifier"], sys_p, usr_p, maker_cfg.get("apiKeyEnv", "OPENROUTER_API_KEY"), timeout, meter=meter, who="maker")
             for sf, content in (res.get("files") or {}).items():
                 dst = gates.safe_rel(sf, sb_art)
                 dst.parent.mkdir(parents=True, exist_ok=True)
@@ -377,9 +387,7 @@ def run_evaluator(eval_cfg, target_path, dimension_id, job_dir=None, harness_out
     try:
         if meter is not None:
             meter.check_cap(json.dumps({"messages": [{"role": "system", "content": sys_p}, {"role": "user", "content": usr_p}]}))
-        payload, ans_host, raw = _chat_json(eval_cfg["url"], eval_cfg["model"]["identifier"], sys_p, usr_p, eval_cfg.get("apiKeyEnv", "OPENROUTER_API_KEY"), timeout)
-        if meter is not None and isinstance(raw, dict):  # C6: a billed reply counts even when it cannot be parsed
-            meter.meter_call("evaluator:" + str(eval_cfg.get("id")), eval_cfg["model"]["identifier"], eval_cfg["url"], None, usage=raw.get("usage"))
+        payload, ans_host, raw = _chat_json(eval_cfg["url"], eval_cfg["model"]["identifier"], sys_p, usr_p, eval_cfg.get("apiKeyEnv", "OPENROUTER_API_KEY"), timeout, meter=meter, who="evaluator:" + str(eval_cfg.get("id")))
         if harness_out:
             harness_out.write_text(json.dumps({"evaluator": eval_cfg["id"], "endpoint": ans_host, "model": raw.get("model"), "usage": raw.get("usage"), "verdict": payload}, indent=2) + "\n", encoding="utf-8")
         return dict(payload, _endpoint=ans_host, _usage=raw.get("usage"))

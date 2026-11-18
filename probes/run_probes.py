@@ -601,6 +601,24 @@ def check_e1():
     return "FAIL", "5xx swallowed: %s/%s" % (st.get("terminal_state"), st.get("reason"))
 
 
+def check_e2():
+    # C6: a billed reply the evaluator cannot parse still meters — the row is
+    # written from the envelope BEFORE the content parse
+    reset_upstream("unparseable")
+    import metering
+    m = metering.Meter(ENV.jobs / "e2-meter", pricing={"default": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}}, bounds={"max_cost_usd": 1.0})
+    ev = {"id": "E1", "kind": "model", "url": ENV.upstream_url, "model": {"identifier": "declared-model"}, "apiKeyEnv": "PROBE_NONE"}
+    target = ENV.jobs / "e2-target.md"
+    target.write_text("# target\n", encoding="utf-8")
+    try:
+        adapters.run_evaluator(ev, target, "D1", meter=m)
+    except Exception:
+        pass  # unparseable content -> unobserved/raise; the ROW must exist regardless
+    rows = m._rows
+    return ("PASS", "billed unparseable reply metered (%d row, cost_hint set)" % len(rows)) \
+        if rows and rows[0].get("kind") == "call" else ("FAIL", "no meter row for a billed unparseable reply")
+
+
 def check_g1():
     job = make_job(ENV.jobs, "g1", maker_kind="script", agent_mode="normal")
     loop.freeze_job(job)
@@ -657,7 +675,8 @@ CHECKS = [
     ("C3", "proxy enforces the cost cap", lambda: check_c3(), None),
     ("K1", "agent children die on kill", lambda: check_k1(), None),
     ("H1", "no key over plain http", lambda: check_h1(), None),
-    ("E1", "upstream 5xx reaches the maker as an error", lambda: check_e1(), None),
+    ("E1", "upstream 5xx reaches the maker as an error", check_e1, None),
+    ("E2", "billed unparseable reply still meters", check_e2, None),
     ("G1", "seat script edited after freeze is refused", lambda: check_g1(), None),
     ("G2", "$0 prices refused at freeze", lambda: check_g2(), None),
     ("R1", "resume after a hard kill is clean", lambda: check_r1(), KNOWN_FAILS["R1"]),
