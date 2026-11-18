@@ -569,6 +569,13 @@ def _refuse_after_disposition(job_dir):
 
 
 def run_job(job_dir):
+    """One operation holds the job for its whole length (P6): a finalize waits for
+    the run to end, so no paid call or custody append can follow a disposition."""
+    with job_lock(job_dir):
+        return _run_job_held(job_dir)
+
+
+def _run_job_held(job_dir):
     job_dir = pathlib.Path(job_dir).resolve()
     cfg, state = _load_job_json(job_dir), json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
     _refuse_after_disposition(job_dir)
@@ -588,6 +595,7 @@ def run_job(job_dir):
         # tampered log must be an integrity refusal HERE, inside the mapped try
         try:
             meter = Meter(job_dir, pricing=cfg.get("pricing", {}), bounds=cfg.get("bounds"))
+            meter.recover()  # this operation holds the job: open reservations are a dead run's
             if (job_dir / "usage.jsonl").is_file() or state.get("usage_anchor"):
                 meter.verify(anchor=state.get("usage_anchor"))  # P9: the anchor catches truncated newest rows
                 if (job_dir / "usage.jsonl").is_file() and not state.get("usage_anchor"):
@@ -616,7 +624,7 @@ def run_job(job_dir):
     # pre-existing log is verified before anything accrues onto it.
 
     prev_term = None
-    if hasattr(signal, "SIGTERM"):
+    if hasattr(signal, "SIGTERM") and threading.current_thread() is threading.main_thread():
         def _on_term(signum, frame):
             raise KeyboardInterrupt()
         prev_term = signal.signal(signal.SIGTERM, _on_term)
@@ -767,6 +775,11 @@ def run_job(job_dir):
 
 
 def resume_job(job_dir):
+    with job_lock(job_dir):
+        return _resume_job_held(job_dir)
+
+
+def _resume_job_held(job_dir):
     """R1: the ONLY recovery path for a hard-killed run. Discards the partial
     round (out of rounds/, which stays immutable, into job/partial/), marks its
     meter rows discarded via an append-only amendment, re-verifies every pin and
@@ -785,6 +798,7 @@ def resume_job(job_dir):
     gates.check_pins(cfg, job_dir, state["pins"])
     try:
         meter = Meter(job_dir, pricing=cfg.get("pricing", {}), bounds=cfg.get("bounds"))
+        meter.recover()  # this operation holds the job: open reservations are a dead run's
         meter.verify(anchor=state.get("usage_anchor"))  # a damaged or truncated usage log refuses the resume; spend re-accrues from it verbatim
         if (job_dir / "usage.jsonl").is_file() and not state.get("usage_anchor"):
             state["usage_unanchored"] = True  # review #5: proceed, but record and re-anchor
@@ -868,6 +882,7 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
                                   "resume it to an end state, or finalize --disposition declined to abandon it (P6)")
         try:
             meter = Meter(job_dir, pricing=cfg.get("pricing", {}), bounds=cfg.get("bounds"))
+            meter.recover()  # this operation holds the job: open reservations are a dead run's
             if (job_dir / "usage.jsonl").is_file() or st.get("usage_anchor"):
                 meter.verify(anchor=st.get("usage_anchor"))  # P9: spend enters the chain only from a verified log
         except ValueError as e:

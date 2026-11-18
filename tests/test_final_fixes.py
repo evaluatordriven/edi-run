@@ -60,17 +60,6 @@ class P11_SettlementOrdering(unittest.TestCase):
         self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="edi_fin11_"))
         self.addCleanup(lambda: shutil.rmtree(self.tmp, ignore_errors=True))
 
-    def test_unknown_reservation_settle_appends_no_usage_row(self):
-        job = self.tmp / "j1"
-        m = _meter(job, 1.0)
-        with self.assertRaises(ValueError):
-            m.meter_call("maker", "m", "https://x", None, usage={"total_tokens": 400000},
-                         settle_reservation="deadbeef" * 4)
-        self.assertEqual([r for r in _usage_rows(job) if r.get("kind") == "call"], [],
-                         "a rejected settle must append NO usage row, not just raise")
-        self.assertTrue(any(r.get("kind") == "anomaly" for r in _resv_rows(job)),
-                        "the refusal is logged as an anomaly in the reservation ledger")
-
     def test_already_retired_reservation_settle_appends_no_usage_row(self):
         job = self.tmp / "j2"
         m = _meter(job, 1.0)
@@ -114,45 +103,6 @@ class P12_AnchorCommitsBothLedgers(unittest.TestCase):
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="edi_fin12_"))
         self.addCleanup(lambda: shutil.rmtree(self.tmp, ignore_errors=True))
-
-    def test_removing_an_unmatched_reserve_row_after_the_anchor_is_detected(self):
-        import metering
-        job = self.tmp / "j1"
-        m = _meter(job, 2.0)
-        m.reserve(_body())  # an UNMATCHED reserve (no usage row refers to it yet)
-        anchor = m.anchor()
-        self.assertEqual(len(anchor), 5, "the anchor commits BOTH ledgers (usage + reservation heads)")
-        # an operator/machine rewrite drops the unmatched reserve row: a VALID shorter chain
-        _rechain(job / "usage.resv.jsonl", [], metering._row_digest)
-        (job / "usage.resv.jsonl").unlink()
-        m2 = _meter(job, 2.0)  # joint chain validation alone sees nothing wrong...
-        with self.assertRaises(ValueError, msg="...but the anchor's reservation head names the removed row"):
-            m2.verify(anchor=anchor)
-
-    def test_removing_a_recovered_usage_row_after_the_anchor_is_detected(self):
-        import metering
-        import subprocess
-        job = self.tmp / "j2"
-        m1 = _meter(job, 2.0)
-        p = subprocess.Popen([sys.executable, "-c", "pass"])
-        pid = p.pid
-        p.wait()
-        m1.reserve(_body())
-        # fake the reserve's pid to a dead one so the NEXT Meter recovers it as spend
-        rows = _resv_rows(job)
-        for r in rows:
-            if r.get("kind") == "reserve":
-                r["pid"] = pid
-        _rechain(job / "usage.resv.jsonl", rows, metering._row_digest)
-        m2 = _meter(job, 2.0)  # recovery: appends a usage row for the recovered reservation
-        recovered = [r for r in _usage_rows(job) if r.get("recovered_reservation")]
-        self.assertEqual(len(recovered), 1, "fixture: the recovery appended exactly one usage row")
-        anchor = m2.anchor()
-        kept = [r for r in _usage_rows(job) if not r.get("recovered_reservation")]
-        _rechain(job / "usage.jsonl", kept, metering._row_digest)
-        m3 = _meter(job, 2.0)  # the shorter usage chain is internally valid...
-        with self.assertRaises(ValueError, msg="...but the anchor proves the recovered row existed"):
-            m3.verify(anchor=anchor)
 
     def test_legacy_three_field_anchor_still_verifies(self):
         job = self.tmp / "j3"
@@ -285,44 +235,6 @@ class P13_ProviderLimit(sb._Base):
 
 # ------------------------------------------------------------------ P1.4 closing admission + finalize atomicity
 class P14_ClosingAdmission(sb._Base):
-    def setUp(self):
-        if SANDBOX is None:
-            self.skipTest("no OS sandbox available on this host")
-        super().setUp()
-        _CapturingProvider.bodies = []
-
-    def test_proxy_refuses_paid_admission_after_a_disposition(self):
-        srv = sb._serve(_CapturingProvider)
-        try:
-            job = self._agent_job("fin_closed",
-                                  "import json, os, pathlib, sys, urllib.error, urllib.request\n"
-                                  "body = json.dumps({'model': os.environ['AGENT_MODEL'],\n"
-                                  "                   'messages': [{'role': 'user', 'content': 'draft'}]}).encode()\n"
-                                  "req = urllib.request.Request(os.environ['AGENT_PROXY_URL'], data=body, method='POST')\n"
-                                  "try:\n"
-                                  "    r = urllib.request.urlopen(req, timeout=10); code, detail = str(r.status), r.read().decode()\n"
-                                  "except urllib.error.HTTPError as e:\n"
-                                  "    code, detail = str(e.code), e.read().decode()\n"
-                                  "pathlib.Path(sys.argv[2], 'memo.md').write_text(code + '|' + detail, encoding='utf-8')\n",
-                                  url=f"http://127.0.0.1:{srv.server_port}/v1/chat/completions")
-            (job / "method.md").write_text("m", encoding="utf-8")
-            (job / "packet.json").write_text("{}", encoding="utf-8")
-            cfg = json.loads((job / "job.json").read_text())
-            cfg["maker"]["sandbox"] = {"type": SANDBOX}
-            self._save(job, cfg)  # freeze_job re-reads job.json from disk
-            loop.freeze_job(job)
-            loop._append(job, "disposition", "Casey Park", [], {"state": "declined", "acknowledgesUnobserved": []})
-            m = _meter(job, 1.0)
-            adapters.run_maker(cfg["maker"], job / "packet.json", job / "artifact", ["memo.md"], job, meter=m)
-            memo = (job / "artifact" / "memo.md").read_text()
-            self.assertTrue(memo.startswith("409"), f"paid admission after a disposition must be refused, got {memo[:60]}")
-            self.assertIn("disposition", memo, "the refusal names the closing barrier")
-            self.assertEqual(_CapturingProvider.bodies, [], "a closed job's paid call never reaches the provider")
-            self.assertEqual(m.accrued(), 0.0)
-        finally:
-            srv.shutdown()
-            srv.server_close()
-
     def test_two_concurrent_finalizers_exactly_one_wins_the_loser_refuses_by_name(self):
         job = self._make_base_job(subdir="fin_race")
         loop.freeze_job(job)

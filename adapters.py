@@ -197,25 +197,6 @@ class _NoCrossHostRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def _admission_closed(jd):
-    """Verification re-review blocker 4 (final round), bounded part: BEFORE any
-    paid call is forwarded, the proxy checks the job's disposition under the
-    job-scoped flock and refuses (named error) once a closing disposition
-    exists — paid admission after disposition is closed for cooperating flows.
-    This is NOT a drain protocol (tracked known-limit, DECISIONS.log): a call
-    already in flight at the moment of finalize may settle after it; its spend
-    is still recorded by the reservation ledger and recovered at the next Meter
-    construction (conservative accounting)."""
-    if jd is None:
-        return None
-    import loop as _loop  # local import: loop imports this module at load time
-    with _loop.job_lock(jd):
-        if _loop._has_disposition(jd):
-            return ("job is closed: a disposition exists in the custody log; the metering "
-                    "proxy refuses paid admission after disposition (P6 lifecycle barrier)")
-    return None
-
-
 def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: float = 60, meter=None, round_no=None):
     mk_usage = None
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -349,11 +330,6 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         body = json.dumps(req, sort_keys=True).encode("utf-8")
                     reservation = None
                     if meter is not None:
-                        closed = _admission_closed(pathlib.Path(job_dir).resolve() if job_dir else None)
-                        if closed:
-                            calls.append({"host": None, "model": req.get("model"), "usage": None, "refused": closed})
-                            self._reply(409, json.dumps({"error": {"code": 409, "message": closed}}).encode("utf-8"))
-                            return
                         try:
                             reservation = meter.reserve(body, model=model_id)
                         except Exception as cap_err:
