@@ -89,14 +89,16 @@ class StampSafety(unittest.TestCase):
         s, job = _prep("job4")
         try:
             from test_runtime_batches import run_cli
-            # break a LATER gate (D4.5 runs<2) so freeze refuses after the stamp point
-            cfg = json.loads((job / "job.json").read_text())
-            cfg["evaluators"][0]["runs"] = 1
-            (job / "job.json").write_text(json.dumps(cfg))
+            # break a gate AFTER the in-memory stamp (CL1-3 approval mismatch in gate_freeze_pre)
+            good = (job / "bar.md").read_bytes()
+            (job / "bar.md").write_bytes(good + b"- D3 unapproved edit\n")
             before = (job / "job.json").read_bytes()
             r = run_cli("freeze", job)
             self.assertEqual(r.returncode, 1)
             self.assertEqual((job / "job.json").read_bytes(), before, "a failed freeze mutated job.json")
+            (job / "bar.md").write_bytes(good)
+            r_ok = run_cli("freeze", job)
+            self.assertEqual(r_ok.returncode, 0, f"corrected retry failed: {r_ok.stderr}")
         finally:
             s.tearDown()
 

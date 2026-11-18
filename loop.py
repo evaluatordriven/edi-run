@@ -3,6 +3,7 @@ from collections import Counter
 from contextlib import contextmanager
 import fcntl, json, math, os, pathlib, shutil, signal, subprocess, sys, threading, time
 import adapters, gates
+import metering
 from metering import Meter, CapExceeded, UnboundedOutput
 
 VENDOR = pathlib.Path(__file__).resolve().parent / "vendor"
@@ -322,17 +323,17 @@ def freeze_job(job_dir, started_at=None, dry_run=False):
                 break
     if zero:
         raise gates.GateError(f"pricing entries {zero} contain a zero, negative, non-numeric or non-finite rate; unpriced spend must be refused, never silently $0 (recheck G2)")
+    unbounded = [m for m in model_ids if m and metering.output_bound(cfg.get("bounds"), pricing_map, m) is None]
+    if unbounded:
+        raise gates.GateError(f"model seat(s) {unbounded} have no max_output_tokens (set bounds.max_output_tokens or "
+                              "pricing[<model>].max_output_tokens): output spend that cannot be bounded is refused at freeze, "
+                              "not at the first paid call (I-07)")
     gates.gate_commands(cfg, job_dir)
-    # auto-hash persistence: stamp the computed bar digest INTO job.json so the
-    # custody record (assembled from job.json at finalize) carries it — the
-    # in-memory-only stamp was lost before record assembly and failed CR-2/
-    # CL1-3/CL1-14 (live-aider-job10, 2026-11-18). Dry-run stamps in memory
-    # only; it must never write (the zero-write oracle invariant).
+    # CL1-14: stamp the computed bar digest in memory BEFORE the pins are taken;
+    # it reaches job.json only through the atomic write after every gate passes.
     _bar = cfg.get("bar") or {}
     if (_bar.get("digest") or {}).get("sha256") is None:
         _bar["digest"] = {"sha256": gates.sha256_file(gates.safe_rel(_bar.get("file", "bar.md"), job_dir))}
-        if not dry_run:
-            (job_dir / "job.json").write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
     if (job_dir / "rounds").exists():
         # rounds/ is runtime-produced custody space; if it exists at freeze the
         # pin-vs-output boundary is already violated (Opus deep review 2026-11-18)

@@ -59,6 +59,28 @@ def cost_of(usage, pricing):
     return (in_tok / 1e6) * float(pricing.get("input_usd_per_mtok", 0.0)) + (out_tok / 1e6) * float(pricing.get("output_usd_per_mtok", 0.0))
 
 
+def _positive(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(float(v)) and v > 0
+
+
+def output_bound(bounds, pricing, model=None):
+    """Worst-case output tokens for a call: bounds.max_output_tokens (number or
+    per-model map), else the pricing entry's. None = unbounded (admission refuses)."""
+    mo = (bounds or {}).get("max_output_tokens")
+    if isinstance(mo, dict):
+        if model and _positive(mo.get(model)):
+            return float(mo[model])
+        vals = [v for v in mo.values() if _positive(v)]
+        mo = max(vals) if vals else None
+    if _positive(mo):
+        return float(mo)
+    for key in ((model,) if model else ()) + ("default",):
+        p = (pricing or {}).get(key)
+        if isinstance(p, dict) and _positive(p.get("max_output_tokens")):
+            return float(p["max_output_tokens"])
+    return None
+
+
 def _pid_alive(pid):
     try:
         pid = int(pid)
