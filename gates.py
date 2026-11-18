@@ -1,7 +1,7 @@
 """Deterministic invariant gates (I-01 through I-04) for edi-run. Standard library only."""
 from collections import Counter
 from datetime import datetime, timezone
-import hashlib, json, math, os, pathlib
+import hashlib, json, math, os, pathlib, re, unicodedata
 
 UNDISCLOSED = "undisclosed"
 
@@ -45,13 +45,100 @@ def gate_bounds(cfg):
         raise GateError("invalid subjectFiles entry")
 
 
+def _auth_key(raw):
+    """Canonicalize an AUTHORSHIP.md KEY the same way values are canonicalized:
+    split/casefold via _canon, plus hyphen variants folded to spaces so
+    'Bar-author' and 'Bar  author' both match the canonical 'bar author'."""
+    return _canon(raw.replace("-", " "))
+
+
+def parse_authorship(job_dir):
+    """Lenient AUTHORSHIP.md parse: `Key: value` lines, canonicalized keys and
+    values (case/whitespace-insensitive, Cf format characters stripped,
+    hyphen/underscore variants folded). Blank value = unattributed. Missing
+    file = everything unattributed. Continuation lines (indented) are FOLDED
+    into the previous key's value -- 'Bar author:\\n  Same Person' is one
+    declaration, not a silently ignored line. Duplicate keys: FIRST wins -- a
+    later duplicate (or blank rebind) cannot launder an earlier declaration."""
+    p = job_dir / "AUTHORSHIP.md"
+    out = {}
+    if not p.is_file():
+        return out
+    last_key = None
+    for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if line[:1] in (" ", "\t"):  # continuation of the previous declaration
+            if last_key is not None:
+                out[last_key] = _canon(out[last_key] + " " + line)
+            continue
+        if ":" not in line:
+            continue
+        k, v = line.split(":", 1)
+        key = _auth_key(k)
+        if not key:
+            continue
+        if key not in out:  # first-wins: later lines may not rebind a seat
+            out[key] = _canon(v)
+        last_key = key
+    return out
+
+
+def gate_authorship(cfg, job_dir):
+    """Seat separation (CL1-6) extended to agents: the declared Operator must not
+    be a declared author of the bar, rubric, method or seed, and must not be the
+    job.json bar.author or maker.name. Blank = unattributed = allowed; a missing
+    AUTHORSHIP.md leaves everything unattributed."""
+    a = parse_authorship(job_dir)
+    op = a.get("operator")
+    if not op:
+        return
+    bar = cfg.get("bar") or {}
+    maker = cfg.get("maker") or {}
+    # job.json identities are declarations too: a self-dealing Operator who only
+    # signs AUTHORSHIP.md with a stranger's name while naming itself in job.json
+    # used to slip past the gate entirely (frontier finding f).
+    for label, v in (("bar.author", bar.get("author")), ("maker.name", maker.get("name"))):
+        if v and _canon(v) == op:
+            raise GateError(
+                f"job.json {label} ({v}) equals the declared Operator; "
+                "the Operator seat cannot author an instrument it operates (CL1-6)")
+    for key in ("bar author", "rubric author", "method author", "seed author"):
+        auth = a.get(key)
+        if auth and auth == op:
+            raise GateError(
+                f"AUTHORSHIP.md declares Operator equal to the {key} ({auth}); "
+                "the Operator seat cannot author an instrument it operates (CL1-6)")
+
+
 def gate_freeze_pre(cfg, job_dir):
     """Bar-level refusal checks that must run BEFORE the first log write: a
     refused freeze leaves nothing behind (I-01 no-trace)."""
     bar = cfg.get("bar") or {}
     actual = sha256_file(safe_rel(bar.get("file", "bar.md"), job_dir))
-    if actual != (bar.get("digest") or {}).get("sha256"):
+    # auto-hash: bar.md's sha256 is computed by the tool that froze it, never
+    # retyped by hand (CL1-14 semantics kept: a DECLARED digest must match).
+    declared = (bar.get("digest") or {}).get("sha256")
+    if declared is None:
+        bar["digest"] = {"sha256": actual}
+    elif actual != declared:
         raise GateError("bar.md sha256 mismatch against bar.digest (CL1-14)")
+    # externally pinned pre-commitment (config `barDigest`): fail closed on any
+    # mismatch between the computed digest and the pinned one, AND on any
+    # present-but-unparseable pin -- a falsy pin ('', {}, null) used to be
+    # silently ignored, which is fail-open (frontier finding 5). The pin must be
+    # a 64-hex sha256 (case-insensitive, whitespace-trimmed) or the freeze refuses.
+    if "barDigest" in cfg:
+        pinned = cfg["barDigest"]
+        pinned_sha = pinned.get("sha256") if isinstance(pinned, dict) else pinned
+        sha = str(pinned_sha).strip() if isinstance(pinned_sha, str) else None
+        if sha is None or not re.fullmatch(r"[0-9a-fA-F]{64}", sha):
+            raise GateError(
+                f"externally pinned barDigest {pinned_sha!r} is present but not a "
+                "parseable 64-hex sha256; refusing to freeze against an unreadable pin (fail-closed)")
+        if sha.casefold() != actual:
+            raise GateError(
+                f"computed bar.md digest {actual} does not match the externally pinned "
+                f"barDigest {sha}; refusing to freeze against a different bar (fail-closed)")
+    gate_authorship(cfg, job_dir)
     for role in ("buyer", "specialist"):
         apps = [a for a in (bar.get("approvals") or []) if a.get("role") == role]
         if not apps or any((a.get("barDigest") or {}).get("sha256") != actual for a in apps):
@@ -210,6 +297,11 @@ def gate_seats(cfg, job_dir, approver_by=None):
 
 
 def _canon(s):
+    # Unicode Cf (format) characters -- zero-width space U+200B, BOM U+FEFF, etc. --
+    # are stripped first: an invisible character inside a declared name must not
+    # launder a self-dealing match (frontier finding: 'Jor\u200bdan Blake' used to
+    # evade the Operator comparison while visually being the same name).
+    s = "".join(ch for ch in str(s) if unicodedata.category(ch) != "Cf")
     return " ".join(s.casefold().split())
 
 

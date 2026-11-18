@@ -83,8 +83,99 @@ def _emit_gap_record(job_dir, st, cfg, extra=()):
     return 1
 
 
-def freeze_job(job_dir, started_at=None):
+def _preflight_freeze_cfg(cfg):
+    """Shape-validate every dict key the real append path reads, BEFORE any
+    write. A missing key (e.g. an approval without 'by') used to KeyError in the
+    REAL freeze only, after job.jsonl appends were already written (no-trace
+    violation), while --dry-run exited 0 -- dry-run was not an oracle. Preflight
+    makes both paths fail with a GateError before the first log write."""
+    bar = cfg.get("bar") or {}
+    why = "the real append path records it; refusing before any log write"
+    if not isinstance(bar.get("author"), str) or not bar["author"].strip():
+        raise gates.GateError(f"freeze pre-flight: bar.author must be a non-empty string ({why})")
+    maker = cfg.get("maker") or {}
+    if not isinstance(maker.get("name"), str) or not maker["name"].strip():
+        raise gates.GateError(f"freeze pre-flight: maker.name must be a non-empty string ({why})")
+    for i, a in enumerate(bar.get("approvals") or []):
+        if not isinstance(a, dict) or not isinstance(a.get("by"), str) or not a["by"].strip():
+            raise gates.GateError(f"freeze pre-flight: bar.approvals[{i}].by must be a non-empty string ({why})")
+        bd = a.get("barDigest") if isinstance(a, dict) else None
+        bd_sha = bd.get("sha256") if isinstance(bd, dict) else None
+        if not isinstance(bd_sha, str) or not bd_sha.strip():
+            raise gates.GateError(f"freeze pre-flight: bar.approvals[{i}].barDigest.sha256 must be a non-empty string ({why})")
+    seed = cfg.get("seed")
+    if seed is not None:
+        if not isinstance(seed, dict) or not isinstance(seed.get("author"), str) or not seed["author"].strip():
+            raise gates.GateError(f"freeze pre-flight: seed.author must be a non-empty string ({why})")
+
+
+def init_job(job_dir):
+    """Structure-only job scaffold: directories and EMPTY templates. Never
+    writes starter controls or any substantive content (structure-only rule)."""
+    import sys as _sys
+    job_dir = pathlib.Path(job_dir)
+    # a symlink target (including a dangling one) is refused outright: init must
+    # never write through a link into a directory the caller did not name
+    if job_dir.is_symlink():
+        print(f"refusing to init: {job_dir} is a symlink; init never writes through a link", file=_sys.stderr)
+        return 1
+    if job_dir.exists() and not job_dir.is_dir():
+        print(f"refusing to init: {job_dir} exists and is not a directory", file=_sys.stderr)
+        return 1
+    if job_dir.exists() and any(job_dir.iterdir()):
+        print(f"refusing to init: {job_dir} exists and is not empty", file=_sys.stderr)
+        return 1
+    job_dir.mkdir(parents=True, exist_ok=True)
+    for d in ("scripts", "seed", "rounds"):
+        (job_dir / d).mkdir(exist_ok=True)
+    for name in ("bar.md", "rubric.md", "method.md"):
+        (job_dir / name).write_text("", encoding="utf-8")
+    (job_dir / "AUTHORSHIP.md").write_text(
+        "Operator:\nBar author:\nRubric author:\nMethod author:\nSeed author:\nSponsor:\n",
+        encoding="utf-8")
+    job = {
+        "job": None, "levelClaimed": None, "specVersion": None,
+        "bounds": {"max_rounds": None, "max_cost_usd": None, "max_wall_seconds": None},
+        "mode": None, "subjectFiles": [],
+        "bar": {"file": "bar.md", "digest": {"sha256": None}, "frozenAt": None,
+                "author": None, "dimensions": [], "approvals": []},
+        "maker": {"name": None, "kind": None, "version": None,
+                  "method": {"file": "method.md"}, "model": None,
+                  "sandbox": None, "command": None},
+        "instrument": {"rubric": {"file": "rubric.md"}, "runner": {"file": None}},
+        "evaluators": [], "controls": {"clean": None, "planted": None},
+        "retention": {"location": None, "public": None},
+        "disposition": {"state": None, "by": None, "acknowledgesUnobserved": []},
+        "pricing": {}, "seed": None, "barDigest": None,
+    }
+    (job_dir / "job.json").write_text(json.dumps(job, indent=2) + "\n", encoding="utf-8")
+    return 0
+
+
+def _job_snapshot(job_dir):
+    snap = {}
+    for p in sorted(job_dir.rglob("*")):
+        rel = str(p.relative_to(job_dir)) + ("/" if p.is_dir() else "")
+        if p.is_file():
+            st = p.stat()
+            snap[rel] = (st.st_size, st.st_mtime_ns, st.st_mode)
+        else:
+            snap[rel] = ("dir", p.stat().st_mtime_ns)  # mtime_ns: dir create+delete is not invisible
+    return snap
+
+
+def freeze_job(job_dir, started_at=None, dry_run=False):
     job_dir, cfg = pathlib.Path(job_dir).resolve(), json.loads((pathlib.Path(job_dir) / "job.json").read_text(encoding="utf-8"))
+    # pre-flight the cfg shape FIRST: real freeze and --dry-run must agree, and
+    # both must fail before any log write (no-trace promise, I-01)
+    _preflight_freeze_cfg(cfg)
+    # dry-run write-guard: snapshot the whole job tree; if ANY gate call touches
+    # the host inside the job dir, that is a defect, detected before returning.
+    # Scope is job-dir-scoped BY DESIGN: atime changes, create+delete inside the
+    # guard window, and writes outside job_dir are out of scope. Directories are
+    # snapshotted with mtime_ns too (a gate that creates+deletes or rewrites a
+    # dir inside job_dir shows up as a changed dir mtime).
+    pre_snap = _job_snapshot(job_dir) if dry_run else None
     gates.gate_bounds(cfg)
     gates.gate_seats(cfg, job_dir)
     model_ids = []
@@ -146,6 +237,23 @@ def freeze_job(job_dir, started_at=None):
                 if res.get("score") is None or float(res["score"]) >= float((d.get("scale") or {}).get("threshold", 4.0)):
                     raise gates.GateError(f"CL3 planted case did not fail on {ev['id']}/{d['id']} (CL3-1)")
                 demos.append({"dimension": d["id"], "evaluator": ev["id"], "planted": {"sha256": gates.sha256_file(p_case)}, "outcome": "does_not_conform", "at": custody_record.now()})
+    if dry_run:
+        # Same gate code, zero writes: the only check a real freeze performs that
+        # needs the log's timestamps is the frozenAt/work-started ordering, so
+        # synthesize exactly what the real path would record (in memory only).
+        if cfg["levelClaimed"] == "baseline":
+            s_at = started_at or (custody_record.now() if hasattr(custody_record, "now") else None)
+            time.sleep(0.002)
+            cfg["bar"]["frozenAt"] = custody_record.now()
+        else:
+            s_at = started_at or custody_record.now()
+        gates.gate_freeze(cfg, job_dir, started_at=s_at)
+        post_snap = _job_snapshot(job_dir)
+        if post_snap != pre_snap:
+            changed = sorted(k for k in set(post_snap) | set(pre_snap or {})
+                             if post_snap.get(k) != (pre_snap or {}).get(k))
+            raise RuntimeError(f"freeze --dry-run wrote to the host (defect): {changed[:5]}")
+        return 0
     _append(job_dir, "job-start", "edi-run", [], {"job": cfg["job"]})
     if seed:
         _append(job_dir, "artifact-supplied", seed["author"], [gates.safe_rel(seed["dir"], job_dir) / f for f in cfg["subjectFiles"]], {"origin": seed.get("origin", ""), "note": seed.get("note", "")})
