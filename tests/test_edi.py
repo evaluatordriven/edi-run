@@ -461,6 +461,53 @@ class TestEDIRuntime(unittest.TestCase):
         st_s = json.loads((job_slow / "state.json").read_text())
         self.assertEqual((st_s["terminal_state"], st_s["reason"]), ("needs_owner", "maker_failed"))
 
+    def test_bwrap_allowlist_argv_binds_first_masks_after(self):
+        # S1 (staged): the allowlist binds ONLY the system runtime + interpreter
+        # tree, and every mask (--tmpfs) must come AFTER the binds — bwrap applies
+        # mounts in argv order, so a late bind shadows earlier masks (the silent
+        # regression the CI legs caught). Argv-level, host-independent.
+        import adapters
+        with tempfile.TemporaryDirectory(prefix="edi_argv_probe_") as td:
+            self._argv_probe(str(pathlib.Path(td)))
+            return
+
+    def _argv_probe(self, td):
+        import adapters
+        jd = pathlib.Path(td) / "argvjd"; sb = jd / "sandbox"
+        (jd / "scripts").mkdir(parents=True)
+        for reads in ("denylist", "allowlist"):
+            argv = adapters.sandbox_prefix("bwrap", jd, sb, reads=reads)
+            binds = [i for i, a in enumerate(argv) if a == "--ro-bind"]
+            masks = [i for i, a in enumerate(argv) if a == "--tmpfs"]
+            self.assertTrue(binds, reads)
+            self.assertTrue(masks, reads)
+            self.assertLess(binds[0], masks[0], reads + ": a bind must not shadow a mask")
+            self.assertLess(argv.index("--proc"), masks[0], reads + ": /proc must come after the binds")
+            if reads == "denylist":
+                self.assertIn("/", [argv[i + 2] for i in binds])  # full root bind present
+            else:
+                self.assertNotIn("/", [argv[i + 2] for i in binds])  # no blanket root bind
+                joined = " ".join(argv)
+                for p in ("/usr", "/etc"):
+                    if pathlib.Path(p).exists():
+                        self.assertIn("--ro-bind", joined)
+
+    def test_allowlist_refused_typed_on_sandbox_exec(self):
+        # the seatbelt allowlist is not shippable on this macOS build (deny-default
+        # aborts; order-decided deny-precedence) — opting in must be a TYPED refusal
+        import adapters
+        if _SANDBOX_TYPE != "sandbox-exec":
+            self.skipTest("sandbox-exec-specific refusal")
+        with tempfile.TemporaryDirectory(prefix="edi_sbad_") as td:
+            jd = pathlib.Path(td); sb = jd / "sandbox"; sb.mkdir()
+            (jd / "packet.json").write_text("{}")
+            (jd / "memo.md").write_text("# t\n")
+            (jd / "method.md").write_text("# method\n")
+            cfg = {"kind": "agent", "url": "http://127.0.0.1:1", "command": ["/bin/echo"], "method": {"file": "method.md"}, "model": {"identifier": "m"}, "apiKeyEnv": "UNSET_KEY", "sandbox": {"type": "sandbox-exec", "reads": "allowlist"}}
+            with self.assertRaises(gates.GateError) as ctx:
+                adapters.run_maker(cfg, jd / "packet.json", jd / "artifact", ["memo.md"], jd)
+            self.assertIn("allowlist", str(ctx.exception))
+
     def test_torn_usage_log_is_integrity_refusal_with_escalation(self):
         # a damaged spend log must yield needs_owner/integrity_error with an
         # escalation package — never a raw traceback (D4.11)

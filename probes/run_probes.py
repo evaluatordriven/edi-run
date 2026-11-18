@@ -367,9 +367,9 @@ def bake_env_into_script(job, pairs):
     sc.write_text(txt, encoding="utf-8")
 
 
-def agent_job(subdir, mode, url=None, pricing=None, bounds=None, extra_env=None):
+def agent_job(subdir, mode, url=None, pricing=None, bounds=None, extra_env=None, maker_body=None):
     job = make_job(ENV.jobs, subdir, maker_kind="agent", url=url, pricing=pricing,
-                   bounds=bounds, agent_mode=mode)
+                   bounds=bounds, agent_mode=mode, maker_body=maker_body)
     pairs = {"PROBE_CANARY2": str(ENV.canary2)}
     pairs.update(extra_env or {})
     bake_env_into_script(job, pairs)
@@ -444,6 +444,50 @@ def check_s1():
     loop.run_job(job)
     val = agent_leak(job).replace("LEAK=", "", 1)
     return ("PASS", "canary next to jobs root unreadable") if val == "DENIED" else ("FAIL", "canary read: " + val)
+
+
+def _allow_agent_job(subdir, mode):
+    # the S1 allowlist switch IN the frozen maker config (staged: the default
+    # profile remains the deny list until S7-S9 pass on every CI leg)
+    return agent_job(subdir, mode, url=ENV.upstream_url,
+                     pricing={"default": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}},
+                     maker_body={"sandbox": {"type": SANDBOX_TYPE, "reads": "allowlist"}})
+
+
+def check_s7():
+    if SANDBOX_TYPE != "bwrap":
+        return "SKIP", "allowlist is a bwrap/Linux capability; sandbox-exec cannot express it (deny precedence + deny-default aborts, verified)"
+    reset_upstream()
+    job = _allow_agent_job("s7", "normal")
+    loop.run_job(job)
+    rounds = sorted((job / "rounds").glob("round-*"))
+    memo = rounds[-1] / "artifact" / "memo.md" if rounds else None
+    if not (memo and memo.is_file()):
+        return "FAIL", "allowlisted agent produced no artifact (interpreter/stdlib/workspace broken?)"
+    st = json.loads((job / "state.json").read_text())
+    if st.get("terminal_state") != "accepted":
+        return "FAIL", "allowlisted agent run did not conform: %s/%s" % (st.get("terminal_state"), st.get("reason"))
+    return "PASS", "allowlisted seat: interpreter, stdlib, relay and workspace all work"
+
+
+def check_s8():
+    if SANDBOX_TYPE != "bwrap":
+        return "SKIP", "allowlist is a bwrap/Linux capability; sandbox-exec cannot express it (deny precedence + deny-default aborts, verified)"
+    reset_upstream()
+    job = _allow_agent_job("s8", "read_jobsroot_canary")
+    loop.run_job(job)
+    val = agent_leak(job).replace("LEAK=", "", 1)
+    return ("PASS", "allowlist: canary next to jobs root is not even visible") if val == "DENIED" else ("FAIL", "allowlist canary read: " + val)
+
+
+def check_s9():
+    if SANDBOX_TYPE != "bwrap":
+        return "SKIP", "allowlist is a bwrap/Linux capability; sandbox-exec cannot express it (deny precedence + deny-default aborts, verified)"
+    reset_upstream()
+    job = _allow_agent_job("s9", "read_held_out")
+    loop.run_job(job)
+    val = agent_leak(job).replace("LEAK=", "", 1)
+    return ("PASS", "allowlist: held-out control unreadable") if val == "DENIED" else ("FAIL", "allowlist held_out read: " + val)
 
 
 def check_s3():
@@ -682,6 +726,9 @@ def check_r1():
 CHECKS = [
     ("S2", "held_out unreadable by its job path", lambda: check_s2(), None),
     ("S1", "canary next to the jobs root unreadable", lambda: check_s1(), KNOWN_FAILS["S1"]),
+    ("S7", "allowlisted seat still works (workspace+stdlib+relay)", lambda: check_s7(), None),
+    ("S8", "allowlist: canary next to jobs root invisible", lambda: check_s8(), None),
+    ("S9", "allowlist: held-out control unreadable", lambda: check_s9(), None),
     ("S3", "own /proc only (no host pids)", lambda: check_s3(), None),
     ("S4", "loop key unreadable via /proc/environ", lambda: check_s4(), None),
     ("S5", "agent cannot write edi-run code", lambda: check_s5(), None),

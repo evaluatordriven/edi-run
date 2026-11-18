@@ -50,11 +50,19 @@ _HOME_DOTFILE_FILES = ("netrc", "git-credentials", "zsh_history", "bash_history"
                        "gitcookies", "dockercfg", "yarnrc.yml", "pgpass", "my.cnf", "vault-token", "s3cfg", "boto", "hgrc")
 
 
-def sandbox_prefix(stype, jd, sb_p):
+def sandbox_prefix(stype, jd, sb_p, reads="denylist"):
     """The sandbox argv prefix for one launch, shared by the launcher and the
     capability probe so the probe exercises the exact flag shape used at runtime.
     Masks are applied ONLY to paths that already exist: bwrap creates missing mount
-    points on the host, and a freeze check must never write anything."""
+    points on the host, and a freeze check must never write anything.
+    reads="allowlist" (S1): the seat sees ONLY the workspace, the resolved
+    interpreter tree, and the system runtime prefixes — /usr /bin /sbin /lib
+    /lib64 /etc /opt /var/lib are also bound read-only (runner tool caches,
+    resolver and TLS material live there; file permissions protect root-owned
+    secrets, and the agent is non-root) — every other host path simply does not
+    exist inside the namespace. Default remains the deny-list profile until the
+    S7-S9 probes prove the allowlist on every CI leg."""
+    allowlist = reads == "allowlist"
     if stype == "sandbox-exec":
         profile = sb_p / "agent.sb"
         return ["sandbox-exec", "-f", str(profile)]
@@ -64,9 +72,28 @@ def sandbox_prefix(stype, jd, sb_p):
         # out is the relay to the proxy's Unix socket. Every job's controls are masked
         # (round-2 B): control sets are reused across jobs under one jobs root.
         home = pathlib.Path.home().resolve()  # seatbelt/bwrap match canonical paths only
-        cmd = ["bwrap", "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-net",
-               "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
-               "--tmpfs", str(jd)]
+        # bwrap applies mounts in argv order: BINDS FIRST, MASKS AFTER — a later
+        # --ro-bind / shadows earlier mounts (the regression the CI legs caught),
+        # so --dev/--proc and every tmpfs mask must come AFTER the binds
+        cmd = ["bwrap", "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-net"]
+        if allowlist:
+            # S1: bind ONLY the system runtime + the resolved interpreter tree; the
+            # host's rest of the filesystem does not exist inside the namespace
+            interp = pathlib.Path(sys.executable).resolve()
+            for b in ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/opt", "/var/lib"):
+                if pathlib.Path(b).exists():
+                    cmd += ["--ro-bind", b, b]
+            cmd += ["--ro-bind", str(interp), str(interp)]  # interpreter may live outside /usr
+            pref = pathlib.Path(getattr(sys, "base_prefix", sys.prefix) or sys.prefix)
+            try:
+                pref = pref.resolve()
+            except OSError:
+                pass
+            if str(pref) != "/usr" and pref.is_dir():
+                cmd += ["--ro-bind", str(pref), str(pref)]
+        else:
+            cmd += ["--ro-bind", "/", "/"]
+        cmd += ["--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", str(jd)]
         for ho in sorted(set(jd.parent.glob("*/held_out")) | set(jd.parent.rglob("held_out"))):  # every job's controls, any depth
             if ho.is_dir() and ho.parent != jd:
                 cmd += ["--tmpfs", str(ho)]
@@ -274,18 +301,41 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                        "AGENT_PROXY_URL": proxy_url, "AGENT_MODEL": maker_cfg.get("model", {}).get("identifier", "")}
                 cmd = _resolve_cmd(list(maker_cfg["command"]), job_dir)
                 stype = (maker_cfg.get("sandbox") or {}).get("type")
+                reads = (maker_cfg.get("sandbox") or {}).get("reads") or "denylist"
                 jd = pathlib.Path(job_dir).resolve()  # seatbelt matches canonical paths only
                 home = pathlib.Path.home().resolve()  # seatbelt matches canonical paths only
                 if stype not in ("sandbox-exec", "bwrap"):
                     raise gates.GateError(f"unknown sandbox type {stype}; supported: sandbox-exec (macOS), bwrap (Linux)")
                 if stype == "sandbox-exec":
                     q = chr(34)  # seatbelt profiles quote paths with double quotes
-                    # Reads: default-allow except held-out material, the custody/evidence files
-                    # (the Maker works from the packet, not the log), and secret files.
-                    # Writes: confined to the agent workspace. Network is denied except
-                    # loopback to the local proxy; the agent holds no key and the proxy
-                    # rejects undeclared models (see README for the disclosed limits).
-                    (sb_p / "agent.sb").write_text(
+                    allow = (maker_cfg.get("sandbox") or {}).get("reads") == "allowlist"
+                    if allow:
+                        # S1 on macOS: the seatbelt allowlist is not shippable on
+                        # this OS build. Verified by execution:
+                        # (1) deny-precedence is ORDER-DECIDED, not absolute: a
+                        #     scoped (allow) AFTER a (deny) makes the child readable,
+                        #     allow-then-deny denies — so "deny broad, allow narrow"
+                        #     needs the allow LAST, and a global (deny file-read*)
+                        #     with allow exceptions aborts sandbox-exec (trap 6);
+                        # (2) (deny default) with a NARROW file-read allowlist also
+                        #     aborts (Abort trap 6); broad (allow file-read*) runs
+                        #     fine. A scoped-deny enumeration allowlist (deny
+                        #     /Users/<user>, allow workspace exceptions last) was
+                        #     NOT ruled out by probing and remains unexplored.
+                        # The allowlist therefore lands on bwrap (Linux) only, where
+                        # selective binds make unlisted paths literally nonexistent.
+                        # macOS keeps the deny-list profile and the S1 disclosure.
+                        raise gates.GateError(
+                            'sandbox.reads="allowlist" is not supported for sandbox-exec on this macOS build: '
+                            'seatbelt deny-precedence defeats narrow exceptions and (deny default) profiles abort '
+                            '(reproducible Abort trap 6). The allowlist is a bwrap/Linux capability (S1).')
+                    else:
+                        # Reads: default-allow except held-out material, the custody/evidence files
+                        # (the Maker works from the packet, not the log), and secret files.
+                        # Writes: confined to the agent workspace. Network is denied except
+                        # loopback to the local proxy; the agent holds no key and the proxy
+                        # rejects undeclared models (see README for the disclosed limits).
+                        profile = (
                         "(version 1)(allow default)\n"
                         "(deny file-write*)\n"
                         f"(allow file-write* (subpath {q}{sb_p}{q}))\n"
@@ -309,15 +359,15 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         )
                         + "(deny file-read* (regex #\"/held_out(\\.|/|$)\"))\n"
                         "(deny network*)\n"
-                        f"(allow network-outbound (remote ip {q}localhost:{srv.server_port}{q}))\n",
-                        encoding="utf-8")
+                        f"(allow network-outbound (remote ip {q}localhost:{srv.server_port}{q}))\n")
+                    (sb_p / "agent.sb").write_text(profile, encoding="utf-8")
                 # bwrap: fresh network namespace (round-2 E) -- the only network path is
                 # the relay to the proxy's Unix socket; the whole job dir is masked with
                 # a tmpfs -- held_out, evidence,
                 # and the custody files live inside it -- then the agent's own scripts
                 # subtree is bound back read-only. The packet is read from the workspace copy.
                 relay = [sys.executable, "-I", "-c", _RELAY, str(sb_p / "proxy.sock"), str(inner_port)] if stype == "bwrap" else []
-                cmd = (sandbox_prefix(stype, jd, sb_p) or []) + relay + cmd
+                cmd = (sandbox_prefix(stype, jd, sb_p, reads=reads) or []) + relay + cmd
                 proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)), stdin=subprocess.DEVNULL)  # no inherited tty: no TIOCSTI keystroke injection (recheck #5)
                 mk_usage = {"agent_calls": calls}  # metered per-call by the loop
                 round_dir = pathlib.Path(out_dir).resolve().parent.parent
