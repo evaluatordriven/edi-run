@@ -12,6 +12,14 @@ instance on the job. A reservation is written (fsynced) BEFORE the proxy forward
 a call, so a kill between the upstream bill and the usage row cannot erase the
 spend: the next Meter construction reconciles stale-process reservations against
 the usage rows and recovers unmatched ones as spend rows (fail-closed).
+
+Verification re-review (2026-11-18): reservations are identified by an opaque
+id created at reserve (never by amount); settle/release name that id exactly
+once and refuse unknown-or-retired ids (an anomaly row is logged); meter_call
+writes the reservation id INTO the usage row so reconciliation is
+identity-based and idempotent; and the two ledgers are cross-anchored
+(usage_head / resv_head / settled digests) and validated TOGETHER at every
+Meter construction and state write — rollback of either ledger is detected.
 """
 
 import fcntl
@@ -83,9 +91,12 @@ class Meter:
         self._lock = threading.Lock()  # the bwrap proxy is threaded; appends must serialize
         self._reserved = 0.0  # worst-case spend of THIS instance's in-flight calls
         self._mine = []  # [(id, amount)] of this instance's active reservations
-        with self._lock, self._file_lock():
+        # Lock ORDER (one rule, everywhere): the cross-process file lock (flock) is
+        # ALWAYS the outer lock, the in-process threading lock the inner one.
+        with self._file_lock(), self._lock:
             self._rows = self._load()
             self._resv_rows = self._load_resv()
+            self._validate_joint_locked()
             self._reconcile_locked()  # billed-but-rowless calls of dead processes re-enter the log
 
     # -- cross-process exclusion ---------------------------------------------
@@ -114,7 +125,18 @@ class Meter:
         return rows
 
     def _load(self):
-        return self._read_rows(self.path)
+        """Load AND chain-verify the usage ledger: admission and recovery must
+        never consume an unverified chain (review blocker 3)."""
+        rows = self._read_rows(self.path)
+        prev = ""
+        for i, row in enumerate(rows):
+            expect = _row_digest({k: v for k, v in row.items() if k != "digest"})
+            if row.get("digest") != expect:
+                raise ValueError(f"usage.jsonl row {i} content does not match its digest (tampered)")
+            if row.get("prev") != prev:
+                raise ValueError(f"usage.jsonl chain broken at row {i}")
+            prev = row.get("digest")
+        return rows
 
     def _load_resv(self):
         """Load and chain-verify the reservation ledger: a hand-edited ledger is
@@ -133,9 +155,43 @@ class Meter:
     def _reload_locked(self):
         """Re-read both ledgers under the locks: another Meter instance on this
         job may have appended since our last look (the chain's prev must never
-        be computed from a stale cache)."""
+        be computed from a stale cache). Both ledgers are validated TOGETHER:
+        chains intact is necessary but not sufficient — the accounting
+        relationship between them is checked too (review blocker 3)."""
         self._rows = self._load()
         self._resv_rows = self._load_resv()
+        self._validate_joint_locked()
+
+    def _validate_joint_locked(self):
+        """Joint ledger validation (review blocker 3): the two hash chains are
+        anchored to each other, so a rollback or truncation of EITHER file is
+        detectable even though a valid prefix of one chain alone would verify.
+        - every reserve row carries `usage_head` (the usage ledger's head digest
+          at reserve time): it must still be present in usage.jsonl;
+        - every release row that settled a bill names the settled usage row's
+          digest: it must still be present (usage may not roll back past a
+          settled reservation);
+        - every usage row carries `resv_head` (the reservation ledger's head
+          digest at append time — the reservation-head commitment kept INSIDE
+          the usage row): it must still be present in the reservation ledger,
+          so truncating the reservation ledger below a recorded usage row
+          refuses."""
+        usage_digests = {r.get("digest") for r in self._rows}
+        resv_digests = {r.get("digest") for r in self._resv_rows}
+        for i, r in enumerate(self._resv_rows):
+            uh = r.get("usage_head") or ""
+            if r.get("kind") == "reserve" and uh and uh not in usage_digests:
+                raise ValueError(f"{self.RESV_NAME} row {i} anchors usage head {str(uh)[:12]}... "
+                                 "that is absent from usage.jsonl (usage ledger rolled back below an open reservation)")
+            settled = r.get("settled") or ""
+            if r.get("kind") == "release" and settled and settled not in usage_digests:
+                raise ValueError(f"{self.RESV_NAME} row {i} names settled usage digest {str(settled)[:12]}... "
+                                 "absent from usage.jsonl (usage ledger rolled back past a settled reservation)")
+        for i, u in enumerate(self._rows):
+            rh = u.get("resv_head") or ""
+            if rh and rh not in resv_digests:
+                raise ValueError(f"usage.jsonl row {i} anchors reservation head {str(rh)[:12]}... "
+                                 f"absent from {self.RESV_NAME} (reservation ledger truncated below a recorded usage row)")
 
     def refresh(self):
         """Public re-read for a caller that ALREADY holds the file lock (finalize
@@ -182,6 +238,16 @@ class Meter:
                 prefix = sum(float(r.get("cost", 0.0)) for r in self._rows[:n] if r.get("kind") == "call")
                 if abs(prefix - total) > 1e-9:
                     raise ValueError(f"usage.jsonl accrued total ${prefix:.6f} does not match the anchored ${total:.6f} (rewritten)")
+        # verification re-review #2 (final round): a 5-field anchor also commits
+        # the RESERVATION ledger's tail — removing an unmatched reserve row (or
+        # any row) after the state write is caught here, at the next validation.
+        # Pre-2026-11 3-field anchors (legacy state.json) skip this check.
+        if anchor and len(anchor) >= 5 and anchor[3] is not None and anchor[4]:
+            rn, rd = int(anchor[3]), str(anchor[4])
+            if rn > len(self._resv_rows):
+                raise ValueError(f"{self.RESV_NAME} has {len(self._resv_rows)} rows but {rn} were anchored (truncated)")
+            if rn and self._resv_rows[rn - 1].get("digest") != rd:
+                raise ValueError(f"{self.RESV_NAME} row {rn - 1} does not match its anchor (rewritten or truncated)")
         return True
 
     def head(self):
@@ -189,9 +255,22 @@ class Meter:
         return (len(self._rows), self._rows[-1]["digest"] if self._rows else "")
 
     def anchor(self):
-        """(row count, head digest, accrued total) — recorded at EVERY state write:
-        the anchor proves the LATEST billed total, not just a prefix digest."""
-        return (len(self._rows), self._rows[-1]["digest"] if self._rows else "", round(self.accrued(), 10))
+        """(usage rows, usage head digest, accrued total, resv rows, resv head
+        digest) — recorded at EVERY state write: the anchor proves the LATEST
+        billed total AND the LATEST reservation-ledger tail, not just a prefix
+        (verification re-review #2, final round: removing an unmatched reserve
+        row or a recovered usage row after a state write is detectable at the
+        next validation, because the anchor names both ledgers' heads).
+        Every state write also re-validates the reservation ledger and
+        usage.jsonl TOGETHER (verification re-review blocker 3): the anchor of a
+        rolled-back pair of ledgers is never issued.
+        MIGRATION (pre-ID usage rows): recovery matches only rows carrying
+        reservation_id; legacy rows without an id are anchored as-is — an exact
+        association cannot be safely inferred for them, so they are committed by
+        the usage anchor alone (documented deferral, DECISIONS.log)."""
+        self._validate_joint_locked()
+        return (len(self._rows), self._rows[-1]["digest"] if self._rows else "", round(self.accrued(), 10),
+                len(self._resv_rows), self._resv_rows[-1]["digest"] if self._resv_rows else "")
 
     def row_cost(self, digest):
         for row in self._rows:
@@ -212,13 +291,16 @@ class Meter:
 
     # -- writes --------------------------------------------------------------
     def _append(self, row):
-        with self._lock, self._file_lock():
+        with self._file_lock(), self._lock:
             self._reload_locked()
             return self._append_locked(row)
 
     def _append_locked(self, row):
         row["ts"] = row.get("ts") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         row["prev"] = self._rows[-1]["digest"] if self._rows else ""
+        # the usage row anchors the reservation ledger's head AT APPEND TIME —
+        # the cross-commitment joint validation checks on every load (review blocker 3)
+        row["resv_head"] = self._resv_rows[-1]["digest"] if self._resv_rows else ""
         digest = _row_digest({k: v for k, v in row.items() if k != "digest"})
         row["digest"] = digest
         new = not self.path.is_file()
@@ -242,11 +324,18 @@ class Meter:
         row["prev"] = self._resv_rows[-1]["digest"] if self._resv_rows else ""
         digest = _row_digest({k: v for k, v in row.items() if k != "digest"})
         row["digest"] = digest
+        new = not self.resv_path.is_file()
         self.resv_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.resv_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(row, sort_keys=True) + "\n")
             f.flush()
             os.fsync(f.fileno())
+        if new:
+            dfd = os.open(str(self.resv_path.parent), os.O_RDONLY)  # the directory entry must be durable too
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
         self._resv_rows.append(row)
         return row
 
@@ -264,29 +353,40 @@ class Meter:
 
     def _reconcile_locked(self):
         """Round-3 external review #2: reservations held by DEAD processes are
-        reconciled against the usage rows at construction. A reservation with a
-        matching usage row is retired; an unmatched one is billed-but-unrecorded
-        (or in-flight when the process died) — recovered AS SPEND, fail-closed,
-        so a kill between the upstream bill and the usage row cannot erase it.
+        reconciled against the usage rows at construction — BY REQUEST IDENTITY,
+        not by cost+timestamp similarity (verification re-review blocker 2):
+        meter_call writes the reservation id INTO the usage row, so a recovered
+        reservation is matched to exactly the row that bill produced, and one
+        usage row can never settle two unrelated reservations. A reservation
+        with no matching usage row is billed-but-unrecorded (or in-flight when
+        the process died) — recovered AS SPEND, fail-closed, exactly ONCE: the
+        recovery appends a release row with state "recovered", so the
+        reservation leaves the active set and is never re-recovered (a crash
+        between the recovery's usage fsync and its release fsync is healed by
+        the next reconciliation finding the usage row by id, not re-charging).
         Live-process reservations (other Meter instances, same or other process)
         stay active: they are shared admission control, not orphans."""
+        usage_by_rid = {}
+        for u in self._rows:
+            if u.get("kind") != "call":
+                continue
+            rid = u.get("reservation_id") or u.get("recovered_reservation")
+            if rid and rid not in usage_by_rid:
+                usage_by_rid[rid] = u
         for r in list(self._active_resv()):
             if _pid_alive(r.get("pid")):
                 continue  # a live holder's reservation is shared state, not an orphan
-            amount = float(r.get("amount", 0.0))
-            match = next((u for u in self._rows
-                          if u.get("kind") == "call" and not u.get("recovered_reservation")
-                          and abs(float(u.get("cost", 0.0)) - amount) <= 1e-9
-                          and str(u.get("ts", "")) >= str(r.get("ts", ""))), None)
-            if match is not None:
-                self._append_resv_locked({"kind": "release", "id": r.get("id"), "state": "released",
-                                          "note": "reconciled: matched usage row"})
+            rid = r.get("id")
+            if rid in usage_by_rid:
+                self._append_resv_locked({"kind": "release", "id": rid, "state": "released",
+                                          "note": "reconciled: matched usage row by reservation id"})
             else:
+                amount = float(r.get("amount", 0.0))
                 self._append_locked({"kind": "call", "who": "meter-recovery", "model": r.get("model", ""),
                                      "endpoint": "", "usage": {}, "cost": round(amount, 10),
-                                     "recovered_reservation": r.get("id"), "round": r.get("round"),
+                                     "recovered_reservation": rid, "reservation_id": rid, "round": r.get("round"),
                                      **({} if amount else {"usage_missing": True})})
-                self._append_resv_locked({"kind": "release", "id": r.get("id"), "state": "released",
+                self._append_resv_locked({"kind": "release", "id": rid, "state": "recovered",
                                           "note": "reconciled: recovered as spend (kill before the usage row)"})
         self._sync_mine_locked()
 
@@ -343,9 +443,13 @@ class Meter:
         never bounds what a response can cost) — UNDER THE LOCKS, before the
         proxy forwards it. The reservation is durable and job-scoped: two Meter
         instances on one job share the same balance, and a kill cannot erase it
-        (recovery at construction). Returns the reserved amount; the caller MUST
-        release() it (or meter_call(settle_reservation=...) it) once done."""
-        with self._lock, self._file_lock():
+        (recovery at construction). Returns an OPAQUE RESERVATION ID (verification
+        re-review blocker 1): settlement and release name THAT id exactly once —
+        never an amount-match search that can retire another request's hold.
+        The caller MUST release(<id>) (or meter_call(settle_reservation=<id>))
+        once done. The row records the usage ledger's head at reserve time
+        (usage_head) — the joint-validation anchor (blocker 3)."""
+        with self._file_lock(), self._lock:
             self._reload_locked()
             self._reconcile_locked()
             total = self.accrued() + self._reserved_total_locked()
@@ -357,32 +461,42 @@ class Meter:
                 raise CapExceeded(f"next call would breach the cap: ${total:.6f} + worst case ${rsv:.6f} >= ${self.max_cost:.6f}")
             rid = uuid.uuid4().hex
             self._append_resv_locked({"kind": "reserve", "id": rid, "pid": os.getpid(), "amount": round(rsv, 12),
-                                      "model": model or "", "round": getattr(self, "_round", None), "state": "active"})
+                                      "model": model or "", "round": getattr(self, "_round", None), "state": "active",
+                                      "usage_head": self._rows[-1]["digest"] if self._rows else ""})
             self._mine.append((rid, rsv))
             self._reserved += rsv
-            return rsv
+            return rid
 
-    def release(self, amount):
-        with self._lock, self._file_lock():
+    def reservation_amount(self, rid):
+        """The reserved worst-case amount of a reservation id (from the ledger)."""
+        for r in self._resv_rows:
+            if r.get("kind") == "reserve" and r.get("id") == rid:
+                return float(r.get("amount", 0.0))
+        return 0.0
+
+    def release(self, rid):
+        with self._file_lock(), self._lock:
             self._reload_locked()
-            self._release_locked(amount)
+            self._release_locked(rid)
 
-    def _release_locked(self, amount, settled_digest=None):
-        """Retire THIS instance's oldest active reservation of exactly `amount`
-        (one transition with the usage-row append when settling)."""
-        target = None
-        for rid, a in self._mine:
-            if abs(a - float(amount)) <= 1e-12:
-                target = rid
-                break
-        if target is None:
-            for r in self._active_resv():  # fall back to any active reservation of that amount
-                if abs(float(r.get("amount", 0.0)) - float(amount)) <= 1e-12:
-                    target = r.get("id")
-                    break
-        if target is None:
-            return
-        self._append_resv_locked({"kind": "release", "id": target, "state": "released",
+    def _release_locked(self, rid, settled_digest=None):
+        """Retire the reservation with EXACTLY this id (verification re-review
+        blocker 1): unknown or already-retired ids are REFUSED (an anomaly row
+        is logged in the reservation ledger; nothing is latched, nothing
+        retired) — a release can never fall back to 'any active reservation of
+        that amount' and steal another request's hold."""
+        rid = str(rid)
+        if not any(r.get("kind") == "reserve" and r.get("id") == rid for r in self._resv_rows):
+            self._append_resv_locked({"kind": "anomaly", "id": rid,
+                                      "note": "release/settle refused: unknown reservation id"})
+            raise ValueError(f"reservation {rid} is unknown — refusing to release or settle an "
+                             "unknown reservation (anomaly logged in the reservation ledger)")
+        if rid in {r.get("id") for r in self._resv_rows if r.get("kind") == "release"}:
+            self._append_resv_locked({"kind": "anomaly", "id": rid,
+                                      "note": "release/settle refused: reservation already retired"})
+            raise ValueError(f"reservation {rid} was already settled or released — refusing to "
+                             "retire it twice (duplicate release refused; anomaly logged)")
+        self._append_resv_locked({"kind": "release", "id": rid, "state": "released",
                                   **({"settled": settled_digest} if settled_digest else {})})
         self._sync_mine_locked()
 
@@ -415,15 +529,61 @@ class Meter:
         caller, so the row exists even if the caller crashes next line.
         settle_reservation: retire the caller's reservation IN THE SAME LOCKED
         TRANSITION as the append (round-3 external review #4: a successful call
-        must never count twice for admission, and the two must not be two steps)."""
+        must never count twice for admission, and the two must not be two steps).
+        The usage row RECORDS THE RESERVATION ID (verification re-review blocker
+        2): reconciliation is identity-based, so the row that bill produced can
+        only ever settle that one reservation. A 200 whose usage envelope is
+        MISSING is billed AT THE RESERVED ESTIMATE and flagged estimated=true
+        (review blocker 4) — never silently $0."""
         if usage is None and isinstance(response, dict):
             usage = (response.get("usage") or {}) if "usage" in response else {}
-        cost = cost_of(usage or {}, self.pricing.get(model, self.pricing.get("default", {})))
-        with self._lock, self._file_lock():
+        with self._file_lock(), self._lock:
+            # verification re-review #1 (final round): EVERYTHING happens under the
+            # locks — the reservation-id validation, the missing-usage amount
+            # lookup and the append — so a repeat settlement can never append a
+            # usage row before it is refused, and a second Meter instance cannot
+            # estimate $0 from a stale cache (the amount lookup runs AFTER the
+            # reload below).
             self._reload_locked()
+            if settle_reservation is not None:
+                rid = str(settle_reservation)
+                known = any(r.get("kind") == "reserve" and r.get("id") == rid for r in self._resv_rows)
+                retired = any(r.get("kind") == "release" and r.get("id") == rid for r in self._resv_rows)
+                prior = next((u for u in self._rows
+                              if u.get("kind") == "call" and u.get("reservation_id") == rid), None)
+                if not known:
+                    # unknown id: refuse WITHOUT appending any usage row (the
+                    # anomaly row in the reservation ledger is the only trace)
+                    self._append_resv_locked({"kind": "anomaly", "id": rid,
+                                              "note": "settle refused: unknown reservation id; NO usage row was written"})
+                    raise ValueError(f"reservation {rid} is unknown — refusing to settle it "
+                                     "(no usage row was appended; anomaly logged in the reservation ledger)")
+                if prior is not None:
+                    # interrupted settlement: the usage row (with this id) was
+                    # fsynced but the release was not. Finish it WITHOUT a second
+                    # charge: retire the hold against the EXISTING row. (If the
+                    # reservation is ALREADY retired, the settlement completed
+                    # earlier — return the existing row, never release twice.)
+                    if not retired:
+                        self._release_locked(rid, settled_digest=prior["digest"])
+                    return prior
+                if retired:
+                    # already settled AND its usage row is gone: refuse, append nothing
+                    self._append_resv_locked({"kind": "anomaly", "id": rid,
+                                              "note": "settle refused: reservation already retired; NO usage row was written"})
+                    raise ValueError(f"reservation {rid} was already settled — refusing to bill it twice "
+                                     "(no usage row was appended; anomaly logged in the reservation ledger)")
+            if not usage and settle_reservation is not None:
+                # billed-at-estimate: the reserved worst case stands in for the missing
+                # envelope — read from the RELOADED ledger, never a stale cache
+                cost = self.reservation_amount(settle_reservation)
+            else:
+                cost = cost_of(usage or {}, self.pricing.get(model, self.pricing.get("default", {})))
             row = self._append_locked({"kind": "call", "who": who, "model": model, "endpoint": endpoint,
                                        "usage": usage or {}, "cost": round(cost, 10), "round": round_no,
-                                       **({} if usage else {"usage_missing": True})})  # a billed reply with no envelope meters a flagged $0 row — never silently free
+                                       **({"reservation_id": settle_reservation} if settle_reservation is not None else {}),
+                                       **({} if usage else {"usage_missing": True,
+                                                            **({"estimated": True} if settle_reservation is not None else {})})})  # a billed reply with no envelope meters a flagged row — at the reserved estimate when one exists, never silently free
             if settle_reservation is not None:
                 self._release_locked(settle_reservation, settled_digest=row["digest"])
         return row

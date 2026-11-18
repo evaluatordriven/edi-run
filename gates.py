@@ -4,10 +4,26 @@ from datetime import datetime, timezone
 import hashlib, json, math, os, pathlib, re, unicodedata
 
 UNDISCLOSED = "undisclosed"
+MAX_PINNED_SEAT_FILES = 512  # the seat dependency walk is bounded: a pathological import graph refuses by name, never silently truncates
 
 
 class GateError(Exception):
     """Raised when a deterministic doctrine or custody invariant fails."""
+
+
+def strict_json_loads(text):
+    """JSON parse that REFUSES duplicate object properties (verification
+    re-review #8): last-wins silently collapses `{"a":1,"a":2}` into one value,
+    so canonicalization is not injective and a config/request can carry two
+    meanings. Raises ValueError naming the duplicate key."""
+    def _pairs(pairs):
+        out = {}
+        for k, v in pairs:
+            if k in out:
+                raise ValueError(f"duplicate JSON property {k!r}")
+            out[k] = v
+        return out
+    return json.loads(text, object_pairs_hook=_pairs)
 
 
 def sha256_file(path):
@@ -226,39 +242,64 @@ def gate_instruments(cfg, job_dir):
                 continue
             if inside and rp.is_file():
                 seen_files[str(rp)] = rp
-    # Round-3 external review #9: the pin must cover the dependencies a seat
-    # script actually invokes, not only the files named in the command tokens.
-    # (a) Python seat scripts: AST-walk local imports (transitively, bounded to
-    #     the job dir, stdlib-only); (b) non-Python seat scripts: scan the text
-    # for referenced files that exist under the job dir (seed/ and held_out/ are
+    # Round-3 external review #9 + verification re-review #7: the pin must cover
+    # the dependencies a seat script actually invokes, not only the files named
+    # in the command tokens. (a) Python seat scripts: AST-walk local imports
+    # (transitively, bounded to the job dir, stdlib-only) — INCLUDING package
+    # __init__.py files (importing pkg.worker executes pkg/__init__.py first)
+    # and RELATIVE imports at any level (`from . import helper`,
+    # `from ..pkg import mod`); (b) non-Python seat scripts: scan the text for
+    # referenced files that exist under the job dir (seed/ and held_out/ are
     # material, not seat code, and stay out of the seat-code pin).
-    def _local_imports(py_path, acc):
-        """AST-walk a Python seat script's local imports; return newly found files."""
+    def _local_imports(py_path, acc, seen_mods):
+        """AST-walk a Python seat script's local imports; return newly found files.
+        seen_mods caches RESOLVED FILE PATHS, not import spellings (verification
+        re-review #5, final round): two packages importing identically named
+        helpers resolve to DIFFERENT files and both get pinned, while the same
+        file reached through different spellings (duplicate imports, diamonds)
+        still expands only once."""
         import ast
         try:
             tree = ast.parse(py_path.read_text(encoding="utf-8"))
         except (OSError, SyntaxError, ValueError) as e:
             raise GateError(f"pinned seat script {py_path.relative_to(job_dir)} is not parseable Python "
                             f"({e}); seat code must be statically analyzable (G1)")
-        names = []
+        mods = []  # (level, dotted name)
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                names += [a.name for a in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                names.append(node.module)
+                mods += [(0, a.name) for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                lvl = node.level or 0
+                base = node.module or ""
+                if base:
+                    mods.append((lvl, base))
+                for a in node.names:  # `from . import helper`, `from .pkg import mod`
+                    mods.append((lvl, (base + "." if base else "") + a.name))
         bases = [py_path.parent, job_dir]
         found = []
-        for name in names:
-            rel = name.replace(".", "/")
-            for base in bases:
-                for cand in (base / rel / "__init__.py", base / (rel + ".py")):
+        for lvl, name in mods:
+            parts = name.split(".") if name else []
+            # relative import level N: walk up N-1 package levels from the file's dir
+            pkg_dir = py_path.parent
+            for _ in range(max(0, lvl - 1)):
+                pkg_dir = pkg_dir.parent
+            rel_bases = [pkg_dir] if lvl else bases
+            for base in rel_bases:
+                # every package prefix's __init__.py PLUS the module file or package init:
+                # `import pkg.worker` executes pkg/__init__.py, then pkg/worker.py (or pkg/worker/__init__.py)
+                cands = [base.joinpath(*parts[:i], "__init__.py") for i in range(1, len(parts) + 1)]
+                if parts:
+                    cands.append(base.joinpath(*parts[:-1], (parts[-1] + ".py")))
+                for cand in cands:
                     try:
                         rp = cand.resolve()
                     except OSError:
                         continue
-                    if rp.is_file() and rp.is_relative_to(job_dir.resolve()) and str(rp) not in acc:
+                    if rp.is_file() and rp.is_relative_to(job_dir.resolve()) and str(rp) not in acc \
+                            and str(rp) not in seen_mods:  # cache by RESOLVED PATH: same file never re-expands
+                        seen_mods.add(str(rp))
                         found.append(rp)
-        return found
+        return list(dict.fromkeys(found))  # dedupe within one level too
 
     def _text_refs(path, acc):
         """Scan a non-Python seat script's text for referenced job files; return newly found files."""
@@ -284,16 +325,34 @@ def gate_instruments(cfg, job_dir):
 
     # bounded transitive walk: imports of Python seats, referenced files of others
     frontier = list(seen_files.values())
-    for _ in range(64):  # bound the walk; job dirs are small
+    seen_mods = set()  # resolved-path cache: the same file never re-expands
+    WALK_DEPTH_LIMIT = 64
+    for _depth in range(WALK_DEPTH_LIMIT):
         newly = []
         for fp in frontier:
             finder = _local_imports if pathlib.Path(fp).suffix == ".py" else _text_refs
-            newly += [p for p in finder(fp, seen_files) if str(p) not in seen_files]
+            args = (fp, seen_files, seen_mods) if finder is _local_imports else (fp, seen_files)
+            newly += [p for p in finder(*args) if str(p) not in seen_files]
+        newly = list(dict.fromkeys(newly))  # dedupe on ENQUEUE: a diamond or duplicate import cannot multiply work
         for p in newly:
             seen_files[str(p)] = p
+        if len(seen_files) > MAX_PINNED_SEAT_FILES:
+            raise GateError(f"the seat dependency walk pinned {len(seen_files)} files, over the "
+                            f"{MAX_PINNED_SEAT_FILES} cap ({len(seen_files) - MAX_PINNED_SEAT_FILES} "
+                            "over): declare such dependencies explicitly instead of importing them "
+                            "transitively; the pin never silently truncates (G1)")
         frontier = newly
         if not frontier:
             break
+    if frontier:
+        # verification re-review #5 (final round): a nonempty frontier at the
+        # depth limit is a REFUSAL, never a silent truncation — an import chain
+        # deeper than the limit is not pinned, and silently exiting would pin a
+        # dependency graph the seats do not actually run
+        raise GateError(f"the seat dependency walk exceeded the depth limit of {WALK_DEPTH_LIMIT} "
+                        "levels without closing the import frontier: declare such dependencies "
+                        "explicitly instead of importing them transitively; the pin never "
+                        "silently truncates (G1)")
     for rp in sorted(seen_files):
         h.update(str(pathlib.Path(rp).relative_to(job_dir.resolve())).encode())
         h.update(sha256_file(seen_files[rp]).encode())
@@ -619,6 +678,13 @@ def gate_packet(packet, job_dir, expected_incumbent_digest, artifact_text=""):
             yield v, feedback
         elif isinstance(v, dict):
             for k, sv in v.items():
+                # verification re-review #9 (final round): dict KEYS are scanned
+                # UNCONDITIONALLY — a key never inherits the quotation
+                # exemption, because "it quotes the artifact" is a claim about
+                # VALUES the candidate authored, and a smuggled marker in a key
+                # position is a leak regardless of what the artifact contains.
+                # The exemption applies only to VALUES under the feedback keys.
+                yield str(k), False
                 yield from _strings(sv, feedback or k in ("defects", "workable_solutions"))
         elif isinstance(v, list):
             for sv in v:

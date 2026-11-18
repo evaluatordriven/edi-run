@@ -75,3 +75,45 @@ bwrap/Linux). CI legs (Ubuntu bwrap) green: run 44294653521 against commit 131f8
 
 **Open.** macOS seatbelt allowlist via scoped-deny enumeration — named unexplored; if
 shipped, it lands as a separate ruling. S7–S9 probes still gate CI green on Linux legs.
+
+## 2026-11-18 — Verification re-review deferrals (tracked, not fixed)
+
+Two findings from the verification re-review (/tmp/edi_r3_verification_gpt62sol.md)
+are documented deferrals, not oversights:
+
+- **Finding 13 — observation-quote provenance.** `run_evaluator` still returns the
+  parsed observation without checking it against the artifact. The artifact fence
+  (fresh per-call token, prompt-level defense) is implemented; whether the judge's
+  observation is an EXACT artifact quote is a separate concern retained as a
+  tracked deferral — a judge stub echoing the fence as its observation still passes
+  the adapter. Deferral accepted by the Owner: prompt-level defense now,
+  provenance check as its own change.
+- **Finding 11 — legacy-log CWD fallback.** `custody_verify` retains the
+  caller-directory fallback for pre-job-pin (legacy) logs BY DESIGN: those logs
+  were written with keys relative to the caller and must still verify from the
+  directory they were written in. Modern (job-pinned) logs refuse caller-relative
+  resolution; conflicting legacy candidates are refused as ambiguous.
+
+## 2026-11-18 — Final targeted fix round: two tracked known-limits (verification re-review 2)
+
+- **Unified accounting journal — REJECTED (tracked known-limit).** The final-round
+  finding that cross-references alone do not commit either ledger's newest tail is
+  addressed by extending `Meter.anchor()` to commit BOTH ledger heads (usage AND
+  reservation row count + head digest) at every state write, validated at the next
+  `verify()`. A single durable accounting journal unifying the two ledgers was
+  considered and rejected as out of scope for this round: the threat model is
+  operator/machine-level file writes, and an adversary who can truncate or rewrite
+  `usage.resv.jsonl` can rewrite `state.json` (and its anchor) just as easily — the
+  journal adds no real assurance against that adversary, only complexity. The
+  anchor extension closes the accidental-truncation gap; a deliberate full-rewrite
+  adversary remains out of scope by the same rationale. Migration: recovery
+  matches only usage rows carrying `reservation_id`; legacy rows without an id
+  are anchored as-is (exact association cannot be safely inferred).
+- **In-flight settlement after finalize — tracked known-limit (conservative
+  accounting).** Closing admission is now checked by the metering proxy under the
+  job-scoped flock BEFORE any paid call is forwarded, so cooperating flows cannot
+  open paid work after a disposition. This is NOT a drain protocol: a call already
+  in flight at the moment of finalize may settle after it. Its spend is still
+  recorded by the reservation ledger (reserved before forwarding) and recovered at
+  the next Meter construction — accounting stays conservative (spend is never
+  lost, only recorded late).

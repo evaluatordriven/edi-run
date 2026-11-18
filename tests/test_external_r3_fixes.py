@@ -46,20 +46,25 @@ def _dead_pid():
 
 
 def _mark_resv_pids_dead(job):
-    """Rechain the reservation ledger with every reserve row's pid set to a dead
-    process (simulating the kill)."""
+    """Simulate the kill WITHOUT touching either ledger: the two ledgers are
+    cross-anchored (usage rows carry resv_head; reserve rows carry usage_head
+    and the settled usage digest), so rechaining one would cyclically invalidate
+    the other's anchors. Instead, patch metering._pid_alive so the recorded
+    holder pids report dead for the NEXT Meter construction (reconciliation),
+    then the patch self-restores."""
     import metering
     rows = [json.loads(ln) for ln in (job / "usage.resv.jsonl").read_text().splitlines()]
-    prev = ""
-    for r in rows:
-        if r.get("kind") == "reserve":
-            r["pid"] = _dead_pid()
-        r.pop("digest", None)
-        r.pop("prev", None)
-        r["prev"] = prev
-        r["digest"] = metering._row_digest(r)
-        prev = r["digest"]
-    (job / "usage.resv.jsonl").write_text("".join(json.dumps(r, sort_keys=True) + "\n" for r in rows))
+    dead = {int(r["pid"]) for r in rows if r.get("kind") == "reserve" and r.get("pid") is not None}
+    orig = metering._pid_alive
+
+    def patched(pid):
+        metering._pid_alive = orig  # self-restore after the first construction
+        try:
+            return False if int(pid) in dead else orig(pid)
+        except (TypeError, ValueError):
+            return orig(pid)
+
+    metering._pid_alive = patched
 
 
 def _active_resv_ids(job):
@@ -118,8 +123,9 @@ class F1_OutputSpendBounded(unittest.TestCase):
         for t in ts:
             t.join()
         # each reservation is ~0.000211 (request+output): only two fit under 0.0005
+        est = m.estimate(_body())
         self.assertLessEqual(len(passed), 2, "parallel reserves ignored the output spend")
-        self.assertLessEqual(sum(passed) + m.accrued(), 0.0005 + 1e-12)
+        self.assertLessEqual(len(passed) * est + m.accrued(), 0.0005 + 1e-12)
         for r in passed:
             m.release(r)
 
@@ -147,10 +153,11 @@ class F2_DurableSharedReservations(unittest.TestCase):
     def test_kill_between_bill_and_usage_row_is_recovered_at_construction(self):
         job = self.tmp / "job2"
         m1 = _meter(job, 1.0)
-        rsv = m1.reserve(_body())
+        est = m1.estimate(_body())
+        m1.reserve(_body())
         _mark_resv_pids_dead(job)  # simulate the kill: the holder process is gone
         m2 = _meter(job, 1.0)  # construction reconciles
-        self.assertAlmostEqual(m2.accrued(), rsv, places=9,
+        self.assertAlmostEqual(m2.accrued(), est, places=9,
                                msg="a billed call whose usage row was lost must be recovered from its reservation")
         self.assertEqual(_active_resv_ids(job), [], "reservation still active after recovery")
 

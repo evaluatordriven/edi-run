@@ -56,9 +56,10 @@ class TestParallelCallsCannotOvershootTheCap(unittest.TestCase):
         for t in threads:
             t.join()
         # 8 x ~0.0003 = 0.0024 > the 0.001 cap: at least four reserves must refuse
+        est = m.estimate(body)
         self.assertGreaterEqual(len(refused), 4,
                                 "parallel reserves all passed: concurrent calls can overshoot the cap")
-        self.assertLessEqual(sum(passed) + m.accrued(), 0.001 + 1e-12,
+        self.assertLessEqual(len(passed) * est + m.accrued(), 0.001 + 1e-12,
                              "reserved + accrued exceeds the cap")
         for rsv in passed:
             m.release(rsv)

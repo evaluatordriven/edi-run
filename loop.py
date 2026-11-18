@@ -1,6 +1,7 @@
 """Deterministic E-DI state machine (I-05 through I-07) wrapping evaluatordriven/custody tools."""
 from collections import Counter
-import json, math, os, pathlib, shutil, signal, subprocess, sys, time
+from contextlib import contextmanager
+import fcntl, json, math, os, pathlib, shutil, signal, subprocess, sys, threading, time
 import adapters, gates
 from metering import Meter, CapExceeded, UnboundedOutput
 
@@ -9,18 +10,101 @@ sys.path.insert(0, str(VENDOR))
 import check as custody_check, record as custody_record  # noqa: E402
 
 
+def _load_job_json(job_dir):
+    """The job config is parsed at the STRICT boundary (verification re-review
+    #8): duplicate JSON properties are refused by name, so the canonical digest
+    of job.json is injective and a doubled key cannot carry two meanings."""
+    try:
+        return gates.strict_json_loads((pathlib.Path(job_dir) / "job.json").read_text(encoding="utf-8"))
+    except ValueError as e:
+        raise gates.GateError(f"job.json refused at the parse boundary: {e}")
+
+
+# --- job lifecycle lock -------------------------------------------------------------
+# Verification re-review blockers 5/6: ONE lock ordering rule — cross-process
+# file locks (flock) are ALWAYS outer, in-process locks inner, and ALL custody
+# appends plus the finalize transaction serialize on ONE job-scoped flock
+# (`job.lock`), so a disposition, the appends it guards, and the state/
+# escalation writes around it are one lifecycle transaction. The meter's own
+# flock (`usage.lock`) is acquired only INSIDE a held job lock, never the
+# reverse. Reentrant per-thread (finalize's guarded _append calls re-enter).
+_JOB_LOCKS = {}
+_JOB_LOCKS_GUARD = threading.Lock()
+
+
+class _JobLifecycleLock:
+    def __init__(self, path):
+        self._path = path
+        self._rl = threading.RLock()
+        self._fd = None
+        self._depth = 0
+
+    @contextmanager
+    def hold(self):
+        # ACTUAL acquisition order (documented as the code behaves, verification
+        # re-review #6): the per-thread RLock is taken FIRST, then — on the first
+        # (depth-0) entry — mkdir, open and flock on job.lock. This is the
+        # OPPOSITE nesting of the meter's rule ("flock outer, thread lock
+        # inner"); the two are different lock families and never nest in the
+        # reverse direction: the meter's usage.lock is only ever acquired INSIDE
+        # a held job lock (finalize), never the reverse. Reentrancy is by
+        # _depth under the RLock.
+        # Exception-safe acquisition: _depth is incremented ONLY AFTER the flock
+        # is successfully held, and a failed mkdir/open/flock cleans up its own
+        # file descriptor and re-raises with the depth untouched — so a failed
+        # acquisition leaves no residue and the NEXT caller acquires cleanly
+        # (pinned by the injected-failure test).
+        with self._rl:
+            if self._depth == 0:
+                self._path.parent.mkdir(parents=True, exist_ok=True)
+                fd = open(self._path, "a")
+                try:
+                    fcntl.flock(fd.fileno(), fcntl.LOCK_EX)
+                except BaseException:
+                    fd.close()
+                    raise
+                self._fd = fd
+            self._depth += 1
+            try:
+                yield
+            finally:
+                self._depth -= 1
+                if self._depth == 0 and self._fd is not None:
+                    fcntl.flock(self._fd.fileno(), fcntl.LOCK_UN)
+                    self._fd.close()
+                    self._fd = None
+
+
+def job_lock(job_dir):
+    """Reentrant job-scoped lifecycle lock (flock on job.lock, threading RLock
+    inner). Every _append and every finalize/state write path takes it."""
+    jd = pathlib.Path(job_dir).resolve()
+    with _JOB_LOCKS_GUARD:
+        lk = _JOB_LOCKS.get(str(jd))
+        if lk is None:
+            lk = _JOB_LOCKS[str(jd)] = _JobLifecycleLock(jd / "job.lock")
+    return lk.hold()
+
+
+def _has_disposition(job_dir):
+    log = pathlib.Path(job_dir) / "job.jsonl"
+    return log.is_file() and any(e.get("type") == "disposition" for e in custody_record.read(str(log)))
+
+
 def _append(job_dir, etype, actor, files, data):
     # P5: file keys are relative to the JOB, never to the caller's working
     # directory, so finalize and verify give the same answer from anywhere.
     jd = pathlib.Path(job_dir).resolve()
-    # Round-3 external review #10: a disposition is a LIFECYCLE BARRIER, enforced
-    # at the append level — no custody event of ANY kind (including round events
-    # from a run still in flight) may follow a disposition in the chain.
-    log = jd / "job.jsonl"
-    if log.is_file() and any(e.get("type") == "disposition" for e in custody_record.read(str(log))):
-        raise gates.GateError("job already has a disposition; no custody event may follow it — the job is closed (P6 lifecycle barrier)")
-    rel = {(f.resolve().relative_to(jd).as_posix() if f.resolve().is_relative_to(jd) else str(f.resolve())): gates.sha256_file(f) for f in files}
-    return custody_record.append(str(job_dir / "job.jsonl"), {"type": etype, "at": custody_record.now(), "actor": actor, "source": "", "files": rel, "data": data})
+    # Round-3 external review #10 + verification re-review blocker 5: a
+    # disposition is a LIFECYCLE BARRIER, enforced INSIDE the same job lock the
+    # append itself takes — the scan and the append are one transaction, so a
+    # round writer paused mid-guard cannot interleave with a finalize's
+    # disposition: it either lands before the disposition or is refused after.
+    with job_lock(jd):
+        if _has_disposition(jd):
+            raise gates.GateError("job already has a disposition; no custody event may follow it — the job is closed (P6 lifecycle barrier)")
+        rel = {(f.resolve().relative_to(jd).as_posix() if f.resolve().is_relative_to(jd) else str(f.resolve())): gates.sha256_file(f) for f in files}
+        return custody_record.append(str(job_dir / "job.jsonl"), {"type": etype, "at": custody_record.now(), "actor": actor, "source": "", "files": rel, "data": data})
 
 
 def custody_verify(job_dir):  # job_dir may also be the log path itself
@@ -197,7 +281,8 @@ def _job_snapshot(job_dir):
 
 
 def freeze_job(job_dir, started_at=None, dry_run=False):
-    job_dir, cfg = pathlib.Path(job_dir).resolve(), json.loads((pathlib.Path(job_dir) / "job.json").read_text(encoding="utf-8"))
+    job_dir = pathlib.Path(job_dir).resolve()
+    cfg = _load_job_json(job_dir)
     # pre-flight the cfg shape FIRST: real freeze and --dry-run must agree, and
     # both must fail before any log write (no-trace promise, I-01)
     _preflight_freeze_cfg(cfg)
@@ -459,7 +544,7 @@ def _refuse_after_disposition(job_dir):
 
 def run_job(job_dir):
     job_dir = pathlib.Path(job_dir).resolve()
-    cfg, state = json.loads((job_dir / "job.json").read_text(encoding="utf-8")), json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
+    cfg, state = _load_job_json(job_dir), json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
     _refuse_after_disposition(job_dir)
     if state.get("open_round"):
         # R1: a hard-killed run is recoverable, never silently resumable — the
@@ -640,9 +725,18 @@ def run_job(job_dir):
         # metered calls still shows their spend (C1/C2)
         state["cost_usd"] = round(meter.accrued(), 6)
         state["wall_spent_seconds"] = float(state.get("wall_spent_seconds", 0.0)) + (time.time() - t0)
-        if state.get("terminal_state") == "needs_owner":
-            _write_escalation(job_dir, state, cfg)
-        _write_state(job_dir, state, meter)
+        # Verification re-review blocker 5: the finally is a WRITE PATH too —
+        # it must never emit state or an escalation after a disposition. The
+        # check and the writes are one transaction under the job lock, so a
+        # finalize that completes concurrently closes the job before this
+        # write can land (the job is the finalize's, not this run's).
+        with job_lock(job_dir):
+            if _has_disposition(job_dir):
+                pass  # the job was closed by a concurrent finalize; write nothing after its disposition
+            else:
+                if state.get("terminal_state") == "needs_owner":
+                    _write_escalation(job_dir, state, cfg)
+                _write_state(job_dir, state, meter)
     return {"accepted": 0, "rejected": 1, "needs_owner": 2}[state["terminal_state"]]
 
 
@@ -654,7 +748,7 @@ def resume_job(job_dir):
     The resumed round reuses the discarded round's number and consumes its
     max_rounds slot (the attempt was made and paid for)."""
     job_dir = pathlib.Path(job_dir).resolve()
-    cfg, state = json.loads((job_dir / "job.json").read_text(encoding="utf-8")), json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
+    cfg, state = _load_job_json(job_dir), json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
     _refuse_after_disposition(job_dir)  # P6: no seat work may follow a disposition
     if state.get("terminal_state"):
         raise gates.GateError(f"job already reached terminal state {state['terminal_state']} ({state.get('reason')}); nothing to resume")
@@ -702,74 +796,88 @@ def resume_job(job_dir):
 
 def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
     job_dir = pathlib.Path(job_dir).resolve()
-    cfg, st = json.loads((job_dir / "job.json").read_text(encoding="utf-8")), json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
-    log_path = job_dir / "job.jsonl"
-    log_problems = custody_verify(log_path)
-    if log_problems:
-        raise gates.GateError("custody log chain broken; refusing to finalize: " + "; ".join(map(str, log_problems[:3])))
-    log_events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
-    if not log_events or log_events[0].get("type") != "job-start":
-        raise gates.GateError("custody log does not begin with job-start; refusing to finalize a truncated or foreign log")
-    if any(e.get("type") == "disposition" for e in log_events):
-        raise gates.GateError("job already finalized (disposition event exists); finalize runs once")
-    gates.check_pins(cfg, job_dir, st["pins"])
-    # P6: finalize binds the Owner's word on a FINISHED outcome — never on a run
-    # that is still mid-round or that produced a best artifact without an end
-    # state. `declined` stays available: a clean way to abandon an interrupted job.
-    # Round-3 external review #10: the end-state check applies to EVERY non-
-    # declined finalize, including a frozen-never-run job (which used to slip to
-    # the no-incumbent branch and bind a disposition without any end state).
-    if state != "declined" and (st.get("open_round") or not st.get("terminal_state")):
-        raise gates.GateError("job has no end state (a run was interrupted mid-round, ended without a terminal state, or never ran): "
-                              "resume it to an end state, or finalize --disposition declined to abandon it (P6)")
-    try:
-        meter = Meter(job_dir, pricing=cfg.get("pricing", {}), bounds=cfg.get("bounds"))
-        if (job_dir / "usage.jsonl").is_file() or st.get("usage_anchor"):
-            meter.verify(anchor=st.get("usage_anchor"))  # P9: spend enters the chain only from a verified log
-    except ValueError as e:
-        raise gates.GateError(f"usage.jsonl failed integrity verification: {e} (spend integrity)")
-    gates.gate_seats(cfg, job_dir, approver_by=by)
-    ack = ack_unobserved if ack_unobserved is not None else cfg["disposition"].get("acknowledgesUnobserved", [])
-    if not st.get("incumbent_round"):
-        _append(job_dir, "disposition", by, [], {"state": state, "acknowledgesUnobserved": ack})
-        return _emit_gap_record(job_dir, st, cfg)
-    win_r, max_r, art_dst, log_path = str(st["incumbent_round"]), str(max(int(k) for k in st["rounds"])), job_dir / "artifact", job_dir / "job.jsonl"
-    win = st["rounds"][win_r]
-    shutil.rmtree(art_dst, ignore_errors=True)
-    shutil.copytree(job_dir / "rounds" / f"round-{int(win_r):02d}" / "artifact", art_dst)
-    (job_dir / "scores.jsonl").write_text("\n".join(json.dumps(r) for r in win["scores"]) + "\n", encoding="utf-8")
-    seed_author = cfg["seed"]["author"] if (cfg.get("seed") and st.get("seed_round") == int(win_r)) else None
-    if win_r != max_r:
-        ev_prod = _append(job_dir, "artifact-produced", seed_author or cfg["maker"]["name"], [art_dst / f for f in cfg["subjectFiles"]], {"seed": True} if seed_author else {})
-        checks = [dict(c, at=_append(job_dir, "check", c["evaluator"], [], c)["at"]) for c in win["checks"]]
-        for k in win["controls"]:
-            _append(job_dir, "control", k["evaluator"], [], dict(k))  # full payload: the re-logged batch is self-describing
-        for ex in win["external"]:
-            _append(job_dir, "external", ex["readBy"], [], ex)
-        prod_at = ev_prod["at"]
-    else:
-        checks, prod_at = win["checks"], win["producedAt"]
-    if (job_dir / "usage.jsonl").is_file():
-        # P9 + round-3 external review #5/#6: the spend attestation happens under
-        # the meter's cross-process lock, with the log RE-READ and verified
-        # EXACTLY against the anchor first — the verified bytes and the attested
-        # bytes are the same bytes. A null anchor never disables the check: an
-        # unanchored log is refused (run/resume may proceed and re-anchor; a
-        # finalize may not attest).
-        if not st.get("usage_anchor"):
-            raise gates.GateError("usage.jsonl is present but state.json has no spend anchor (unanchored log); "
-                                  "refusing to attest spend that no state write vouched for (P9)")
+    cfg = _load_job_json(job_dir)
+    # Verification re-review blocker 4 (final round): the WHOLE finalize is one
+    # lifecycle transaction — the state re-read, the custody verify, the pins
+    # check and every append hold the job-scoped flock from the first byte, so a
+    # competing finalizer cannot rewrite artifact/scores between the read and
+    # the attest: it re-reads INSIDE the lock, sees the disposition, and refuses
+    # by name. (Previously the state read and custody verify ran BEFORE the
+    # lock — a second finalizer could slip a rewrite into that window.)
+    with job_lock(job_dir):
+        st = json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
+        log_path = job_dir / "job.jsonl"
+        log_problems = custody_verify(log_path)
+        if log_problems:
+            raise gates.GateError("custody log chain broken; refusing to finalize: " + "; ".join(map(str, log_problems[:3])))
+        log_events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+        if not log_events or log_events[0].get("type") != "job-start":
+            raise gates.GateError("custody log does not begin with job-start; refusing to finalize a truncated or foreign log")
+        if any(e.get("type") == "disposition" for e in log_events):
+            raise gates.GateError("job already finalized (disposition event exists); finalize runs once")
+        gates.check_pins(cfg, job_dir, st["pins"])
+        # P6: finalize binds the Owner's word on a FINISHED outcome — never on a run
+        # that is still mid-round or that produced a best artifact without an end
+        # state. `declined` stays available: a clean way to abandon an interrupted job.
+        # Round-3 external review #10: the end-state check applies to EVERY non-
+        # declined finalize, including a frozen-never-run job (which used to slip to
+        # the no-incumbent branch and bind a disposition without any end state).
+        if state != "declined" and (st.get("open_round") or not st.get("terminal_state")):
+            raise gates.GateError("job has no end state (a run was interrupted mid-round, ended without a terminal state, or never ran): "
+                                  "resume it to an end state, or finalize --disposition declined to abandon it (P6)")
         try:
-            with meter.file_lock():
-                meter.refresh()
-                meter.verify(anchor=st.get("usage_anchor"), exact=True)
-                rows_n, head_d, _total = meter.anchor()
-                _append(job_dir, "spend", "edi-run", [job_dir / "usage.jsonl"],
-                        {"usd": round(meter.accrued(), 6), "discardedUsd": round(meter.discarded(), 6),
-                         "rows": rows_n, "head": head_d})
+            meter = Meter(job_dir, pricing=cfg.get("pricing", {}), bounds=cfg.get("bounds"))
+            if (job_dir / "usage.jsonl").is_file() or st.get("usage_anchor"):
+                meter.verify(anchor=st.get("usage_anchor"))  # P9: spend enters the chain only from a verified log
         except ValueError as e:
             raise gates.GateError(f"usage.jsonl failed integrity verification: {e} (spend integrity)")
-    ev_disp = _append(job_dir, "disposition", by, [], {"state": state, "acknowledgesUnobserved": ack})
+        gates.gate_seats(cfg, job_dir, approver_by=by)
+        # Verification re-review blocker 5: finalize is a LIFECYCLE TRANSACTION —
+        # the disposition scan, every custody append (spend included), and the
+        # state/escalation writes around them hold the job-scoped flock as ONE
+        # transition. A competing round-append therefore either lands before the
+        # disposition or is refused after it — it can never interleave.
+        ack = ack_unobserved if ack_unobserved is not None else cfg["disposition"].get("acknowledgesUnobserved", [])
+        if not st.get("incumbent_round"):
+            _append(job_dir, "disposition", by, [], {"state": state, "acknowledgesUnobserved": ack})
+            return _emit_gap_record(job_dir, st, cfg)
+        win_r, max_r, art_dst, log_path = str(st["incumbent_round"]), str(max(int(k) for k in st["rounds"])), job_dir / "artifact", job_dir / "job.jsonl"
+        win = st["rounds"][win_r]
+        shutil.rmtree(art_dst, ignore_errors=True)
+        shutil.copytree(job_dir / "rounds" / f"round-{int(win_r):02d}" / "artifact", art_dst)
+        (job_dir / "scores.jsonl").write_text("\n".join(json.dumps(r) for r in win["scores"]) + "\n", encoding="utf-8")
+        seed_author = cfg["seed"]["author"] if (cfg.get("seed") and st.get("seed_round") == int(win_r)) else None
+        if win_r != max_r:
+            ev_prod = _append(job_dir, "artifact-produced", seed_author or cfg["maker"]["name"], [art_dst / f for f in cfg["subjectFiles"]], {"seed": True} if seed_author else {})
+            checks = [dict(c, at=_append(job_dir, "check", c["evaluator"], [], c)["at"]) for c in win["checks"]]
+            for k in win["controls"]:
+                _append(job_dir, "control", k["evaluator"], [], dict(k))  # full payload: the re-logged batch is self-describing
+            for ex in win["external"]:
+                _append(job_dir, "external", ex["readBy"], [], ex)
+            prod_at = ev_prod["at"]
+        else:
+            checks, prod_at = win["checks"], win["producedAt"]
+        if (job_dir / "usage.jsonl").is_file():
+            # P9 + round-3 external review #5/#6: the spend attestation happens under
+            # the meter's cross-process lock, with the log RE-READ and verified
+            # EXACTLY against the anchor first — the verified bytes and the attested
+            # bytes are the same bytes. A null anchor never disables the check: an
+            # unanchored log is refused (run/resume may proceed and re-anchor; a
+            # finalize may not attest).
+            if not st.get("usage_anchor"):
+                raise gates.GateError("usage.jsonl is present but state.json has no spend anchor (unanchored log); "
+                                      "refusing to attest spend that no state write vouched for (P9)")
+            try:
+                with meter.file_lock():
+                    meter.refresh()
+                    meter.verify(anchor=st.get("usage_anchor"), exact=True)
+                    rows_n, head_d = meter.anchor()[:2]
+                    _append(job_dir, "spend", "edi-run", [job_dir / "usage.jsonl"],
+                            {"usd": round(meter.accrued(), 6), "discardedUsd": round(meter.discarded(), 6),
+                             "rows": rows_n, "head": head_d})
+            except ValueError as e:
+                raise gates.GateError(f"usage.jsonl failed integrity verification: {e} (spend integrity)")
+        ev_disp = _append(job_dir, "disposition", by, [], {"state": state, "acknowledgesUnobserved": ack})
     violations = [{"dimension": d["id"], "description": f"{d['id']} failed conform threshold"} for d in cfg["bar"]["dimensions"] if any(c["dimension"] == d["id"] and c["outcome"] == "does_not_conform" for c in checks)]
     disagreements = [{"dimension": d["id"], "checks": [i for i, c in enumerate(checks) if c["dimension"] == d["id"]], "note": "evaluators disagreed"} for d in cfg["bar"]["dimensions"] if len({c["outcome"] for c in checks if c["dimension"] == d["id"]}) > 1]
     evals_clean = [{k: v for k, v in e.items() if k in ("id", "name", "kind", "model", "script", "sameModelAsMaker")} for e in cfg["evaluators"]]
@@ -798,7 +906,8 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
 
 
 def verify_job(job_dir):
-    job_dir, cfg = pathlib.Path(job_dir).resolve(), json.loads((pathlib.Path(job_dir) / "job.json").read_text(encoding="utf-8"))
+    job_dir = pathlib.Path(job_dir).resolve()
+    cfg = _load_job_json(job_dir)
     if custody_verify(job_dir):
         return 1
     rep = custody_check.verify(json.loads((job_dir / "record.json").read_text(encoding="utf-8")), files=str(job_dir / "artifact"), evidence=str(job_dir / "evidence"), bar=str(job_dir / cfg["bar"]["file"]))
