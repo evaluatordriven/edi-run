@@ -73,8 +73,10 @@ def sandbox_prefix(stype, jd, sb_p, reads="denylist"):
         # out is the relay to the proxy's Unix socket. Every job's controls are masked
         # (round-2 B): control sets are reused across jobs under one jobs root.
         home = pathlib.Path.home().resolve()  # seatbelt/bwrap match canonical paths only
+        # bwrap applies mounts in argv order: BINDS FIRST, MASKS AFTER — a later
+        # --ro-bind / shadows earlier tmpfs mounts (the regression the CI legs caught)
         cmd = ["bwrap", "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-net",
-               "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", str(jd)]
+               "--dev", "/dev", "--proc", "/proc"]
         if allowlist:
             # S1: bind ONLY the system runtime + the resolved interpreter tree; the
             # host's rest of the filesystem does not exist inside the namespace
@@ -92,6 +94,7 @@ def sandbox_prefix(stype, jd, sb_p, reads="denylist"):
                 cmd += ["--ro-bind", str(pref), str(pref)]
         else:
             cmd += ["--ro-bind", "/", "/"]
+        cmd += ["--tmpfs", "/tmp", "--tmpfs", str(jd)]
         for ho in sorted(set(jd.parent.glob("*/held_out")) | set(jd.parent.rglob("held_out"))):  # every job's controls, any depth
             if ho.is_dir() and ho.parent != jd:
                 cmd += ["--tmpfs", str(ho)]
