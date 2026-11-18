@@ -319,19 +319,20 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 relay = [sys.executable, "-I", "-c", _RELAY, str(sb_p / "proxy.sock"), str(inner_port)] if stype == "bwrap" else []
                 cmd = (sandbox_prefix(stype, jd, sb_p) or []) + relay + cmd
                 proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)), stdin=subprocess.DEVNULL)  # no inherited tty: no TIOCSTI keystroke injection (recheck #5)
+                mk_usage = {"agent_calls": calls}  # metered per-call by the loop
+                round_dir = pathlib.Path(out_dir).resolve().parent.parent
+                if round_dir.is_dir():
+                    # accumulate, not clobber: every round's proxy log must survive for
+                    # audit — INCLUDING the cap-trip raise below (refused calls are audit)
+                    with (round_dir / "proxy-usage.jsonl").open("a", encoding="utf-8") as f:
+                        for c in calls:
+                            f.write(json.dumps(c) + "\n")
                 if cap_flag and cap_flag[0] is not None:
                     raise cap_flag[0]  # a mid-round cap trip halts as cap_reached, never as maker_failed
                 if proc.returncode != 0:
                     raise RuntimeError(f"Agent Maker failed ({proc.returncode}): {proc.stderr.strip()} | cmd[0:4]={cmd[:4]}")
                 if not any(gates.safe_rel(sf, sb_art).is_file() for sf in subject_files):
                     raise RuntimeError("Agent Maker returned no subject files")
-                mk_usage = {"agent_calls": calls}  # metered per-call by the loop
-                round_dir = pathlib.Path(out_dir).resolve().parent.parent
-                if round_dir.is_dir():
-                    # accumulate, not clobber: every round's proxy log must survive for audit
-                    with (round_dir / "proxy-usage.jsonl").open("a", encoding="utf-8") as f:
-                        for c in calls:
-                            f.write(json.dumps(c) + "\n")
             finally:
                 srv.shutdown()
                 srv.server_close()

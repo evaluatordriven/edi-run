@@ -461,6 +461,22 @@ class TestEDIRuntime(unittest.TestCase):
         st_s = json.loads((job_slow / "state.json").read_text())
         self.assertEqual((st_s["terminal_state"], st_s["reason"]), ("needs_owner", "maker_failed"))
 
+    def test_torn_usage_log_is_integrity_refusal_with_escalation(self):
+        # a damaged spend log must yield needs_owner/integrity_error with an
+        # escalation package — never a raw traceback (D4.11)
+        job = self._make_base_job(subdir="job_torn_meter")
+        loop.freeze_job(job)
+        from metering import Meter
+        m = Meter(job, pricing={"default": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}}, bounds={"max_cost_usd": 1.0})
+        m._append({"kind": "call", "who": "maker", "model": "m", "endpoint": "x", "usage": {}, "cost": 0.1})
+        with (job / "usage.jsonl").open("a", encoding="utf-8") as f:
+            f.write("{torn json\n")
+        with self.assertRaises(gates.GateError):
+            loop.run_job(job)
+        st = json.loads((job / "state.json").read_text())
+        self.assertEqual((st["terminal_state"], st["reason"]), ("needs_owner", "integrity_error"))
+        self.assertTrue((job / "escalation.json").is_file())
+
     def test_meter_chain_amendments_and_tamper_refusal(self):
         # the usage log is the spend source of truth: hash-chained, append-only,
         # amendment rows mark discarded rounds without rewriting history

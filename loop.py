@@ -263,6 +263,14 @@ def run_job(job_dir):
             raise gates.GateError("frozen instruments modified after freeze (I-01/I-02)")
         if state.get("terminal_state"):
             raise gates.GateError(f"job already reached terminal state {state['terminal_state']} ({state.get('reason')}); run executes once")
+        # the meter loads the durable usage log at construction — a torn or
+        # tampered log must be an integrity refusal HERE, inside the mapped try
+        try:
+            meter = Meter(job_dir, pricing=cfg.get("pricing", {}), bounds=cfg.get("bounds"))
+            if (job_dir / "usage.jsonl").is_file():
+                meter.verify()
+        except ValueError as e:
+            raise gates.GateError(f"usage.jsonl failed integrity verification: {e} (spend integrity)")
     except gates.GateError as e:
         if not state.get("terminal_state"):
             # D4.11: a pre-run integrity refusal leaves a named end state and an escalation
@@ -280,13 +288,7 @@ def run_job(job_dir):
     pricing = cfg.get("pricing", {})
     # the spend source of truth: durable, hash-chained usage rows (C1-C7). A
     # pre-existing log is verified before anything accrues onto it.
-    try:
-        meter = Meter(job_dir, pricing=pricing, bounds=cfg.get("bounds"))
-        if (job_dir / "usage.jsonl").is_file():
-            meter.verify()
-    except ValueError as e:
-        # a torn or damaged usage log is an integrity refusal, not a crash
-        raise gates.GateError(f"usage.jsonl failed integrity verification: {e} (spend integrity)")
+
     prev_term = None
     if hasattr(signal, "SIGTERM"):
         def _on_term(signum, frame):
