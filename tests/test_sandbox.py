@@ -1,13 +1,10 @@
-"""Must-fail tests for the round-2 briefing to the edi-run maintainer (2026-11-17).
-
-Drop this file into tests/ next to test_briefing_2026_11_17.py; it reuses that file's helpers.
-Run:  python3 -m unittest discover -s tests -p "test_briefing_2026_11_17_r2.py" -v
+"""Sandbox confinement, network confinement and proxy-transport invariants — findings raised in the 2026-11-17/18 briefings, re-homed by concern (not by review date).
 
 Sandbox tests run under whatever maker.sandbox the host supports (sandbox-exec on macOS,
 bwrap on Linux) and skip when neither can launch. Platform notes per test:
   A1, A2  red on Linux (bwrap) only; the macOS profile already denies writes.
   B, E    red on both platforms.
-  C*, D*  platform-independent (C* need no sandbox at all).
+  D*      platform-independent.
 Every test cleans up anything it manages to write outside its own temp tree.
 """
 import http.server
@@ -22,35 +19,114 @@ import unittest
 import uuid
 
 import test_edi
-import test_briefing_2026_11_17 as r1
 import gates
 import loop
 import adapters
 
-PASSING = r1.PASSING
+from support_briefing import PASSING, _Base, _R2Base, _serve
+
 REPO = pathlib.Path(loop.__file__).resolve().parent
 
 
-class _R2Base(r1._Base):
-    _r1_agent_job = r1.Finding4AgentMaker._agent_job
+class _RecordingUpstream(http.server.BaseHTTPRequestHandler):
+    seen = []
 
-    def _sandboxed_agent_job(self, subdir, script, url="https://example.invalid/v1"):
-        if test_edi._SANDBOX_TYPE is None:
-            self.skipTest("no OS sandbox available on this host")
-        job = self._r1_agent_job(subdir, script, url=url)
+    def log_message(self, format, *args):  # noqa: A002
+        return
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))) or b"{}")
+        type(self).seen.append(body.get("model"))
+        raw = json.dumps({"model": body.get("model"), "usage": {"total_tokens": 10},
+                          "choices": [{"message": {"content": "ok"}}]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+
+# ---------------------------------------------------------------- Finding 4
+class Finding4AgentMaker(_Base):
+    def test_4a_proxy_forwards_only_the_declared_model(self):
+        """The record names the declared model; the proxy must not let the agent call another."""
+        _RecordingUpstream.seen = []
+        srv = http.server.HTTPServer(("127.0.0.1", 0), _RecordingUpstream)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            job = self._agent_job("f4a", (
+                "import json, os, pathlib, sys, urllib.request\n"
+                "for model in ('other-family/model-x', os.environ['AGENT_MODEL']):\n"
+                "    body = json.dumps({'model': model, 'messages': [{'role': 'user', 'content': 'draft'}]}).encode()\n"
+                "    try:\n"
+                "        urllib.request.urlopen(urllib.request.Request(os.environ['AGENT_PROXY_URL'], data=body, method='POST'), timeout=10).read()\n"
+                "    except Exception:\n"
+                "        pass\n"
+                "pathlib.Path(sys.argv[2], 'memo.md').write_text('" + PASSING + "', encoding='utf-8')\n"),
+                url=f"http://127.0.0.1:{srv.server_port}/v1/chat/completions")
+            cfg = self._cfg(job)
+            st = test_edi._SANDBOX_TYPE
+            if st is None:
+                self.skipTest("no OS sandbox available on this host")
+            cfg["maker"]["sandbox"] = {"type": st}
+            self._save(job, cfg)
+            loop.freeze_job(job)
+            loop.run_job(job)
+            self.assertNotIn("other-family/model-x", _RecordingUpstream.seen,
+                             f"proxy forwarded an undeclared model upstream: {_RecordingUpstream.seen}")
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def _cl2_agent_job(self, subdir, eval_family, eval_endpoint):
+        job = self._agent_job(subdir, "import sys\n", level="CL2")
         cfg = self._cfg(job)
-        cfg["maker"]["sandbox"] = {"type": test_edi._SANDBOX_TYPE}
+        cfg["evaluators"].append({"id": "E2", "name": "Model Judge", "kind": "model", "script": None, "runs": 2,
+                                  "url": f"https://{eval_endpoint}/v1/chat/completions",
+                                  "model": {"family": eval_family, "identifier": "judge-1", "endpoint": eval_endpoint, "readOnly": True}})
         self._save(job, cfg)
         return job
 
-    def _memo_tail(self, job):
-        return (job / "rounds" / "round-01" / "artifact" / "memo.md").read_text().splitlines()[-1]
+    def test_4b_cl2_family_gate_applies_to_agent_makers(self):
+        """CL2-3: gate_seats checks family/endpoint independence only for kind == model, so an
+        agent Maker skips it at freeze and the job fails only at finalize, after the spend."""
+        job = self._cl2_agent_job("f4b", eval_family="mock", eval_endpoint="127.0.0.1")
+        with self.assertRaises(gates.GateError):
+            loop.freeze_job(job)
 
+    def test_r3a_freeze_refuses_unconfined_agent_maker_above_cl1(self):
+        """Ruling R3, option A (interim): no agent Maker at CL2/CL3 until OS-level confinement exists."""
+        job = self._cl2_agent_job("f4r3", eval_family="other", eval_endpoint="other.example")
+        with self.assertRaises(gates.GateError):
+            loop.freeze_job(job)
 
-def _serve(handler):
-    srv = http.server.HTTPServer(("127.0.0.1", 0), handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    return srv
+    def test_4d_agent_maker_cannot_read_held_out(self):
+        """D3.held-out: held-out material never reaches the Maker. R3 (sandboxed variant):
+        the runtime launches agent Makers under maker.sandbox confinement, so held_out/
+        is neither readable nor writable, and the custody log stays out of reach."""
+        import test_edi as _te
+        if _te._SANDBOX_TYPE is None:
+            self.skipTest("no OS sandbox available on this host")
+        job = self._agent_job("f4d", (
+            "import pathlib, sys\n"
+            "ho = pathlib.Path(__file__).resolve().parents[1] / 'held_out' / 'controls' / 'planted.md'\n"
+            "try:\n"
+            "    ho.read_text(); seen = True\n"
+            "except OSError:\n"
+            "    seen = False\n"
+            "try:\n"
+            "    pathlib.Path(ho.parent, 'tampered.md').write_text('x'); wrote = True\n"
+            "except OSError:\n"
+            "    wrote = False\n"
+            "pathlib.Path(sys.argv[2], 'memo.md').write_text('" + PASSING + "held_out_readable=' + str(seen) + ' held_out_writable=' + str(wrote) + '\\n', encoding='utf-8')\n"))
+        cfg = self._cfg(job)
+        cfg["maker"]["sandbox"] = {"type": test_edi._SANDBOX_TYPE}
+        self._save(job, cfg)
+        loop.freeze_job(job)
+        loop.run_job(job)
+        memo = (job / "rounds" / "round-01" / "artifact" / "memo.md").read_text()
+        self.assertIn("held_out_readable=False", memo)
+        self.assertIn("held_out_writable=False", memo)  # deny file-write* keeps the controls intact
 
 
 class FindingG_LinuxCredentialParity(_R2Base):
@@ -111,59 +187,6 @@ class FindingH_UnresolvedHome(_R2Base):
             loop.freeze_job(job)
             loop.run_job(job)
         self.assertIn("aws=DENIED", self._memo_tail(job))
-
-
-class FindingI_ShortLineNeedle(_R2Base):
-    def test_i_short_held_out_lines_are_whole_line_needles(self):
-        """Recheck #3: a held-out line shorter than WINDOW (e.g. 29 chars) yielded no
-        32-char window and passed the filter untouched -- for script/model Makers
-        the filter is the ONLY exclusion mechanism."""
-        job = self.tmp / "job-short"
-        (job / "held_out").mkdir(parents=True)
-        (job / "held_out" / "key.txt").write_text("No header and no figure here.\n")
-        windows, digests, lines = gates.held_out_needles(job)
-        self.assertIn(gates._canon("No header and no figure here."), lines)
-        # frontier-review blocker regression: short common words must NOT become
-        # substring needles (they scrubbed legitimate feedback and GateError-ed legal packets)
-        (job / "held_out" / "labels.txt").write_text("yes\nno\nN/A\nStep 1\n")
-        _, _, short = gates.held_out_needles(job)
-        self.assertEqual(short, {gates._canon("No header and no figure here.")})  # <MIN_LINE skipped
-        item = {"feedback": "The script prints yes at the end. We note the northern approach; do not reformat."}
-        out, _ = gates.scrub_held_out([item], gates.held_out_needles(job))
-        self.assertNotIn(gates.WITHHELD, out[0]["feedback"])  # no false-positive scrub
-        # the 29-char line IS matched, but only whole-line: mid-word echoes survive,
-        # a line-echo is redacted
-        short_line = "No header and no figure here."
-        out2, w2 = gates.scrub_held_out(
-            [{"a": "Overall there was " + short_line + " in the control."}],
-            gates.held_out_needles(job))
-        self.assertEqual(w2, 1)
-        self.assertIn(gates.WITHHELD, out2[0]["a"])
-        out3, w3 = gates.scrub_held_out(
-            [{"a": "the no-header and no-figure here-abouts clause"}],
-            gates.held_out_needles(job))
-        self.assertEqual(w3, 0)  # word-boundary respected: mid-word echo survives
-        # verification follow-ups: punctuation- and quote-delimited echoes are leaks too
-        out4, w4 = gates.scrub_held_out(
-            [{"a": "the verdict was '" + short_line + "', so revise."}],
-            gates.held_out_needles(job))
-        self.assertEqual(w4, 1)
-        out5, w5 = gates.scrub_held_out(
-            [{"a": "Summary: " + short_line + "."}],
-            gates.held_out_needles(job))
-        self.assertEqual(w5, 1)
-
-
-class FindingJ_HttpUpstream(_R2Base):
-    def test_j_agent_proxy_refuses_plain_http_upstream(self):
-        """Recheck H1: the proxy holds the key; a configured http:// upstream
-        (loopback-range 127.0.0.2 is NOT exempt) must be refused, not served."""
-        import adapters
-        for url in ("http://127.0.0.2/v1", "http://example.invalid/v1"):
-            with self.assertRaises(ValueError):
-                adapters._require_https(url)
-        adapters._require_https("https://example.invalid/v1")  # control: accepted
-        adapters._require_https("http://127.0.0.1/v1")  # loopback exempt
 
 
 class FindingF_AgentTmpdir(_R2Base):
@@ -242,54 +265,6 @@ class FindingB_NeighbourHeldOut(_R2Base):
         self.assertEqual(self._memo_tail(job), "seen=", "agent read held-out controls of: " + self._memo_tail(job))
 
 
-# ------------------------------------------------------------------ Finding C
-class FindingC_FilterPrecision(unittest.TestCase):
-    """D4.9 asks that held-out material be filtered out of the Maker's input. It does not ask
-    that the bar's own wording, or ordinary phrases, be filtered out with it."""
-
-    def _job(self, bar, clean):
-        d = pathlib.Path(tempfile.mkdtemp(prefix="edi_r2_filter_"))
-        self.addCleanup(shutil.rmtree, d, True)
-        (d / "held_out" / "controls").mkdir(parents=True)
-        (d / "bar.md").write_text(bar, encoding="utf-8")
-        (d / "method.md").write_text("# Method\nWrite the summary.\n", encoding="utf-8")
-        (d / "held_out" / "controls" / "clean.md").write_text(clean, encoding="utf-8")
-        return d
-
-    def test_c1_a_remedy_quoting_the_bar_reaches_the_maker(self):
-        d = self._job("# Bar\n- D1: include the section '## Root cause and prevention measures' verbatim\n",
-                      "## Root cause and prevention measures (owner: SRE on call)\nThe queue backed up after a config push.\n")
-        item = {"remedy": "Add the section '## Root cause and prevention measures' after the timeline."}
-        out, n = gates.scrub_held_out([item], gates.held_out_needles(d))
-        self.assertEqual((out[0]["remedy"], n), (item["remedy"], 0), "bar-required wording was withheld from the Maker")
-
-    def test_c2_only_the_matching_span_is_withheld(self):
-        sentence = "The queue backed up for forty minutes after a config push at 14:02."
-        d = self._job("# Bar\n- D1: a timeline\n", sentence + "\n")
-        items = [{"observation": f"Paragraph 2 copies a reference sentence: '{sentence}' Rewrite it from the incident log."},
-                 {"observation": "Paragraph 3: 'the  QUEUE backed up for forty\nminutes after a CONFIG push at 14:02' again."}]
-        out, n = gates.scrub_held_out(items, gates.held_out_needles(d))
-        for o in out:
-            self.assertNotIn("backed up for forty", " ".join(o["observation"].casefold().split()))  # still filtered
-        self.assertIn("Paragraph 2 copies a reference sentence", out[0]["observation"])  # the rest survives
-        self.assertIn("Rewrite it from the incident log.", out[0]["observation"])
-        self.assertIn("again.", out[1]["observation"])
-        self.assertGreaterEqual(n, 2)
-
-    def test_c3_a_shared_common_phrase_is_not_a_leak(self):
-        d = self._job("# Bar\n- D2: root cause named\n", "The fault was fixed in commit 4e1d by the on-call engineer.\n")
-        item = {"observation": "The root-cause section says it was fixed in commit `9f2e1c`, with no follow-up."}
-        out, n = gates.scrub_held_out([item], gates.held_out_needles(d))
-        self.assertEqual((out[0]["observation"], n), (item["observation"], 0), "a 21-character common phrase was treated as a leak")
-
-    def test_c4_the_committed_cl2_example_loses_no_line_whole(self):
-        ex = REPO / "examples" / "live-cl2-job"
-        needles = gates.held_out_needles(ex)
-        lines = [ln for ln in (ex / "artifact" / "summary.md").read_text().splitlines() if ln.strip()]
-        lost = [ln for ln in lines if gates.scrub_held_out([{"o": ln}], needles)[0][0]["o"] == gates.WITHHELD]
-        self.assertEqual(lost, [], f"{len(lost)}/{len(lines)} lines of the accepted artifact would reach the Maker as [withheld]")
-
-
 # ------------------------------------------------------------------ Finding D
 class _Status500(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):  # noqa: A002
@@ -360,7 +335,7 @@ class FindingE_Network(_R2Base):
         """The agent needs the proxy and nothing else; any other host is an exfiltration channel
         for whatever else the agent can read."""
         _Collector.hits = []
-        collector, upstream = _serve(_Collector), _serve(r1._RecordingUpstream)
+        collector, upstream = _serve(_Collector), _serve(_RecordingUpstream)
         try:
             job = self._sandboxed_agent_job("e", (
                 "import json, os, pathlib, sys, urllib.request\n"
@@ -382,6 +357,19 @@ class FindingE_Network(_R2Base):
             for s in (collector, upstream):
                 s.shutdown()
                 s.server_close()
+
+
+# ------------------------------------------------------------------ Finding J
+class FindingJ_HttpUpstream(_R2Base):
+    def test_j_agent_proxy_refuses_plain_http_upstream(self):
+        """Recheck H1: the proxy holds the key; a configured http:// upstream
+        (loopback-range 127.0.0.2 is NOT exempt) must be refused, not served."""
+        import adapters
+        for url in ("http://127.0.0.2/v1", "http://example.invalid/v1"):
+            with self.assertRaises(ValueError):
+                adapters._require_https(url)
+        adapters._require_https("https://example.invalid/v1")  # control: accepted
+        adapters._require_https("http://127.0.0.1/v1")  # loopback exempt
 
 
 if __name__ == "__main__":

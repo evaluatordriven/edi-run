@@ -133,9 +133,10 @@ deletes anything without the Owner's explicit ruling naming the action.
 
 ## 10. Open questions (Owner to rule before implementation)
 
-1. Jobs root location and name (proposal: `~/edi-jobs/`).
-2. Whether `AUTHORSHIP.md` should also capture a human "sponsor" line (who asked for
-   the job), for auditability beyond seat separation.
+1. RESOLVED (2026-11-18, S2): jobs root defaults to `~/edi-jobs/`, overridable via
+   `EDI_HOME`.
+2. RESOLVED (2026-11-18, S2): AUTHORSHIP.md carries an optional `Sponsor:` line
+   (who asked for the job) — auditability at zero gate cost.
 3. RESOLVED (2026-11-17, round-2 briefing): build `edi.py freeze --dry-run` in the
    runtime rather than a second preflight inside the skill; `preflight.py` stays a thin
    wrapper around it. Land the sandbox fixes first — a freeze-time sandbox check that

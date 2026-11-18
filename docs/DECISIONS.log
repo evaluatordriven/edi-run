@@ -1,5 +1,19 @@
 # edi-run DECISIONS.log — newest at TOP
 
+## 2026-11-18 — Review bar demoted from standing gate to tiered (Owner: S2)
+
+**Ruling.** The hardening sprint is over; the last three changes were flip-a-default
+scale, and carrying a deep + adversarial frontier review pair as a standing gate on
+every change was drifting toward the Plumbline failure mode (ceremony growing faster
+than evidence). Tiered bar, effective now:
+
+- **Deep + adversarial frontier reviews** — required only for changes touching
+  `adapters.py` or gate semantics (gates.py, loop.py freeze/finalize paths).
+- **Everything else** — full suite + probe gate + CI green. Those already catch the
+  invariant regressions; reviews add no marginal signal at this change size.
+- Review-artifact tests are re-homed by CONCERN (tests/test_sandbox.py,
+  tests/test_briefing.py), never stacked as dated strata per review round.
+
 ## 2026-11-18 — S1 sandbox.reads default flipped to allowlist (Owner: S2, decision A)
 
 **Ruling.** bwrap jobs default to `sandbox.reads=allowlist`. Denylist remains available
