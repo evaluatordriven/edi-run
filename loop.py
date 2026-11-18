@@ -66,6 +66,12 @@ def freeze_job(job_dir, started_at=None):
     missing = [m for m in model_ids if m and m not in pricing_map and "default" not in pricing_map]
     if missing:
         raise gates.GateError(f"missing pricing for model seat(s) {missing}; add a pricing map to job.json so the cost cap is enforceable")
+    zero = []
+    for key, p in pricing_map.items():
+        if any(float(p.get(k, 0.0)) <= 0.0 for k in ("input_usd_per_mtok", "output_usd_per_mtok")):
+            zero.append(key)
+    if zero:
+        raise gates.GateError(f"pricing entries {zero} contain a zero or negative rate; unpriced spend must be refused, never silently $0 (recheck G2)")
     pins = gates.gate_instruments(cfg, job_dir)
     if (job_dir / "job.jsonl").exists():
         raise gates.GateError("job.jsonl already exists; freeze runs once")

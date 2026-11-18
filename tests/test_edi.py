@@ -520,9 +520,9 @@ class TestEDIRuntime(unittest.TestCase):
         self.assertIn("recommendation", esc)
         # a Maker crash halts as needs_owner/maker_failed, never a traceback
         job3 = self._make_base_job(subdir="job_makerfail")
-        loop.freeze_job(job3)
         maker = job3 / "scripts" / "maker.py"
-        maker.write_text("import sys\nsys.stderr.write('boom')\nsys.exit(3)\n", encoding="utf-8")
+        maker.write_text("import sys\nsys.stderr.write('boom')\nsys.exit(3)\n", encoding="utf-8")  # before freeze: scripts are pinned at freeze (G1)
+        loop.freeze_job(job3)
         self.assertEqual(loop.run_job(job3), 2)
         st3 = json.loads((job3 / "state.json").read_text())
         self.assertEqual((st3["terminal_state"], st3["reason"]), ("needs_owner", "maker_failed"))
@@ -556,12 +556,29 @@ class TestEDIRuntime(unittest.TestCase):
         self.assertEqual(oct(ho.stat().st_mode & 0o777), "0o700")
         self.assertEqual(oct((ho / "controls" / "clean.md").stat().st_mode & 0o777), "0o600")
 
+    def test_scripts_pinned_at_freeze_and_zero_pricing_refused(self):
+        # G1: a seat script edited after freeze is refused at run start, like an edited seed
+        job = self._make_base_job(subdir="job_g1")
+        loop.freeze_job(job)
+        (job / "scripts" / "maker.py").write_text("# tampered after freeze\n", encoding="utf-8")
+        with self.assertRaises(gates.GateError) as cm:
+            loop.run_job(job)
+        self.assertIn("frozen instruments modified after freeze", str(cm.exception))
+        # G2: a $0 pricing entry is refused at freeze
+        job2 = self._make_base_job(subdir="job_g2")
+        cfg = json.loads((job2 / "job.json").read_text())
+        cfg["pricing"] = {"default": {"input_usd_per_mtok": 0, "output_usd_per_mtok": 1.0}}
+        (job2 / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        with self.assertRaises(gates.GateError) as cm2:
+            loop.freeze_job(job2)
+        self.assertIn("zero or negative rate", str(cm2.exception))
+
     def test_evaluator_crash_halts_cleanly_and_run_once(self):
         # an evaluator that prints non-JSON must not traceback the run
         job = self._make_base_job(subdir="job_evalcrash")
-        loop.freeze_job(job)
         ev = job / "scripts" / "eval_e1.py"
-        ev.write_text("import sys\nsys.stdout.write('I am not json')\n", encoding="utf-8")
+        ev.write_text("import sys\nsys.stdout.write('I am not json')\n", encoding="utf-8")  # before freeze: scripts are pinned at freeze (G1)
+        loop.freeze_job(job)
         self.assertEqual(loop.run_job(job), 2)
         st = json.loads((job / "state.json").read_text())
         self.assertEqual((st["terminal_state"], st["reason"]), ("needs_owner", "no_observation"))
@@ -791,7 +808,7 @@ class TestEDIRuntime(unittest.TestCase):
                         "url": "https://example.invalid/v1", "model": {"family": "m", "identifier": "m1", "endpoint": "example.invalid", "readOnly": False},
                         "sandbox": {"type": _SANDBOX_TYPE},
                         "command": [sys.executable, str(agent)]}
-        cfg["pricing"] = {"default": {"input_usd_per_mtok": 0, "output_usd_per_mtok": 0}}
+        cfg["pricing"] = {"default": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}}
         (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         loop.freeze_job(job)
         self.assertEqual(loop.run_job(job), 2)

@@ -68,6 +68,15 @@ def gate_instruments(cfg, job_dir):
         if not f:
             raise GateError(f"instrument.{k} file missing (CL1-5)")
         pins[k] = sha256_file(safe_rel(f, job_dir))
+    # the code the seats execute is an instrument too: pin the scripts tree at freeze
+    # so an edit after freeze is refused at run start, like an edited seed (recheck G1)
+    sdir = job_dir / "scripts"
+    if sdir.is_dir():
+        h = hashlib.sha256()
+        for f in sorted(p for p in sdir.rglob("*") if p.is_file()):
+            h.update(str(f.relative_to(job_dir)).encode())
+            h.update(sha256_file(f).encode())
+        pins["scripts"] = h.hexdigest()
     return pins
 
 
