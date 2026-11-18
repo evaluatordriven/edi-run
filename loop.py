@@ -109,51 +109,29 @@ def _append(job_dir, etype, actor, files, data):
 
 
 def custody_verify(job_dir):  # job_dir may also be the log path itself
-    """Chain + content verification of job.jsonl with file re-hash checks, EXCLUDING
-    events superseded by a round-discarded record: a resumed attempt legitimately
-    rewrites the same artifact path with new content, and the discarded attempt's
-    event must stop pinning that path (append-only history is never rewritten —
-    the supersession is itself recorded in the chain)."""
-    log_path = pathlib.Path(job_dir).resolve()  # accepts a job dir or a log path
+    """Chain + content verification of job.jsonl with file re-hash checks."""
+    log_path = pathlib.Path(job_dir).resolve()
     if log_path.is_dir():
         log_path = log_path / "job.jsonl"
-    job_dir = log_path.parent
-    problems = custody_record.verify(str(log_path), files=False)  # chain + content, all events
+    problems = custody_record.verify(str(log_path), files=False)
     events = custody_record.read(str(log_path))
-    superseded = set()
-    legacy = True  # pre-P5 logs (no job-pin event) may resolve caller-relative keys
-    for e in events:
-        if e.get("type") == "job-pin":
-            legacy = False
-        d = e.get("data") or {}
-        if e.get("type") == "round-discarded":
-            superseded.update(d.get("supersedes") or [])
+    legacy = not any(e.get("type") == "job-pin" for e in events)
     for i, e in enumerate(events, 1):
-        if i in superseded:
-            continue
         for path, h in (e.get("files") or {}).items():
             p = pathlib.Path(path)
-            # P5: job-relative keys are the new canonical form. Round-3 external
-            # review #11: the caller-relative fallback is for LEGACY logs only —
-            # a modern log's evidence must live under the job dir, so a
-            # byte-identical stand-in placed in the caller's directory cannot
-            # stand in for missing job evidence. For legacy logs, conflicting
-            # candidates are ambiguous and refused, naming both.
             if not p.is_absolute():
-                jd_cand = log_path.parent / p
-                cw = pathlib.Path.cwd() / p
+                jd_cand, cw = log_path.parent / p, pathlib.Path.cwd() / p
                 jd_file, cw_file = jd_cand.is_file(), cw.is_file()
                 if jd_file and (not legacy or not cw_file
                                 or custody_record.digest_file(jd_cand) == custody_record.digest_file(cw)):
-                    p = jd_cand  # job-relative first (a byte-identical caller copy is harmless)
+                    p = jd_cand
                 elif legacy and cw_file:
-                    if jd_file:  # both candidates exist and DISAGREE: ambiguous — name both
-                        problems.append(f"event {i}: ambiguous custody file for {path}: job-relative candidate "
-                                        f"{jd_cand} and caller-relative {cw} disagree")
+                    if jd_file:
+                        problems.append(f"event {i}: ambiguous custody file for {path}: job-relative candidate {jd_cand} and caller-relative {cw} disagree")
                         continue
-                    p = cw  # legacy fallback: the log was written from the caller's directory
+                    p = cw
                 else:
-                    p = jd_cand  # modern log without the job file: report it missing, never resolve via cwd
+                    p = jd_cand
             if not p.is_file():
                 problems.append(f"event {i}: file not found: {path}")
             elif custody_record.digest_file(p) != h:
@@ -641,7 +619,12 @@ def _run_job_held(job_dir):
         # terminal state, which run_job refuses (recovery is explicit `edi.py resume`)
         state["open_round"] = r
         _write_state(job_dir, state, meter)
-        r_dir, art_dir = job_dir / "rounds" / f"round-{r:02d}", job_dir / "rounds" / f"round-{r:02d}" / "artifact"
+        r_dir = job_dir / "rounds" / f"round-{r:02d}"
+        att = 1
+        while (r_dir / "artifact").exists():
+            att += 1
+            r_dir = job_dir / "rounds" / f"round-{r:02d}-a{att}"
+        art_dir = r_dir / "artifact"
         r_dir.mkdir(parents=True, exist_ok=True)
         needles = gates.held_out_needles(job_dir)
         pk_def, w1 = gates.scrub_held_out(list(state["defects"]) + list(state.get("rejected_defects", [])), needles)
@@ -652,12 +635,14 @@ def _run_job_held(job_dir):
         # it quotes the artifact; evaluator-invented text gets the full scan.
         art_text = ""
         if state.get("incumbent_round"):
-            inc_art_dir = job_dir / "rounds" / f"round-{int(state['incumbent_round']):02d}" / "artifact"
+            inc_w = (state.get("rounds") or {}).get(str(state["incumbent_round"])) or {}
+            inc_art_dir = job_dir / inc_w.get("dir", f"rounds/round-{int(state['incumbent_round']):02d}") / "artifact"
             art_text = "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in sorted(inc_art_dir.rglob("*")) if p.is_file())
         gates.gate_packet(pkt, job_dir, state["incumbent_digest"], artifact_text=art_text)
         (r_dir / "packet.json").write_text(json.dumps(pkt, indent=2) + "\n", encoding="utf-8")
         if state["incumbent_round"]:
-            shutil.copytree(job_dir / "rounds" / f"round-{state['incumbent_round']:02d}" / "artifact", art_dir, dirs_exist_ok=True)
+            inc_w = (state.get("rounds") or {}).get(str(state["incumbent_round"])) or {}
+            shutil.copytree(job_dir / inc_w.get("dir", f"rounds/round-{state['incumbent_round']:02d}") / "artifact", art_dir, dirs_exist_ok=True)
         maker_ran = True
         if state.get("seed") and r == 1 and state["incumbent_round"] is None:
             # Round 1 evaluates the Owner-supplied seed as-is: an unvalidated candidate,
@@ -714,7 +699,7 @@ def _run_job_held(job_dir):
                 raise gates.GateError(str(e))
             state.update(terminal_state="needs_owner", reason="cap_reached")  # emitted checks stay; the round never becomes incumbent
             break
-        state["rounds"][str(r)] = {"producedAt": ev_prod["at"], "digest": cand_digest, "checks": checks, "controls": ctls, "scores": s_rows, "external": exts, "dim_scores": d_scores}
+        state["rounds"][str(r)] = {"dir": r_dir.relative_to(job_dir).as_posix(), "producedAt": ev_prod["at"], "digest": cand_digest, "checks": checks, "controls": ctls, "scores": s_rows, "external": exts, "dim_scores": d_scores}
         _accrue(state, usages, pricing)
         state["cost_usd"] = round(meter.accrued(), 6)  # the meter is authoritative; _accrue's figure is display-only
         if any(c["outcome"] == "unobserved" for c in checks):
@@ -805,33 +790,16 @@ def _resume_job_held(job_dir):
     except ValueError as e:
         # typed, like run_job: a damaged spend log is an integrity refusal, not a crash
         raise gates.GateError(f"usage.jsonl failed integrity verification: {e} (spend integrity)")
-    partial = job_dir / "rounds" / f"round-{r:02d}"
-    superseded_seqs = []
-    events = custody_record.read(str(job_dir / "job.jsonl"))
-    for i, e in enumerate(events, 1):
-        # the killed attempt's artifact events pin files under the round dir that the
-        # resumed attempt will rewrite — record the supersession in the chain itself
-        if any(f"rounds/round-{r:02d}/" in str(p) for p in (e.get("files") or {})):
-            superseded_seqs.append(i)
-    if partial.is_dir():
-        dst = job_dir / "partial" / f"round-{r:02d}"
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        if dst.exists():
-            shutil.rmtree(dst)
-        shutil.move(str(partial), str(dst))  # rounds/ stays immutable: partial work moves OUT
     round_rows = [row["digest"] for row in meter._rows if row.get("kind") == "call" and row.get("round") == r and "discarded_round" not in row]
     if round_rows:
-        meter.amend(round_rows, note=f"round {r} discarded by resume")  # append-only: history intact, no double-count
-    # the resume IS a custody event: it marks the supersession (which artifact events
-    # no longer pin their files), notes the spend preserved from the killed attempt,
-    # and satisfies the design's resumed_after_interrupt disclosure
+        meter.amend(round_rows, note=f"round {r} discarded by resume")
     _append(job_dir, "round-discarded", "edi-run", [],
-            {"round": r, "supersedes": superseded_seqs, "resumed_after_interrupt": True,
+            {"round": r, "resumed_after_interrupt": True,
              "discarded_spend_usd": round(sum(meter.row_cost(d) for d in round_rows), 6) if round_rows else 0.0})
-    state["resume_from"] = r  # the resumed attempt reuses the number and consumes the slot
+    state["resume_from"] = r
     state["open_round"] = None
     _write_state(job_dir, state, meter)
-    return run_job(job_dir)
+    return _run_job_held(job_dir)
 
 
 def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
@@ -900,7 +868,7 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
         win_r, max_r, art_dst, log_path = str(st["incumbent_round"]), str(max(int(k) for k in st["rounds"])), job_dir / "artifact", job_dir / "job.jsonl"
         win = st["rounds"][win_r]
         shutil.rmtree(art_dst, ignore_errors=True)
-        shutil.copytree(job_dir / "rounds" / f"round-{int(win_r):02d}" / "artifact", art_dst)
+        shutil.copytree(job_dir / win.get("dir", f"rounds/round-{int(win_r):02d}") / "artifact", art_dst)
         (job_dir / "scores.jsonl").write_text("\n".join(json.dumps(r) for r in win["scores"]) + "\n", encoding="utf-8")
         seed_author = cfg["seed"]["author"] if (cfg.get("seed") and st.get("seed_round") == int(win_r)) else None
         if win_r != max_r:
