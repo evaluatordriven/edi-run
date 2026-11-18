@@ -1,0 +1,17 @@
+# edi-run DECISIONS.log — newest at TOP
+
+## 2026-11-18 — S1 sandbox.reads default flipped to allowlist (Owner: S2, decision A)
+
+**Ruling.** bwrap jobs default to `sandbox.reads=allowlist`. Denylist remains available
+by explicit config and remains the seatbelt (macOS) posture, whose allowlist mode is
+not shippable on this OS build (deny-precedence is order-decided and deny-default with
+allow-exceptions aborts sandbox-exec — verified by execution, PR #16).
+
+**Evidence at ruling time.** Local suite 66 tests OK (1 skip: macOS leg). Probe gate
+14 PASS / 0 FAIL / 1 KNOWN-FAIL (S1 macOS-only known-fail) / 5 SKIP (S3, S4, S7–S9 are
+bwrap/Linux). CI legs (Ubuntu bwrap) green: run 44294653521 against commit 131f888.
+
+**Commit.** 131f888 `Owner ruling 2026-11-18 (A): bwrap sandbox.reads defaults to allowlist`
+
+**Open.** macOS seatbelt allowlist via scoped-deny enumeration — named unexplored; if
+shipped, it lands as a separate ruling. S7–S9 probes still gate CI green on Linux legs.
