@@ -6,6 +6,8 @@ artifact is Python code could never pass integrity at finalize.
 """
 import json
 import pathlib
+import shutil
+import tempfile
 import sys
 import unittest
 
@@ -27,7 +29,7 @@ class RoundsArtifactsPinned(unittest.TestCase):
             # compute the scripts pin directly via the freeze-time helper
             import inspect
             src = inspect.getsource(gates)
-            self.assertIn('"rounds" in f.parts', src)
+            self.assertIn('_relp.parts[0] == "rounds"', src)
             # behavior check: recompute the scripts-tree digest before/after a
             # rounds artifact appears -- simulate by hashing with the same logic
             import hashlib
@@ -53,6 +55,44 @@ class RoundsArtifactsPinned(unittest.TestCase):
             self.assertEqual(d0, d1, "a runtime-produced rounds/*.py changed the seat-code pin")
         finally:
             s.tearDown()
+
+
+class RoundsPinScope(unittest.TestCase):
+    """Adversarial round (GPT 6.2-sol, 2026-11-18): the rounds/ exclusion must be
+    scoped to the job-root rounds/ tree ONLY — a freeze-time helper under a nested
+    dep/rounds/ stays pinned."""
+
+    def test_dep_rounds_helper_still_pinned(self):
+        import sys as _sys
+        _sys.path.insert(0, str(ROOT))
+        import gates as _gates
+        jd = pathlib.Path(tempfile.mkdtemp(prefix="depscope_"))
+        (jd / "bar.md").write_text("bar")
+        (jd / "method.md").write_text("m")
+        inst = jd / "instrument"; inst.mkdir()
+        (inst / "rubric.md").write_text("r"); (inst / "runner.md").write_text("u")
+        (jd / "scripts").mkdir(); (jd / "scripts/main.py").write_text("z=1")
+        helper = jd / "dep/rounds/helper.py"; helper.parent.mkdir(parents=True)
+        helper.write_text("x=1")
+        (jd / "top.py").write_text("import dep.rounds.helper\n")
+        pins = _gates.gate_instruments(
+            {"bar": {"file": "bar.md"},
+             "maker": {"method": {"file": "method.md"}, "kind": "script", "command": ["python3", "top.py"]},
+             "instrument": {"rubric": {"file": "instrument/rubric.md"}, "runner": {"file": "instrument/runner.md"}},
+             "scripts": {"dir": "scripts"}},
+            jd)
+        # the job-root walk digest must include dep/rounds/helper.py: mutate it and
+        # confirm the recomputed scripts pin CHANGES (membership by behavior, not text)
+        before = pins["scripts"]
+        helper.write_text("x=2")
+        pins2 = _gates.gate_instruments(
+            {"bar": {"file": "bar.md"},
+             "maker": {"method": {"file": "method.md"}, "kind": "script", "command": ["python3", "top.py"]},
+             "instrument": {"rubric": {"file": "instrument/rubric.md"}, "runner": {"file": "instrument/runner.md"}},
+             "scripts": {"dir": "scripts"}},
+            jd)
+        self.assertNotEqual(before, pins2["scripts"], "dep/rounds/helper.py edit did not change the pin — it is excluded")
+        shutil.rmtree(jd)
 
 
 if __name__ == "__main__":

@@ -206,7 +206,9 @@ class TestAutoHashAndAuthorship(RuntimeBatchTest):
         events = [json.loads(l) for l in (job_dir / "job.jsonl").read_text().splitlines()]
         digests = [e["data"]["barDigest"] for e in events if e.get("type") == "approval"]
         self.assertTrue(digests and all(d == computed for d in digests))
-        self.assertIsNone(json.loads((job_dir / "job.json").read_text())["bar"]["digest"]["sha256"])
+        # corrected doctrine (live-aider-job10, 2026-11-18): the stamp is PERSISTED
+        # into job.json, or the custody record assembles with a null bar digest
+        self.assertEqual(json.loads((job_dir / "job.json").read_text())["bar"]["digest"]["sha256"], computed)
 
     def test_freeze_refuses_wrong_declared_digest(self):
         job_dir = self._make_base_job()

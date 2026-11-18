@@ -333,9 +333,16 @@ def freeze_job(job_dir, started_at=None, dry_run=False):
         _bar["digest"] = {"sha256": gates.sha256_file(gates.safe_rel(_bar.get("file", "bar.md"), job_dir))}
         if not dry_run:
             (job_dir / "job.json").write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
-    pins = gates.gate_instruments(cfg, job_dir)
+    if (job_dir / "rounds").exists():
+        # rounds/ is runtime-produced custody space; if it exists at freeze the
+        # pin-vs-output boundary is already violated (Opus deep review 2026-11-18)
+        raise gates.GateError("rounds/ already exists; it is runtime custody space, never present at freeze")
     if (job_dir / "job.jsonl").exists():
+        # freeze-once check BEFORE any job.json mutation: a refused re-freeze
+        # must not rewrite the frozen config (GPT 6.2-sol adversarial finding,
+        # 2026-11-18 — the bar-digest stamp used to land first)
         raise gates.GateError("job.jsonl already exists; freeze runs once")
+    pins = gates.gate_instruments(cfg, job_dir)
     # bar-level refusal checks run before ANY append: a refused freeze must
     # leave no job.jsonl for the corrected retry to trip over (I-01 no-trace)
     gates.gate_freeze_pre(cfg, job_dir)
@@ -395,6 +402,14 @@ def freeze_job(job_dir, started_at=None, dry_run=False):
                              if post_snap.get(k) != (pre_snap or {}).get(k))
             raise RuntimeError(f"freeze --dry-run wrote to the host (defect): {changed[:5]}")
         return 0
+    # persist the stamped digest NOW: every gate has passed and this is the
+    # real (non-dry-run) path — the last point where a refusal can still
+    # happen is before this write, so a refused freeze leaves job.json
+    # byte-identical (Opus deep review 2026-11-18). Atomic tmp+replace.
+    if not dry_run:
+        _tmpj = job_dir / "job.json.tmp-freeze"
+        _tmpj.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+        os.replace(_tmpj, job_dir / "job.json")
     _append(job_dir, "job-start", "edi-run", [], {"job": cfg["job"]})
     if seed:
         _append(job_dir, "artifact-supplied", seed["author"], [gates.safe_rel(seed["dir"], job_dir) / f for f in cfg["subjectFiles"]], {"origin": seed.get("origin", ""), "note": seed.get("note", "")})
@@ -814,12 +829,23 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
     # the attest: it re-reads INSIDE the lock, sees the disposition, and refuses
     # by name. (Previously the state read and custody verify ran BEFORE the
     # lock — a second finalizer could slip a rewrite into that window.)
+    if not (job_dir / "state.json").is_file():
+        # fast refusal BEFORE the lock: job_lock would otherwise create a
+        # lockfile in a dir with no state — a write on a refused finalize
+        # (Opus deep review 2026-11-18); the in-lock check below still guards
+        # the read race
+        raise gates.GateError("no state.json; the job has not been frozen (finalize follows freeze)")
     with job_lock(job_dir):
-        if not (job_dir / "state.json").is_file():
+        try:
+            state_bytes = (job_dir / "state.json").read_bytes()
+        except FileNotFoundError:
             # a never-frozen (or pre-run) dir has no state: declining or finalizing
-            # it would attest custody that does not exist (live-aider-job8, 2026-11-18)
+            # it would attest custody that does not exist (live-aider-job8, 2026-11-18);
+            # is_file() then read() can race a concurrent removal — same refusal
+            st = None
+        st = json.loads(state_bytes.decode(encoding="utf-8")) if state_bytes is not None else None
+        if st is None:
             raise gates.GateError("no state.json; the job has not been frozen (finalize follows freeze)")
-        st = json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
         log_path = job_dir / "job.jsonl"
         log_problems = custody_verify(log_path)
         if log_problems:
@@ -922,9 +948,13 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
 def verify_job(job_dir):
     job_dir = pathlib.Path(job_dir).resolve()
     cfg = _load_job_json(job_dir)
-    if not (job_dir / "record.json").is_file():
+    try:
+        record_bytes = (job_dir / "record.json").read_bytes()
+    except FileNotFoundError:
+        # is_file() then read() can race a concurrent removal; a missing record
+        # is always the clean refusal, never a traceback (GPT 6.2-sol finding, 2026-11-18)
         raise gates.GateError("no record.json; the job has not been finalized yet (verify follows finalize)")
     if custody_verify(job_dir):
         return 1
-    rep = custody_check.verify(json.loads((job_dir / "record.json").read_text(encoding="utf-8")), files=str(job_dir / "artifact"), evidence=str(job_dir / "evidence"), bar=str(job_dir / cfg["bar"]["file"]))
+    rep = custody_check.verify(json.loads(record_bytes.decode(encoding="utf-8")), files=str(job_dir / "artifact"), evidence=str(job_dir / "evidence"), bar=str(job_dir / cfg["bar"]["file"]))
     return 0 if rep["verdict"] == "OK" else (1 if rep["verdict"] == "FAILED" else 2)

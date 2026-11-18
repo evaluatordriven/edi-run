@@ -387,8 +387,9 @@ def gate_instruments(cfg, job_dir):
                 raise GateError(f"symlinked python file {f.relative_to(job_dir)} (G1)")
             if sdir in f.parents:
                 continue
-            if "rounds" in f.parts:
-                continue  # runtime-produced custody artifacts (a maker's .py artifact) are outputs, not seat code; including them made every coding-artifact job unfinalizable (live-aider-job, 2026-11-18)
+            _relp = f.relative_to(job_dir)
+            if _relp.parts and _relp.parts[0] == "rounds":
+                continue  # ONLY the job-root rounds/ tree holds runtime-produced custody artifacts (a maker's .py artifact); including it made every coding-artifact job unfinalizable (live-aider-job, 2026-11-18). Scoped to the top-level dir: a freeze-time helper under dep/rounds/ must stay pinned (GPT 6.2-sol adversarial finding, 2026-11-18)
             h.update(str(f.relative_to(job_dir)).encode())
             h.update(sha256_file(f).encode())
         pins["scripts"] = h.hexdigest()
@@ -455,21 +456,25 @@ def gate_commands(cfg, job_dir):
         for tok in cmd[1:]:
             if not isinstance(tok, str):
                 raise GateError(f"{who} command tokens must be strings")
-            # Only tokens that LOOK like paths are probed as paths: an argv token
-            # that is neither absolute nor a plausible relative path (no slash,
-            # or too long / malformed for the filesystem) is data, not a file
-            # reference. stat() can raise OSError (e.g. ENAMETOOLONG) on data
-            # tokens -- that must never crash the gate (live-aider-job, 2026-11-18).
-            looks_like_path = "/" in tok and not tok.startswith("-") and len(tok) < 1024
+            # EVERY token is probed as a path if it resolves to an existing file:
+            # a bare filename ("input") can be a file operand just as much as a
+            # slashful one (GPT 6.2-sol adversarial finding, 2026-11-18 — a
+            # slash-less symlink operand escaped containment). Data tokens are
+            # filtered by the filesystem itself: stat on a 2000-char free-text
+            # token raises OSError (e.g. ENAMETOOLONG), which must never crash
+            # the gate (live-aider-job, 2026-11-18).
             cand = pathlib.Path(tok)
             if not cand.is_absolute():
                 cand = job_dir / tok
             try:
-                exists = cand.exists() if looks_like_path else False
+                exists = cand.exists()
             except OSError:
                 exists = False
             if exists:
-                rp = cand.resolve()
+                try:
+                    rp = cand.resolve()
+                except OSError as e:
+                    raise GateError(f"{who} command token {tok!r} cannot be resolved ({e})")
                 if not rp.is_relative_to(job_dir.resolve()):
                     raise GateError(f"{who} command references {tok} outside the job dir; seat code must live in the job (G1)")
 
