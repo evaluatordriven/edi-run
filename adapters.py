@@ -56,14 +56,13 @@ def sandbox_prefix(stype, jd, sb_p, reads="denylist"):
     Masks are applied ONLY to paths that already exist: bwrap creates missing mount
     points on the host, and a freeze check must never write anything.
     reads="allowlist" (S1): the seat sees ONLY the workspace, the resolved
-    interpreter tree, and the system runtime — every other path simply does not
+    interpreter tree, and the system runtime prefixes — /usr /bin /sbin /lib
+    /lib64 /etc /opt /var/lib are also bound read-only (runner tool caches,
+    resolver and TLS material live there; file permissions protect root-owned
+    secrets, and the agent is non-root) — every other host path simply does not
     exist inside the namespace. Default remains the deny-list profile until the
     S7-S9 probes prove the allowlist on every CI leg."""
     allowlist = reads == "allowlist"
-    """The sandbox argv prefix for one launch, shared by the launcher and the
-    capability probe so the probe exercises the exact flag shape used at runtime.
-    Masks are applied ONLY to paths that already exist: bwrap creates missing mount
-    points on the host, and a freeze check must never write anything."""
     if stype == "sandbox-exec":
         profile = sb_p / "agent.sb"
         return ["sandbox-exec", "-f", str(profile)]
@@ -74,9 +73,9 @@ def sandbox_prefix(stype, jd, sb_p, reads="denylist"):
         # (round-2 B): control sets are reused across jobs under one jobs root.
         home = pathlib.Path.home().resolve()  # seatbelt/bwrap match canonical paths only
         # bwrap applies mounts in argv order: BINDS FIRST, MASKS AFTER — a later
-        # --ro-bind / shadows earlier tmpfs mounts (the regression the CI legs caught)
-        cmd = ["bwrap", "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-net",
-               "--dev", "/dev", "--proc", "/proc"]
+        # --ro-bind / shadows earlier mounts (the regression the CI legs caught),
+        # so --dev/--proc and every tmpfs mask must come AFTER the binds
+        cmd = ["bwrap", "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-net"]
         if allowlist:
             # S1: bind ONLY the system runtime + the resolved interpreter tree; the
             # host's rest of the filesystem does not exist inside the namespace
@@ -94,7 +93,7 @@ def sandbox_prefix(stype, jd, sb_p, reads="denylist"):
                 cmd += ["--ro-bind", str(pref), str(pref)]
         else:
             cmd += ["--ro-bind", "/", "/"]
-        cmd += ["--tmpfs", "/tmp", "--tmpfs", str(jd)]
+        cmd += ["--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", str(jd)]
         for ho in sorted(set(jd.parent.glob("*/held_out")) | set(jd.parent.rglob("held_out"))):  # every job's controls, any depth
             if ho.is_dir() and ho.parent != jd:
                 cmd += ["--tmpfs", str(ho)]
@@ -311,16 +310,18 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                     q = chr(34)  # seatbelt profiles quote paths with double quotes
                     allow = (maker_cfg.get("sandbox") or {}).get("reads") == "allowlist"
                     if allow:
-                        # S1 on macOS: seatbelt CANNOT express the allowlist on this
-                        # OS build. Two walls, both verified by execution:
-                        # (1) deny-precedence — a (deny file-read*) rule beats a
-                        #     (allow file-read*) rule regardless of order, so
-                        #     "deny everything except the allowlist" is inexpressible;
-                        # (2) deny-default profiles — (deny default) with a NARROW
-                        #     file-read allowlist abort sandbox-exec itself
-                        #     (Abort trap 6, 5/5 reproducible; broad file-read*
-                        #     allow runs fine — the crash is the denied startup
-                        #     reads surfacing as a hard abort, not a clean EPERM).
+                        # S1 on macOS: the seatbelt allowlist is not shippable on
+                        # this OS build. Verified by execution:
+                        # (1) deny-precedence is ORDER-DECIDED, not absolute: a
+                        #     scoped (allow) AFTER a (deny) makes the child readable,
+                        #     allow-then-deny denies — so "deny broad, allow narrow"
+                        #     needs the allow LAST, and a global (deny file-read*)
+                        #     with allow exceptions aborts sandbox-exec (trap 6);
+                        # (2) (deny default) with a NARROW file-read allowlist also
+                        #     aborts (Abort trap 6); broad (allow file-read*) runs
+                        #     fine. A scoped-deny enumeration allowlist (deny
+                        #     /Users/<user>, allow workspace exceptions last) was
+                        #     NOT ruled out by probing and remains unexplored.
                         # The allowlist therefore lands on bwrap (Linux) only, where
                         # selective binds make unlisted paths literally nonexistent.
                         # macOS keeps the deny-list profile and the S1 disclosure.
