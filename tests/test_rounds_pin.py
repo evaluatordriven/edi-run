@@ -25,34 +25,12 @@ class RoundsArtifactsPinned(unittest.TestCase):
         s.setUp()
         try:
             job = s._make_base_job(subdir="job")
-            before = None  # pins are hashed directly below; no state needed
-            # compute the scripts pin directly via the freeze-time helper
-            import inspect
-            src = inspect.getsource(gates)
-            self.assertIn('_relp.parts[0] == "rounds"', src)
-            # behavior check: recompute the scripts-tree digest before/after a
-            # rounds artifact appears -- simulate by hashing with the same logic
-            import hashlib
-            def scripts_digest():
-                h = hashlib.sha256()
-                jd = pathlib.Path(job)
-                sdir = jd / "scripts"
-                for f in sorted(sdir.rglob("*")):
-                    if f.is_file():
-                        h.update(str(f.relative_to(jd)).encode())
-                        h.update(hashlib.sha256(f.read_bytes()).hexdigest().encode())
-                for f in sorted(jd.rglob("*.py")):
-                    if sdir in f.parents or "rounds" in f.parts:
-                        continue
-                    h.update(str(f.relative_to(jd)).encode())
-                    h.update(hashlib.sha256(f.read_bytes()).hexdigest().encode())
-                return h.hexdigest()
-            d0 = scripts_digest()
+            d0 = dict(gates.tree_manifest(job))
             art = job / "rounds" / "round-01" / "artifact"
             art.mkdir(parents=True)
             (art / "widget.py").write_text("def widget():\n    return 1\n", encoding="utf-8")
-            d1 = scripts_digest()
-            self.assertEqual(d0, d1, "a runtime-produced rounds/*.py changed the seat-code pin")
+            d1 = dict(gates.tree_manifest(job))
+            self.assertEqual(d0, d1, "a runtime-produced rounds/*.py changed the frozen tree pin")
         finally:
             s.tearDown()
 
@@ -81,9 +59,7 @@ class RoundsPinScope(unittest.TestCase):
              "instrument": {"rubric": {"file": "instrument/rubric.md"}, "runner": {"file": "instrument/runner.md"}},
              "scripts": {"dir": "scripts"}},
             jd)
-        # the job-root walk digest must include dep/rounds/helper.py: mutate it and
-        # confirm the recomputed scripts pin CHANGES (membership by behavior, not text)
-        before = pins["scripts"]
+        before = dict(pins["tree"])
         helper.write_text("x=2")
         pins2 = _gates.gate_instruments(
             {"bar": {"file": "bar.md"},
@@ -91,7 +67,7 @@ class RoundsPinScope(unittest.TestCase):
              "instrument": {"rubric": {"file": "instrument/rubric.md"}, "runner": {"file": "instrument/runner.md"}},
              "scripts": {"dir": "scripts"}},
             jd)
-        self.assertNotEqual(before, pins2["scripts"], "dep/rounds/helper.py edit did not change the pin — it is excluded")
+        self.assertNotEqual(before, pins2["tree"], "dep/rounds/helper.py edit did not change the pin — it is excluded")
         shutil.rmtree(jd)
 
 

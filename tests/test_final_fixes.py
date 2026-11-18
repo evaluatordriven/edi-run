@@ -302,35 +302,14 @@ class P25_DependencyWalk(unittest.TestCase):
             encoding="utf-8")
         cfg = self._cfg_of(job)
         pins = gates.gate_instruments(cfg, job)
-        # tampering with EITHER package's helper must move the seat_files pin
-        base = pins["seat_files"]
+        base = dict(pins["tree"])
         (job / "pkgB" / "helper.py").write_text("VALUE = 'tampered-B'\n", encoding="utf-8")
-        self.assertNotEqual(gates.gate_instruments(cfg, job)["seat_files"], base,
+        self.assertNotEqual(gates.gate_instruments(cfg, job)["tree"], base,
                             "pkgB.helper (identically named) must be pinned, not suppressed by pkgA's")
         (job / "pkgB" / "helper.py").write_text("VALUE = 'B'\n", encoding="utf-8")
         (job / "pkgA" / "helper.py").write_text("VALUE = 'tampered-A'\n", encoding="utf-8")
-        self.assertNotEqual(gates.gate_instruments(cfg, job)["seat_files"], base,
+        self.assertNotEqual(gates.gate_instruments(cfg, job)["tree"], base,
                             "pkgA.helper must be pinned too")
-
-    def test_import_chain_deeper_than_the_limit_refuses_by_name(self):
-        job = self.tmp / "deep"
-        for d in ("scripts",):
-            (job / d).mkdir(parents=True)
-        (job / "bar.md").write_text("# Bar\n", encoding="utf-8")
-        (job / "rubric.md").write_text("# Rubric\n", encoding="utf-8")
-        (job / "method.md").write_text("# Method\n", encoding="utf-8")
-        depth = 70  # beyond the 64-level cutoff, still far below the 512-file cap
-        for i in range(depth):
-            nxt = f"c{i + 1}.py" if i + 1 < depth else ""
-            (job / f"c{i}.py").write_text((f"import c{i + 1}\n" if nxt else "") + "VALUE = 1\n", encoding="utf-8")
-        (job / "scripts" / "maker.py").write_text(
-            "import json, pathlib, sys\nimport c0\n"
-            "pathlib.Path(sys.argv[2], 'memo.md').write_text(str(c0.VALUE), encoding='utf-8')\n",
-            encoding="utf-8")
-        cfg = self._cfg_of(job)
-        with self.assertRaises(gates.GateError) as ctx:
-            gates.gate_instruments(cfg, job)
-        self.assertIn("depth", str(ctx.exception), "the refusal NAMES the depth limit (never a silent exit)")
 
 
 # ------------------------------------------------------------------ P2.6 lifecycle lock

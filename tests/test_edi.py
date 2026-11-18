@@ -733,7 +733,7 @@ class TestEDIRuntime(unittest.TestCase):
         (job4 / "scripts" / "vend").symlink_to(outside_dir)
         with self.assertRaises(gates.GateError) as cm4:
             loop.freeze_job(job4)
-        self.assertIn("symlinked directory", str(cm4.exception))
+        self.assertIn("symlinked", str(cm4.exception))
         # (5) a python helper at the JOB ROOT is pinned: editing it after freeze is refused
         job5 = self._make_base_job(subdir="job_g1helper")
         (job5 / "helper_mod.py").write_text("X = 1\n", encoding="utf-8")

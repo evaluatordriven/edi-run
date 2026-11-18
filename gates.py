@@ -142,10 +142,7 @@ def gate_freeze_pre(cfg, job_dir):
     actual = sha256_file(safe_rel(bar.get("file", "bar.md"), job_dir))
     # auto-hash: bar.md's sha256 is computed by the tool that froze it, never
     # retyped by hand (CL1-14 semantics kept: a DECLARED digest must match).
-    declared = (bar.get("digest") or {}).get("sha256")
-    if declared is None:
-        bar["digest"] = {"sha256": actual}
-    elif actual != declared:
+    if actual != (bar.get("digest") or {}).get("sha256"):
         raise GateError("bar.md sha256 mismatch against bar.digest (CL1-14)")
     # externally pinned pre-commitment (config `barDigest`): fail closed on any
     # mismatch between the computed digest and the pinned one, AND on any
@@ -213,187 +210,41 @@ def gate_instruments(cfg, job_dir):
     # from a second read of job.json, which a two-read TOCTOU could split.
     j = {k: v for k, v in (cfg or {}).items() if k != "disposition"}
     pins["job"] = hashlib.sha256(json.dumps(j, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    # NOTE round 3 (c): EVERY file a seat command can run is pinned, not just *.py
-    # under the job tree -- an Evaluator script in another language at the job root
-    # was swapped after freeze while the pins stayed clean.
-    h = hashlib.sha256()
-    seat_cmds = []
-    mk = cfg.get("maker") or {}
-    if mk.get("command"):
-        seat_cmds.append(mk["command"])
-    for e in cfg.get("evaluators") or []:
-        if e.get("command"):
-            seat_cmds.append(e["command"])
-        sn = (e.get("script") or {}).get("name")
-        if sn:
-            seat_cmds.append([sn])
-    seen_files = {}
-    for cmd in seat_cmds:
-        for tok in cmd:
-            if not isinstance(tok, str) or tok.startswith("-"):
-                continue
-            cand = pathlib.Path(tok)
-            if not cand.is_absolute():
-                cand = job_dir / tok
-            try:
-                rp = cand.resolve()
-                inside = rp.is_relative_to(job_dir.resolve())
-            except OSError:
-                continue
-            try:
-                is_file = rp.is_file()
-            except OSError:  # e.g. ENAMETOOLONG on a data token (live-aider-job, 2026-11-18)
-                continue
-            if inside and is_file:
-                seen_files[str(rp)] = rp
-    # Round-3 external review #9 + verification re-review #7: the pin must cover
-    # the dependencies a seat script actually invokes, not only the files named
-    # in the command tokens. (a) Python seat scripts: AST-walk local imports
-    # (transitively, bounded to the job dir, stdlib-only) — INCLUDING package
-    # __init__.py files (importing pkg.worker executes pkg/__init__.py first)
-    # and RELATIVE imports at any level (`from . import helper`,
-    # `from ..pkg import mod`); (b) non-Python seat scripts: scan the text for
-    # referenced files that exist under the job dir (seed/ and held_out/ are
-    # material, not seat code, and stay out of the seat-code pin).
-    def _local_imports(py_path, acc, seen_mods):
-        """AST-walk a Python seat script's local imports; return newly found files.
-        seen_mods caches RESOLVED FILE PATHS, not import spellings (verification
-        re-review #5, final round): two packages importing identically named
-        helpers resolve to DIFFERENT files and both get pinned, while the same
-        file reached through different spellings (duplicate imports, diamonds)
-        still expands only once."""
-        import ast
-        try:
-            tree = ast.parse(py_path.read_text(encoding="utf-8"))
-        except (OSError, SyntaxError, ValueError) as e:
-            raise GateError(f"pinned seat script {py_path.relative_to(job_dir)} is not parseable Python "
-                            f"({e}); seat code must be statically analyzable (G1)")
-        mods = []  # (level, dotted name)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                mods += [(0, a.name) for a in node.names]
-            elif isinstance(node, ast.ImportFrom):
-                lvl = node.level or 0
-                base = node.module or ""
-                if base:
-                    mods.append((lvl, base))
-                for a in node.names:  # `from . import helper`, `from .pkg import mod`
-                    mods.append((lvl, (base + "." if base else "") + a.name))
-        bases = [py_path.parent, job_dir]
-        found = []
-        for lvl, name in mods:
-            parts = name.split(".") if name else []
-            # relative import level N: walk up N-1 package levels from the file's dir
-            pkg_dir = py_path.parent
-            for _ in range(max(0, lvl - 1)):
-                pkg_dir = pkg_dir.parent
-            rel_bases = [pkg_dir] if lvl else bases
-            for base in rel_bases:
-                # every package prefix's __init__.py PLUS the module file or package init:
-                # `import pkg.worker` executes pkg/__init__.py, then pkg/worker.py (or pkg/worker/__init__.py)
-                cands = [base.joinpath(*parts[:i], "__init__.py") for i in range(1, len(parts) + 1)]
-                if parts:
-                    cands.append(base.joinpath(*parts[:-1], (parts[-1] + ".py")))
-                for cand in cands:
-                    try:
-                        rp = cand.resolve()
-                    except OSError:
-                        continue
-                    if rp.is_file() and rp.is_relative_to(job_dir.resolve()) and str(rp) not in acc \
-                            and str(rp) not in seen_mods:  # cache by RESOLVED PATH: same file never re-expands
-                        seen_mods.add(str(rp))
-                        found.append(rp)
-        return list(dict.fromkeys(found))  # dedupe within one level too
-
-    def _text_refs(path, acc):
-        """Scan a non-Python seat script's text for referenced job files; return newly found files."""
-        try:
-            txt = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            return []
-        found = []
-        for tok in re.findall(r"[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]{1,8}", txt):
-            cands = [(path.parent / tok).resolve(), (job_dir / tok).resolve()]
-            for cand in cands:
-                try:
-                    inside = cand.is_relative_to(job_dir.resolve())
-                except OSError:
-                    continue
-                if not inside or not cand.is_file() or str(cand) in acc or str(cand) == str(path):
-                    continue
-                relp = cand.relative_to(job_dir.resolve())
-                if relp.parts and relp.parts[0] in ("seed", "held_out", "evidence", "rounds", "partial"):
-                    continue  # material, not seat code
-                found.append(cand)
-        return found
-
-    # bounded transitive walk: imports of Python seats, referenced files of others
-    frontier = list(seen_files.values())
-    seen_mods = set()  # resolved-path cache: the same file never re-expands
-    WALK_DEPTH_LIMIT = 64
-    for _depth in range(WALK_DEPTH_LIMIT):
-        newly = []
-        for fp in frontier:
-            finder = _local_imports if pathlib.Path(fp).suffix == ".py" else _text_refs
-            args = (fp, seen_files, seen_mods) if finder is _local_imports else (fp, seen_files)
-            newly += [p for p in finder(*args) if str(p) not in seen_files]
-        newly = list(dict.fromkeys(newly))  # dedupe on ENQUEUE: a diamond or duplicate import cannot multiply work
-        for p in newly:
-            seen_files[str(p)] = p
-        if len(seen_files) > MAX_PINNED_SEAT_FILES:
-            raise GateError(f"the seat dependency walk pinned {len(seen_files)} files, over the "
-                            f"{MAX_PINNED_SEAT_FILES} cap ({len(seen_files) - MAX_PINNED_SEAT_FILES} "
-                            "over): declare such dependencies explicitly instead of importing them "
-                            "transitively; the pin never silently truncates (G1)")
-        frontier = newly
-        if not frontier:
-            break
-    if frontier:
-        # verification re-review #5 (final round): a nonempty frontier at the
-        # depth limit is a REFUSAL, never a silent truncation — an import chain
-        # deeper than the limit is not pinned, and silently exiting would pin a
-        # dependency graph the seats do not actually run
-        raise GateError(f"the seat dependency walk exceeded the depth limit of {WALK_DEPTH_LIMIT} "
-                        "levels without closing the import frontier: declare such dependencies "
-                        "explicitly instead of importing them transitively; the pin never "
-                        "silently truncates (G1)")
-    for rp in sorted(seen_files):
-        h.update(str(pathlib.Path(rp).relative_to(job_dir.resolve())).encode())
-        h.update(sha256_file(seen_files[rp]).encode())
-    if seen_files:
-        pins["seat_files"] = h.hexdigest()
-    # the code the seats execute is an instrument too: pin the scripts tree at freeze
-    # so an edit after freeze is refused at run start, like an edited seed (recheck G1)
-    sdir = job_dir / "scripts"
-    if sdir.is_dir():
-        h = hashlib.sha256()
-        import os as _os
-        for root, dirs, files in _os.walk(sdir, followlinks=False):
-            for d in dirs:
-                if (pathlib.Path(root) / d).is_symlink():
-                    raise GateError(f"symlinked directory {pathlib.Path(root, d).relative_to(job_dir)} under scripts/; pinned seat code must be plain files (G1)")
-            for fn in files:
-                f = pathlib.Path(root) / fn
-                if f.is_symlink():
-                    raise GateError(f"symlinked file {f.relative_to(job_dir)} under scripts/ (G1)")
-                h.update(str(f.relative_to(job_dir)).encode())
-                h.update(sha256_file(f).encode())
-        # a seat script can import a helper from anywhere under the job dir, not
-        # just scripts/ -- pin every python file in the job so the import graph
-        # cannot escape the pin (frontier finding: job-root helper edited after
-        # freeze landed tampered output with the scripts pin untouched)
-        for f in sorted(job_dir.rglob("*.py")):
-            if f.is_symlink():
-                raise GateError(f"symlinked python file {f.relative_to(job_dir)} (G1)")
-            if sdir in f.parents:
-                continue
-            _relp = f.relative_to(job_dir)
-            if _relp.parts and _relp.parts[0] == "rounds":
-                continue  # ONLY the job-root rounds/ tree holds runtime-produced custody artifacts (a maker's .py artifact); including it made every coding-artifact job unfinalizable (live-aider-job, 2026-11-18). Scoped to the top-level dir: a freeze-time helper under dep/rounds/ must stay pinned (GPT 6.2-sol adversarial finding, 2026-11-18)
-            h.update(str(f.relative_to(job_dir)).encode())
-            h.update(sha256_file(f).encode())
-        pins["scripts"] = h.hexdigest()
+    # I-01/I-02/I-04: everything the Architect froze is pinned -- seat code in any
+    # language and wherever it lives, its imports, data, seed and held-out
+    # controls -- as one {path: sha256} manifest. Excluded: what the runtime
+    # writes after freeze, and interpreter/OS caches that are never authored.
+    pins["tree"] = tree_manifest(job_dir)
     return pins
+
+
+RUNTIME_WRITTEN = {"rounds", "partial", "artifact", "evidence", "job.json", "job.jsonl", "job.lock", "state.json",
+                   "state.json.tmp", "job.json.tmp-freeze", "usage.jsonl", "usage.resv.jsonl", "usage.lock",
+                   "scores.jsonl", "inputs.json", "record.json", "escalation.json"}
+NEVER_AUTHORED = {"__pycache__", ".DS_Store"}
+
+
+def tree_manifest(job_dir):
+    """{relative path: sha256} of every frozen file under the job. Symlinks are
+    refused: pinned material must be plain files inside the job (G1)."""
+    job_dir = pathlib.Path(job_dir).resolve()
+    out = {}
+    for root, dirs, files in os.walk(job_dir, followlinks=False):
+        here = pathlib.Path(root)
+        skip = RUNTIME_WRITTEN if here == job_dir else set()
+        dirs[:] = sorted(d for d in dirs if d not in skip and d not in NEVER_AUTHORED)
+        for name in dirs + sorted(files):
+            f = here / name
+            rel = f.relative_to(job_dir).as_posix()
+            if name in skip or name in NEVER_AUTHORED or name.endswith(".pyc"):
+                continue
+            if f.is_symlink():
+                raise GateError(f"symlinked {rel} in the frozen job tree; pinned material must be plain files (G1)")
+            if f.is_file():
+                out[rel] = sha256_file(f)
+                if len(out) > MAX_PINNED_SEAT_FILES:
+                    raise GateError(f"frozen job tree exceeds the {MAX_PINNED_SEAT_FILES}-file cap (G1)")
+    return out
 
 
 def _chain_job_pins(job_dir):
@@ -428,13 +279,19 @@ def check_pins(cfg, job_dir, frozen):
     cur, frozen = gate_instruments(cfg, job_dir), frozen or {}
     drift = sorted(k for k in set(cur) | set(frozen) if cur.get(k) != frozen.get(k))
     if drift:
-        what = ", ".join("job.json settings" if k == "job" else k for k in drift)
+        what = ", ".join("job.json settings" if k == "job" else _tree_drift(cur.get(k), frozen.get(k)) if k == "tree" else k for k in drift)
         raise GateError(f"frozen instruments modified after freeze: {what} (I-01/I-02)")
     chain = _chain_job_pins(job_dir) or {}
     drift = sorted(k for k in set(cur) | set(chain) if cur.get(k) != chain.get(k))
     if drift:
         what = ", ".join("job.json settings" if k == "job" else k for k in drift)
         raise GateError(f"state.json pins do not match the freeze-time job-pin event in the custody chain: {what} (P7)")
+
+
+def _tree_drift(cur, frozen):
+    cur, frozen = cur or {}, frozen or {}
+    moved = sorted(f for f in set(cur) | set(frozen) if cur.get(f) != frozen.get(f))
+    return "files " + ", ".join(moved[:5]) + (f" (+{len(moved) - 5} more)" if len(moved) > 5 else "")
 
 
 def gate_commands(cfg, job_dir):
