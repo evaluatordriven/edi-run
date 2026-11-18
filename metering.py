@@ -70,6 +70,12 @@ class Meter:
             prev = row.get("digest")
         return True
 
+    def row_cost(self, digest):
+        for row in self._rows:
+            if row.get("digest") == digest:
+                return float(row.get("cost", 0.0))
+        return 0.0
+
     def accrued(self):
         total = 0.0
         amended = set()
@@ -132,14 +138,14 @@ class Meter:
                 rate = max(rate, float(p.get("input_usd_per_mtok", 0.0)))
         return (n / 4.0) / 1e6 * rate
 
-    def meter_call(self, who, model, endpoint, body, response=None, usage=None):
+    def meter_call(self, who, model, endpoint, body, response=None, usage=None, round_no=None):
         """Record one billed call. Called BEFORE the response is consumed by the
         caller, so the row exists even if the caller crashes next line."""
         if usage is None and isinstance(response, dict):
             usage = (response.get("usage") or {}) if "usage" in response else {}
         cost = cost_of(usage or {}, self.pricing.get(model, self.pricing.get("default", {})))
         row = self._append({"kind": "call", "who": who, "model": model, "endpoint": endpoint,
-                            "usage": usage or {}, "cost": round(cost, 10),
+                            "usage": usage or {}, "cost": round(cost, 10), "round": round_no,
                             **({} if usage else {"usage_missing": True})})  # a billed reply with no envelope meters a flagged $0 row — never silently free
         return row
 

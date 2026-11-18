@@ -41,7 +41,6 @@ import loop  # noqa: E402
 # --- known-still-open defects, per the 2026-11-17b recheck -----------------
 KNOWN_FAILS = {
     "S1": "reads outside the deny list are still default-allow; exfil via artifact possible (open: read-allowlist)",
-    "R1": "no resume after a hard kill (runtime_error; restart = new job)",
 }
 
 FAKE_KEY = "probe-fake-key"
@@ -645,21 +644,39 @@ def check_g2():
 
 
 def check_r1():
-    reset_upstream()
-    job = make_job(ENV.jobs, "r1", maker_kind="model", url=ENV.upstream_url, pricing=P1_PRICING)
+    reset_upstream("hang")  # the kill must land MID-ROUND: a fast fake upstream finishes before the kill
+    job = make_job(ENV.jobs, "r1", maker_kind="agent", url=ENV.upstream_url, pricing=P1_PRICING, agent_mode="normal")
     loop.freeze_job(job)
-    proc = subprocess.Popen([sys.executable, "-m", "loop", "run", str(job)], cwd=str(REPO),
+    # loop.py has no CLI: run the job through a real in-process call in the child
+    proc = subprocess.Popen([sys.executable, "-c", "import sys, loop; loop.run_job(sys.argv[1])", str(job)], cwd=str(REPO),
                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     time.sleep(3)
-    proc.kill()
+    proc.kill()  # hard kill: no finally runs, open_round persists with no terminal state
     proc.wait()
     try:
         loop.run_job(job)
-        return "FAIL", "run-once guard did not refuse; silent resume attempted"
+        return "FAIL", "silent resume attempted on a hard-killed run"
     except gates.GateError as e:
-        return ("PASS", "resume refused cleanly") if "once" in str(e).lower() else ("FAIL", "resume refusal odd: %s" % str(e)[:120])
-    except Exception as e:
-        return "FAIL", "resume attempt garbled: %s" % str(e)[:120]
+        if "edi.py resume" not in str(e):
+            return "FAIL", "refusal does not name the remedy: %s" % str(e)[:120]
+    # explicit resume: pins re-verified, partial round discarded, run completes
+    time.sleep(31)  # the single-threaded fake upstream is still inside its hang sleep; let it drain
+    reset_upstream()  # the resumed run gets a healthy upstream
+    st = json.loads((job / "state.json").read_text())
+    cost_before = st.get("cost_usd", 0.0)
+    rc = loop.resume_job(job)
+    st = json.loads((job / "state.json").read_text())
+    if st.get("terminal_state") not in ("accepted", "rejected", "needs_owner"):
+        return "FAIL", "resume did not reach a named end state: %s/%s" % (st.get("terminal_state"), st.get("reason"))
+    if st.get("cost_usd", 0.0) < cost_before - 1e-9:
+        return "FAIL", "resume lost spend: %s < %s" % (st.get("cost_usd"), cost_before)
+    # the resume must leave the job FINALIZABLE: the superseded artifact events
+    # must not pin files the resumed attempt rewrote (record.verify files=True)
+    frc = loop.finalize_job(job, state="given", by="Probe R1")
+    if frc != 0:
+        return "FAIL", "finalize after resume refused (rc=%s) — superseded events still pin artifacts" % frc
+    return "PASS", "silent resume refused; explicit resume completed (%s/%s, spend %s -> %s); finalize OK" % (
+        st.get("terminal_state"), st.get("reason"), cost_before, st.get("cost_usd"))
 
 
 CHECKS = [
@@ -679,7 +696,7 @@ CHECKS = [
     ("E2", "billed unparseable reply still meters", check_e2, None),
     ("G1", "seat script edited after freeze is refused", lambda: check_g1(), None),
     ("G2", "$0 prices refused at freeze", lambda: check_g2(), None),
-    ("R1", "resume after a hard kill is clean", lambda: check_r1(), KNOWN_FAILS["R1"]),
+    ("R1", "resume after a hard kill is clean", lambda: check_r1(), None),
 ]
 
 

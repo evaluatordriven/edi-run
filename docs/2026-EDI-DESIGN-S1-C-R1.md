@@ -77,11 +77,11 @@ invocation with an opaque error; there is no clean recovery path.
 
 **Design: interrupted-state is a first-class state.**
 
-- `state.json` gains `run_state: frozen | running | interrupted | terminal`.
-  The loop sets `running` at start and writes `interrupted` in a SIGTERM/atexit
-  path; a *hard* kill (SIGKILL, power loss) leaves `running` behind — which the
-  next invocation detects via a start-token (pid + boot-unique id written at
-  start; if the pid is dead and no terminal state, the run was hard-killed).
+- AMENDED AS IMPLEMENTED (2026-11-17): `state.json` carries a durable in-flight
+  marker `state.open_round` (written at each round start, cleared at every named
+  end state and at the round boundary) instead of a run_state enum + start token;
+  a hard kill (SIGKILL, power loss) leaves `open_round` set with no terminal
+  state, which the next invocation detects exactly as this section requires.
 - Recovery is **explicit**: `edi.py resume <job>` — the only way past the guard
   for an interrupted job. Plain `run` on an interrupted job refuses with the
   remedy sentence: "interrupted by a hard kill; resume with edi.py resume".
@@ -97,8 +97,14 @@ invocation with an opaque error; there is no clean recovery path.
   A resume is a new round, not a continuation of killed work — consistent with
   "restarts are new jobs" at seat level, while the job's custody chain stays one
   chain.
-- No opinion enters the record: the record notes `resumed_after_interrupt` with
-  the accrued spend; the Architect's analysis stays in the skill layer (R2 ruling).
+- No opinion enters the record: `resume` APPENDS a `round-discarded` custody
+  event — `{type: "round-discarded", data: {round, supersedes: [<seqs of the
+  killed attempt's artifact events>], resumed_after_interrupt: true,
+  discarded_spend_usd}}` — so the supersession is IN the chain, not just in the
+  record. Custody verification exempts the superseded events from file re-hash
+  (the resumed attempt legitimately rewrites the same artifact path with new
+  content; the appended record carries the `resumed_after_interrupt` + spend
+  disclosure). The Architect's analysis stays in the skill layer (R2 ruling).
 
 ## S1 — default-deny reads for the agent seat
 

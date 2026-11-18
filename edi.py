@@ -7,7 +7,7 @@ import loop
 def main():
     ap = argparse.ArgumentParser(description="E-DI minimal reference runtime")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("freeze", "run", "verify"):
+    for name in ("freeze", "run", "verify", "resume"):
         sub.add_parser(name).add_argument("job_dir", type=pathlib.Path)
     fin = sub.add_parser("finalize")
     fin.add_argument("job_dir", type=pathlib.Path)

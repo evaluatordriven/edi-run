@@ -36,7 +36,7 @@ def _chat_json(url, model_id, sys_prompt, user_prompt, key_env="OPENROUTER_API_K
     # C6/C7: the meter fires on the BILLED ENVELOPE, before any content parse —
     # a reply the seat cannot parse was still billed and must still accrue
     if meter is not None:
-        meter.meter_call(who or "seat", model_id, url, None, usage=raw.get("usage"))
+        meter.meter_call(who or "seat", model_id, url, None, usage=raw.get("usage"), round_no=getattr(meter, "_round", None))
     txt = raw["choices"][0]["message"]["content"].strip()
     m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", txt, re.S) or re.search(r"(\{.*\})", txt, re.S)
     return json.loads(m.group(1) if m else txt), host, raw
@@ -167,7 +167,7 @@ class _NoCrossHostRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: float = 60, meter=None):
+def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: float = 60, meter=None, round_no=None):
     mk_usage = None
     out_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="edi_maker_") as sb:
@@ -240,7 +240,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                     # the agent — a crash or kill after the upstream bill cannot lose it
                     if meter is not None and status == 200:
                         try:
-                            meter.meter_call("maker", req.get("model"), upstream, body, usage=usage)
+                            meter.meter_call("maker", req.get("model"), upstream, body, usage=usage, round_no=round_no)
                         except Exception as meter_err:
                             # a meter failure must NOT serve an unmetered billed call (fsync discipline)
                             out = json.dumps({"error": {"code": 503, "message": "meter unavailable"}}).encode("utf-8")
