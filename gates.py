@@ -1,6 +1,6 @@
 """Deterministic invariant gates (I-01 through I-04) for edi-run. Standard library only."""
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib, json, math, os, pathlib
 
 UNDISCLOSED = "undisclosed"
@@ -58,6 +58,20 @@ def gate_freeze_pre(cfg, job_dir):
             raise GateError(f"missing or mismatched {role} approval on bar.digest (CL1-3)")
     if cfg.get("levelClaimed") == "baseline" and not isinstance(cfg.get("readsBeforeFreeze"), list):
         raise GateError("baseline jobs must record readsBeforeFreeze (BL-1)")
+    # frozenAt must be parseable and, for CL1+, strictly in the past: both are
+    # refusals, so both run before the first log write (the post-append ordering
+    # predicate is then construction-guaranteed: the work-started event is
+    # emitted after freeze, so a past frozenAt can never satisfy f_dt >= s_dt)
+    f_raw = (cfg.get("bar") or {}).get("frozenAt")
+    if cfg.get("levelClaimed") != "baseline":
+        if not f_raw:
+            raise GateError("CL1+ jobs must carry bar.frozenAt (CL1-1)")
+        try:
+            f_dt = when(f_raw)
+        except Exception as e:
+            raise GateError(f"bar.frozenAt is not a parseable timestamp: {f_raw!r}") from e
+        if f_dt >= datetime.now(timezone.utc):
+            raise GateError(f"bar.frozenAt {f_raw} is not in the past; a bar frozen after work began is not a frozen bar (CL1-1)")
 
 
 def gate_freeze(cfg, job_dir, started_at):

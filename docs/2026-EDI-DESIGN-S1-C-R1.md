@@ -49,8 +49,8 @@ control are not counted (C5); a billed reply that cannot be parsed is not counte
     the remaining model checks of that batch do not run. A partially evaluated
     round never produces D4.9 feedback and never becomes incumbent — the run
     halts `needs_owner/cap_reached`; on `resume` (R1) the round restarts fresh
-    (its meter rows are kept, its work is discarded and labeled
-    `discarded_round: true` so a re-accrual cannot double-count).
+    under the same round number (its meter rows are kept and marked via the
+    amendment row so a re-accrual cannot double-count).
 - **C5/C6/C7:** model evaluators and model makers call `meter_call` too — with
   `who` distinguishing maker/evaluator/check/control. A parse failure after a
   billed reply still counts the row (the bill exists).
@@ -86,12 +86,17 @@ invocation with an opaque error; there is no clean recovery path.
   for an interrupted job. Plain `run` on an interrupted job refuses with the
   remedy sentence: "interrupted by a hard kill; resume with edi.py resume".
 - `resume` discards the partial round (moved OUT of `rounds/` — which stays
-  immutable — to `job/partial/round-N/`), relabels that round's meter rows
-  `discarded_round: true`, re-accrues spend from the durable usage log (C1–C7
+  immutable — to `job/partial/round-N/`), appends a superseding AMENDMENT row to
+  the usage log (`{kind: "amendment", amends: [<row digests>], discarded_round:
+  true}`) — meter rows are append-only and hash-chained, so no row is ever
+  rewritten in place — and re-accrues spend from the durable usage log (C1–C7
   make this exact), re-verifies all pins (bar, method, instruments, scripts,
-  seeds), and continues from the round boundary. A resume is a new round, not a
-  continuation of killed work — consistent with "restarts are new jobs" at seat
-  level, while the job's custody chain stays one chain.
+  seeds), and continues from the round boundary. The resumed round REUSES the
+  discarded round's number and the discarded attempt CONSUMES its `max_rounds`
+  slot (the attempt was made and paid for; bounds are respected conservatively).
+  A resume is a new round, not a continuation of killed work — consistent with
+  "restarts are new jobs" at seat level, while the job's custody chain stays one
+  chain.
 - No opinion enters the record: the record notes `resumed_after_interrupt` with
   the accrued spend; the Architect's analysis stays in the skill layer (R2 ruling).
 

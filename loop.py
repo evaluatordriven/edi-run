@@ -324,7 +324,8 @@ def run_job(job_dir):
                         rows = [{"evaluator": "maker", "model": mk_id, "case": "maker", "usage": mk["usage"]}]
                     _accrue(state, rows, pricing)
             except (TimeoutError, subprocess.TimeoutExpired):
-                state.update(terminal_state="needs_owner", reason="maker_failed", maker_error="maker wall-clock deadline exceeded")
+                state.update(terminal_state="needs_owner", reason="maker_failed",
+                             maker_error="maker wall-clock deadline exceeded (max_wall_seconds=%s)" % (cfg.get("bounds") or {}).get("max_wall_seconds"))
                 break
             except gates.GateError:
                 raise  # integrity/security violations fail loud, never become dispositions

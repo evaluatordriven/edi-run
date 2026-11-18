@@ -438,6 +438,16 @@ class TestEDIRuntime(unittest.TestCase):
         with self.assertRaises(gates.GateError):
             loop.freeze_job(job)
         self.assertFalse((job / "job.jsonl").exists(), "a refused freeze must leave no log")
+        # a malformed or future bar.frozenAt is refused BEFORE any append too
+        for bad in ("not-a-date", "2099-01-01T00:00:00Z"):
+            job_b = self._make_base_job(subdir="job_badfrozen")
+            cfg_b = json.loads((job_b / "job.json").read_text())
+            cfg_b["bar"]["frozenAt"] = bad
+            (job_b / "job.json").write_text(json.dumps(cfg_b, indent=2), encoding="utf-8")
+            with self.assertRaises(gates.GateError):
+                loop.freeze_job(job_b)
+            self.assertFalse((job_b / "job.jsonl").exists(), "frozenAt refusal left a trace")
+            self.assertFalse((job_b / "state.json").exists())
         self.assertFalse((job / "state.json").exists())
         # corrected retry now freezes cleanly (no dead-end)
         (job / "bar.md").write_text((self.tmp / "job_bar_ok" / "bar.md").read_text() if (self.tmp / "job_bar_ok" / "bar.md").exists() else "# Header\n", encoding="utf-8")
