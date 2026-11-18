@@ -1,0 +1,103 @@
+# Design: S1 read-allowlist, C1–C7 metering/cap, R1 recovery
+
+Status: proposed — implementation follows approval of the shape below.
+Doctrine anchor: v0.2.1. Spirit: the custody chain never contains an opinion; spend
+is owned; the sandbox narrows, the proxy meters; a refusal is a sentence, not silence.
+
+## C1–C7 — spend is durable, metered at the point of billing
+
+**Defects (probe-verified):** spend accrues only from a completed maker round's
+self-report (C1/C2: crash and timeout lose the spend); the cap is checked at round
+boundaries only (C3); not before each paid call (C4); evaluator runs after a failed
+control are not counted (C5); a billed reply that cannot be parsed is not counted
+(C6/C7).
+
+**Design: one metering module, every billed call flows through it.**
+
+- `metering.py`: `meter_call(who, model, url, body) -> (response, usage_row)`.
+  Appends one row `{ts, who, model, endpoint, usage, cost_hint}` to
+  `job/rounds/usage.jsonl` **and fsyncs it before the response is used** — a row
+  exists for every call whose upstream bill exists, regardless of what happens to
+  the caller afterward. The kill of a seat cannot unbill a call the upstream billed.
+- The agent proxy becomes a consumer of the same module: each relayed call appends
+  its row (it already logs; now it persists durably in the shared format).
+- Authoritative spend = the usage log, not any seat's self-report. `loop` computes
+  `cost_usd = Σ cost(rows)` at every state write (round end, maker crash, timeout,
+  evaluator failure) — nothing a seat does can make the record under-count.
+- **C4 — cap before each paid call:** `meter_call` refuses (raises
+  `CapExceeded`, surfaced as `cap_reached`) when `accrued + max(estimated_cost,
+  last_call_cost) >= max_cost_usd`. Estimate = tokenized request × declared price;
+  the price map is already mandatory (G2). This is the first enforcement point that
+  bounds a single seat's round, not just the job.
+- **C5/C6/C7:** model evaluators and model makers call `meter_call` too — with
+  `who` distinguishing maker/evaluator/check/control. A parse failure after a
+  billed reply still counts the row (the bill exists).
+- Meter rows carry a hash chain (prev-row digest), like the record: a seat cannot
+  edit its own spend history.
+
+**What does not change:** D4.9, the unidirectional pipeline, seats never see the
+key, evaluator independence. The proxy remains the only thing that holds the key on
+the agent path; model-maker/evaluator calls keep their direct URL but now meter.
+
+## R1 — a hard kill is recoverable, never silent
+
+**Defect (probe R1):** after a hard kill, the run-once guard refuses the next
+invocation with an opaque error; there is no clean recovery path.
+
+**Design: interrupted-state is a first-class state.**
+
+- `state.json` gains `run_state: frozen | running | interrupted | terminal`.
+  The loop sets `running` at start and writes `interrupted` in a SIGTERM/atexit
+  path; a *hard* kill (SIGKILL, power loss) leaves `running` behind — which the
+  next invocation detects via a start-token (pid + boot-unique id written at
+  start; if the pid is dead and no terminal state, the run was hard-killed).
+- Recovery is **explicit**: `edi.py resume <job>` — the only way past the guard
+  for an interrupted job. Plain `run` on an interrupted job refuses with the
+  remedy sentence: "interrupted by a hard kill; resume with edi.py resume".
+- `resume` discards the partial round (rounds/round-N removed to
+  `rounds/round-N.partial/`), re-accrues spend from the durable usage log (C1–C7
+  make this exact), re-verifies all pins (bar, method, instruments, scripts,
+  seeds), and continues from the round boundary. A resume is a new round, not a
+  continuation of killed work — consistent with "restarts are new jobs" at seat
+  level, while the job's custody chain stays one chain.
+- No opinion enters the record: the record notes `resumed_after_interrupt` with
+  the accrued spend; the Architect's analysis stays in the skill layer (R2 ruling).
+
+## S1 — default-deny reads for the agent seat
+
+**Defect (probe S1, KNOWN-FAIL):** reads outside the deny list are default-allow;
+a canary next to the jobs root is readable and exfiltrable through the artifact.
+
+**Design: allowlist, not deny-list.** The agent sandbox flips the read posture:
+deny `file-read*` by default; allow exactly what a seat needs:
+
+- the workspace subtree (packet, artifact, scripts, held_out under the job);
+- the interpreter and its standard library + site-packages (resolved from the
+  actual `sys.base_prefix` at freeze — the probe already exercises the exact argv);
+- `/dev/urandom`, `/etc/{resolv.conf,hosts,services}` (resolver), the proxy relay
+  socket (already the only egress);
+- macOS: seatbelt `allow file-read*` subscope list; Linux: replace `--ro-bind / /`
+  with explicit `--ro-bind` entries for the above (bwrap becomes allowlist-shaped
+  the same way).
+
+**Rollout (the risk is breaking legitimate seats, not missing a leak):**
+1. Implement behind `SANDBOX_READS=allowlist` (default remains deny-list) so the
+   probe gate can run both postures side by side.
+2. Probe additions: S1 flips to expected-PASS; new S7 (interpreter + stdlib
+   readable), S8 (site-packages import of a real module works), S9 (host
+   `/usr/share`, `/opt`, other users' homes denied).
+3. Full suite + probe gate green on both postures → flip the default, remove the
+   env switch in the same commit, close S1's KNOWN_FAILS entry.
+4. README residual updated: the deny list becomes an allowlist; the in-artifact
+   exfil disclosure stays (the proxy meters; it cannot make a tool-using agent
+   trustworthy).
+
+## Sequencing
+
+1. `metering.py` + cap-before-call (C1–C7) — self-contained, probe-verifiable,
+   no doctrine interaction beyond spend.
+2. R1 recovery — depends on the durable usage log for exact re-accrual.
+3. S1 allowlist — biggest blast radius, staged rollout as above.
+
+Each step: red-first tests, probe-gate entries flip in the same commit, suite green
+on all legs, frontier reviews per the shipping bar.
