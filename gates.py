@@ -45,7 +45,9 @@ def gate_bounds(cfg):
         raise GateError("invalid subjectFiles entry")
 
 
-def gate_freeze(cfg, job_dir, started_at):
+def gate_freeze_pre(cfg, job_dir):
+    """Bar-level refusal checks that must run BEFORE the first log write: a
+    refused freeze leaves nothing behind (I-01 no-trace)."""
     bar = cfg.get("bar") or {}
     actual = sha256_file(safe_rel(bar.get("file", "bar.md"), job_dir))
     if actual != (bar.get("digest") or {}).get("sha256"):
@@ -54,6 +56,14 @@ def gate_freeze(cfg, job_dir, started_at):
         apps = [a for a in (bar.get("approvals") or []) if a.get("role") == role]
         if not apps or any((a.get("barDigest") or {}).get("sha256") != actual for a in apps):
             raise GateError(f"missing or mismatched {role} approval on bar.digest (CL1-3)")
+    if cfg.get("levelClaimed") == "baseline" and not isinstance(cfg.get("readsBeforeFreeze"), list):
+        raise GateError("baseline jobs must record readsBeforeFreeze (BL-1)")
+
+
+def gate_freeze(cfg, job_dir, started_at):
+    bar = cfg.get("bar") or {}
+    gate_freeze_pre(cfg, job_dir)
+    actual = sha256_file(safe_rel(bar.get("file", "bar.md"), job_dir))
     f_dt, s_dt = when(bar["frozenAt"]), when(started_at)
     if (cfg.get("levelClaimed") == "baseline" and not (f_dt > s_dt and isinstance(cfg.get("readsBeforeFreeze"), list))) or (cfg.get("levelClaimed") != "baseline" and f_dt >= s_dt):
         raise GateError("bar.frozenAt ordering invalid for claimed level (CL1-1/BL-1)")

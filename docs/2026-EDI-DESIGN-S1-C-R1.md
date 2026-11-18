@@ -16,30 +16,61 @@ control are not counted (C5); a billed reply that cannot be parsed is not counte
 
 - `metering.py`: `meter_call(who, model, url, body) -> (response, usage_row)`.
   Appends one row `{ts, who, model, endpoint, usage, cost_hint}` to
-  `job/rounds/usage.jsonl` **and fsyncs it before the response is used** — a row
+  **`job/usage.jsonl` (job root, next to `scores.jsonl`)** — NOT inside `rounds/`,
+  which stays "immutable per-round snapshots" — **and fsyncs it (file and, on
+  first append, the parent directory entry) before the response is used** — a row
   exists for every call whose upstream bill exists, regardless of what happens to
-  the caller afterward. The kill of a seat cannot unbill a call the upstream billed.
+  the caller afterward. The kill of a seat cannot unbill a call the upstream
+  billed. Residual, disclosed like every other limit: a crash between the
+  upstream bill and the append still loses that call's row; the window is one
+  append, not one round.
 - The agent proxy becomes a consumer of the same module: each relayed call appends
   its row (it already logs; now it persists durably in the shared format).
 - Authoritative spend = the usage log, not any seat's self-report. `loop` computes
   `cost_usd = Σ cost(rows)` at every state write (round end, maker crash, timeout,
   evaluator failure) — nothing a seat does can make the record under-count.
 - **C4 — cap before each paid call:** `meter_call` refuses (raises
-  `CapExceeded`, surfaced as `cap_reached`) when `accrued + max(estimated_cost,
-  last_call_cost) >= max_cost_usd`. Estimate = tokenized request × declared price;
-  the price map is already mandatory (G2). This is the first enforcement point that
-  bounds a single seat's round, not just the job.
+  `CapExceeded`) when `accrued + max(estimated_cost, last_call_cost) >=
+  max_cost_usd`. Estimate = tokenized request × declared price; the price map is
+  already mandatory (G2). There is no separate per-seat cap — `accrued` is the
+  job total from the usage log; the cap simply fires wherever the next call
+  would breach it, instead of only at round boundaries. Residual overshoot:
+  `last_call_cost` as the floor means a call may exceed the cap by up to one
+  prior call's cost; disclosed.
+- **Mid-call state machine (named, not improvised):**
+  - Maker-side trip (model or agent maker, before a call): the maker sees a
+    metering refusal; the round ends and the run halts
+    `needs_owner/cap_reached` — the same terminal as a boundary trip, wherever
+    it fired. `cap_reached` is terminal at any point in the round; the arch §6
+    "mid-batch cap → gap record" trigger is resolved as: an incomplete final
+    round finalized with a disposition emits the gap-listed record (existing
+    §6 semantics); a halted run itself is needs_owner, never a gap.
+  - Evaluator-side trip mid-batch: checks already emitted in the batch stay;
+    the remaining model checks of that batch do not run. A partially evaluated
+    round never produces D4.9 feedback and never becomes incumbent — the run
+    halts `needs_owner/cap_reached`; on `resume` (R1) the round restarts fresh
+    (its meter rows are kept, its work is discarded and labeled
+    `discarded_round: true` so a re-accrual cannot double-count).
 - **C5/C6/C7:** model evaluators and model makers call `meter_call` too — with
   `who` distinguishing maker/evaluator/check/control. A parse failure after a
   billed reply still counts the row (the bill exists).
 - Meter rows carry a hash chain (prev-row digest), like the record: a seat cannot
-  edit its own spend history.
+  edit its own spend history. The chain is verified at `resume` and at `finalize`
+  (before spend enters the record) — a truncated or hand-edited `usage.jsonl`
+  refuses instead of re-accruing. `usage.jsonl` is added to the agent sandbox deny
+  list (spend telemetry must not leak into the seat that produced it).
 
 **What does not change:** D4.9, the unidirectional pipeline, seats never see the
 key, evaluator independence. The proxy remains the only thing that holds the key on
 the agent path; model-maker/evaluator calls keep their direct URL but now meter.
 
 ## R1 — a hard kill is recoverable, never silent
+
+Doc conflict to resolve alongside: arch I-01 says an interrupted run "is never
+rerunnable"; this design amends I-01 — interrupted runs are rerunnable ONLY via
+the explicit `edi.py resume`, which re-verifies every pin and re-accrues spend
+from the verified usage log. Silence stays forbidden; the guard message names
+the remedy.
 
 **Defect (probe R1):** after a hard kill, the run-once guard refuses the next
 invocation with an opaque error; there is no clean recovery path.
@@ -54,8 +85,9 @@ invocation with an opaque error; there is no clean recovery path.
 - Recovery is **explicit**: `edi.py resume <job>` — the only way past the guard
   for an interrupted job. Plain `run` on an interrupted job refuses with the
   remedy sentence: "interrupted by a hard kill; resume with edi.py resume".
-- `resume` discards the partial round (rounds/round-N removed to
-  `rounds/round-N.partial/`), re-accrues spend from the durable usage log (C1–C7
+- `resume` discards the partial round (moved OUT of `rounds/` — which stays
+  immutable — to `job/partial/round-N/`), relabels that round's meter rows
+  `discarded_round: true`, re-accrues spend from the durable usage log (C1–C7
   make this exact), re-verifies all pins (bar, method, instruments, scripts,
   seeds), and continues from the round boundary. A resume is a new round, not a
   continuation of killed work — consistent with "restarts are new jobs" at seat
@@ -91,6 +123,22 @@ deny `file-read*` by default; allow exactly what a seat needs:
 4. README residual updated: the deny list becomes an allowlist; the in-artifact
    exfil disclosure stays (the proxy meters; it cannot make a tool-using agent
    trustworthy).
+
+## Doc amendments required in the same change (docs stay true)
+
+- Arch I-07: spend source of truth = `job/usage.jsonl`; `state.json` `cost_usd`
+  becomes the derived sum; delete the crash/timeout-loss disclosed limit (it is
+  fixed); proxy logging folds into `metering.py`.
+- Arch §2 Maker bullet + README "Cost caps": cap fires before each paid call;
+  `cap_reached` is terminal at any point in the round; overshoot residual named.
+- Arch §5 layout: `usage.jsonl` at job root; `rounds/` contract unchanged;
+  `partial/` added for R1.
+- Arch I-01: "never rerunnable" → "rerunnable only via explicit `edi.py resume`".
+- Arch I-07 reason-tag list gains the tags the code already emits
+  (`below_floor`, `interrupted`, `runtime_error`, `integrity_error`).
+- Arch §1 I-02: `gate_instruments` pins the scripts tree and every job-dir python
+  file (G1, merged); pricing refusal covers zero/negative/non-finite rates and
+  empty identifiers (G2, merged) — the doc must match `main`.
 
 ## Sequencing
 

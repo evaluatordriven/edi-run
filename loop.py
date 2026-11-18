@@ -89,6 +89,9 @@ def freeze_job(job_dir, started_at=None):
     pins = gates.gate_instruments(cfg, job_dir)
     if (job_dir / "job.jsonl").exists():
         raise gates.GateError("job.jsonl already exists; freeze runs once")
+    # bar-level refusal checks run before ANY append: a refused freeze must
+    # leave no job.jsonl for the corrected retry to trip over (I-01 no-trace)
+    gates.gate_freeze_pre(cfg, job_dir)
     # Every check that can refuse the freeze runs BEFORE the first log write --
     # a refused freeze must leave nothing behind for the corrected retry to trip over.
     seed = cfg.get("seed")
@@ -105,6 +108,15 @@ def freeze_job(job_dir, started_at=None):
         if any(str(a["by"]).casefold() == str(seed["author"]).casefold() for a in cfg["bar"]["approvals"]):
             raise gates.GateError("seed author cannot hold the Buyer or Specialist seat (the approver of the bar would be the maker of record)")
         seed_pins = {f: gates.sha256_file(sdir / f) for f in cfg["subjectFiles"]}
+    demos, rub_txt = [], gates.safe_rel(cfg["instrument"]["rubric"]["file"], job_dir).read_text(encoding="utf-8")
+    if cfg["levelClaimed"] == "CL3":
+        p_case = gates.safe_rel(cfg["controls"]["planted"], job_dir)
+        for ev in cfg["evaluators"]:
+            for d in cfg["bar"]["dimensions"]:
+                res = adapters.run_evaluator(ev, p_case, d["id"], job_dir=job_dir, dim_cfg=d, rubric_txt=rub_txt)
+                if res.get("score") is None or float(res["score"]) >= float((d.get("scale") or {}).get("threshold", 4.0)):
+                    raise gates.GateError(f"CL3 planted case did not fail on {ev['id']}/{d['id']} (CL3-1)")
+                demos.append({"dimension": d["id"], "evaluator": ev["id"], "planted": {"sha256": gates.sha256_file(p_case)}, "outcome": "does_not_conform", "at": custody_record.now()})
     _append(job_dir, "job-start", "edi-run", [], {"job": cfg["job"]})
     if seed:
         _append(job_dir, "artifact-supplied", seed["author"], [gates.safe_rel(seed["dir"], job_dir) / f for f in cfg["subjectFiles"]], {"origin": seed.get("origin", ""), "note": seed.get("note", "")})
@@ -128,15 +140,6 @@ def freeze_job(job_dir, started_at=None):
         for f in ho.rglob("*"):
             os.chmod(f, 0o700 if f.is_dir() else 0o600)
         os.chmod(ho, 0o700)
-    demos, rub_txt = [], gates.safe_rel(cfg["instrument"]["rubric"]["file"], job_dir).read_text(encoding="utf-8")
-    if cfg["levelClaimed"] == "CL3":
-        p_case = gates.safe_rel(cfg["controls"]["planted"], job_dir)
-        for ev in cfg["evaluators"]:
-            for d in cfg["bar"]["dimensions"]:
-                res = adapters.run_evaluator(ev, p_case, d["id"], job_dir=job_dir, dim_cfg=d, rubric_txt=rub_txt)
-                if res.get("score") is None or float(res["score"]) >= float((d.get("scale") or {}).get("threshold", 4.0)):
-                    raise gates.GateError(f"CL3 planted case did not fail on {ev['id']}/{d['id']} (CL3-1)")
-                demos.append({"dimension": d["id"], "evaluator": ev["id"], "planted": {"sha256": gates.sha256_file(p_case)}, "outcome": "does_not_conform", "at": custody_record.now()})
     state = {"status": "frozen", "pins": pins, "startedAt": s_at, "frozenAt": ev_frz["at"], "demonstrations": demos, "incumbent_round": None, "incumbent_digest": None, "incumbent_scores": None, "last_candidate_digest": None, "defects": [], "solutions": [], "rounds": {}, "terminal_state": None, "reason": None, "cost_usd": 0.0, "seed": ({"dir": seed["dir"], "author": seed["author"], "digests": seed_pins} if seed else None)}
     (job_dir / "state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     return 0
@@ -321,7 +324,7 @@ def run_job(job_dir):
                         rows = [{"evaluator": "maker", "model": mk_id, "case": "maker", "usage": mk["usage"]}]
                     _accrue(state, rows, pricing)
             except (TimeoutError, subprocess.TimeoutExpired):
-                state.update(terminal_state="needs_owner", reason="cap_reached")
+                state.update(terminal_state="needs_owner", reason="maker_failed", maker_error="maker wall-clock deadline exceeded")
                 break
             except gates.GateError:
                 raise  # integrity/security violations fail loud, never become dispositions
