@@ -516,6 +516,9 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         "(version 1)(allow default)\n"
                         "(deny file-write*)\n"
                         f"(allow file-write* (subpath {q}{sb_p}{q}))\n"
+                        # the null device: aider/litellm open /dev/null for stdout
+                        # silencing; it is not storage (live-aider-job5, 2026-11-18)
+                        '(allow file-write* (literal "/dev/null"))\n'
                         f"(deny file-read* (subpath {q}{jd / 'held_out'}{q}))\n"
                         f"(deny file-read* (subpath {q}{jd / 'evidence'}{q}))\n"
                         f"(deny file-read* (literal {q}{jd / 'job.jsonl'}{q}))\n"

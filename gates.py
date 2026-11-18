@@ -240,7 +240,11 @@ def gate_instruments(cfg, job_dir):
                 inside = rp.is_relative_to(job_dir.resolve())
             except OSError:
                 continue
-            if inside and rp.is_file():
+            try:
+                is_file = rp.is_file()
+            except OSError:  # e.g. ENAMETOOLONG on a data token (live-aider-job, 2026-11-18)
+                continue
+            if inside and is_file:
                 seen_files[str(rp)] = rp
     # Round-3 external review #9 + verification re-review #7: the pin must cover
     # the dependencies a seat script actually invokes, not only the files named
@@ -383,6 +387,8 @@ def gate_instruments(cfg, job_dir):
                 raise GateError(f"symlinked python file {f.relative_to(job_dir)} (G1)")
             if sdir in f.parents:
                 continue
+            if "rounds" in f.parts:
+                continue  # runtime-produced custody artifacts (a maker's .py artifact) are outputs, not seat code; including them made every coding-artifact job unfinalizable (live-aider-job, 2026-11-18)
             h.update(str(f.relative_to(job_dir)).encode())
             h.update(sha256_file(f).encode())
         pins["scripts"] = h.hexdigest()
@@ -449,10 +455,20 @@ def gate_commands(cfg, job_dir):
         for tok in cmd[1:]:
             if not isinstance(tok, str):
                 raise GateError(f"{who} command tokens must be strings")
+            # Only tokens that LOOK like paths are probed as paths: an argv token
+            # that is neither absolute nor a plausible relative path (no slash,
+            # or too long / malformed for the filesystem) is data, not a file
+            # reference. stat() can raise OSError (e.g. ENAMETOOLONG) on data
+            # tokens -- that must never crash the gate (live-aider-job, 2026-11-18).
+            looks_like_path = "/" in tok and not tok.startswith("-") and len(tok) < 1024
             cand = pathlib.Path(tok)
             if not cand.is_absolute():
                 cand = job_dir / tok
-            if cand.exists():
+            try:
+                exists = cand.exists() if looks_like_path else False
+            except OSError:
+                exists = False
+            if exists:
                 rp = cand.resolve()
                 if not rp.is_relative_to(job_dir.resolve()):
                     raise GateError(f"{who} command references {tok} outside the job dir; seat code must live in the job (G1)")

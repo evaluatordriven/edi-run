@@ -323,6 +323,16 @@ def freeze_job(job_dir, started_at=None, dry_run=False):
     if zero:
         raise gates.GateError(f"pricing entries {zero} contain a zero, negative, non-numeric or non-finite rate; unpriced spend must be refused, never silently $0 (recheck G2)")
     gates.gate_commands(cfg, job_dir)
+    # auto-hash persistence: stamp the computed bar digest INTO job.json so the
+    # custody record (assembled from job.json at finalize) carries it — the
+    # in-memory-only stamp was lost before record assembly and failed CR-2/
+    # CL1-3/CL1-14 (live-aider-job10, 2026-11-18). Dry-run stamps in memory
+    # only; it must never write (the zero-write oracle invariant).
+    _bar = cfg.get("bar") or {}
+    if (_bar.get("digest") or {}).get("sha256") is None:
+        _bar["digest"] = {"sha256": gates.sha256_file(gates.safe_rel(_bar.get("file", "bar.md"), job_dir))}
+        if not dry_run:
+            (job_dir / "job.json").write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
     pins = gates.gate_instruments(cfg, job_dir)
     if (job_dir / "job.jsonl").exists():
         raise gates.GateError("job.jsonl already exists; freeze runs once")
@@ -805,6 +815,10 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
     # by name. (Previously the state read and custody verify ran BEFORE the
     # lock — a second finalizer could slip a rewrite into that window.)
     with job_lock(job_dir):
+        if not (job_dir / "state.json").is_file():
+            # a never-frozen (or pre-run) dir has no state: declining or finalizing
+            # it would attest custody that does not exist (live-aider-job8, 2026-11-18)
+            raise gates.GateError("no state.json; the job has not been frozen (finalize follows freeze)")
         st = json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
         log_path = job_dir / "job.jsonl"
         log_problems = custody_verify(log_path)
@@ -908,6 +922,8 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
 def verify_job(job_dir):
     job_dir = pathlib.Path(job_dir).resolve()
     cfg = _load_job_json(job_dir)
+    if not (job_dir / "record.json").is_file():
+        raise gates.GateError("no record.json; the job has not been finalized yet (verify follows finalize)")
     if custody_verify(job_dir):
         return 1
     rep = custody_check.verify(json.loads((job_dir / "record.json").read_text(encoding="utf-8")), files=str(job_dir / "artifact"), evidence=str(job_dir / "evidence"), bar=str(job_dir / cfg["bar"]["file"]))
