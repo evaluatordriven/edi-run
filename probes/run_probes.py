@@ -41,9 +41,6 @@ import loop  # noqa: E402
 # --- known-still-open defects, per the 2026-11-17b recheck -----------------
 KNOWN_FAILS = {
     "S1": "reads outside the deny list are still default-allow; exfil via artifact possible (open: read-allowlist)",
-    "C1": "agent spend on crash is lost — metering accrues only on clean maker exit",
-    "C2": "agent spend on timeout is lost — same root as C1 (terminal maker_failed: wall deadline)",
-    "C3": "the proxy does not enforce the cost cap",
     "R1": "no resume after a hard kill (runtime_error; restart = new job)",
 }
 
@@ -549,9 +546,9 @@ def check_c3():
                     pricing=P1_PRICING, bounds={"max_rounds": 2, "max_cost_usd": 0.0003, "max_wall_seconds": 60})
     loop.run_job(job)
     cost, ts, reason = metered_spend(job)
-    if cost <= 0.0003:
-        return "PASS", "cap held ($%s <= 0.0003)" % cost
-    return "FAIL", "cap $0.0003 exceeded: cost_usd=%s (%s/%s) with %d upstream calls" % (cost, ts, reason, len(_FakeUpstream.calls))
+    if cost <= 0.0003 and reason == "cap_reached":
+        return "PASS", "cap held and named ($%s <= 0.0003, terminal cap_reached)" % cost
+    return "FAIL", "cap $0.0003: cost_usd=%s terminal %s/%s with %d upstream calls" % (cost, ts, reason, len(_FakeUpstream.calls))
 
 
 def check_k1():
@@ -602,6 +599,24 @@ def check_e1():
     if st.get("maker_error"):
         return "PASS", "upstream 500 reaches the maker as an error (%s/%s)" % (st.get("terminal_state"), st.get("reason"))
     return "FAIL", "5xx swallowed: %s/%s" % (st.get("terminal_state"), st.get("reason"))
+
+
+def check_e2():
+    # C6: a billed reply the evaluator cannot parse still meters — the row is
+    # written from the envelope BEFORE the content parse
+    reset_upstream("unparseable")
+    import metering
+    m = metering.Meter(ENV.jobs / "e2-meter", pricing={"default": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}}, bounds={"max_cost_usd": 1.0})
+    ev = {"id": "E1", "kind": "model", "url": ENV.upstream_url, "model": {"identifier": "declared-model"}, "apiKeyEnv": "PROBE_NONE"}
+    target = ENV.jobs / "e2-target.md"
+    target.write_text("# target\n", encoding="utf-8")
+    try:
+        adapters.run_evaluator(ev, target, "D1", meter=m)
+    except Exception:
+        pass  # unparseable content -> unobserved/raise; the ROW must exist regardless
+    rows = m._rows
+    return ("PASS", "billed unparseable reply metered (%d row, cost_hint set)" % len(rows)) \
+        if rows and rows[0].get("kind") == "call" else ("FAIL", "no meter row for a billed unparseable reply")
 
 
 def check_g1():
@@ -655,12 +670,13 @@ CHECKS = [
     ("S5", "agent cannot write edi-run code", lambda: check_s5(), None),
     ("S6", "no network except the proxy", lambda: check_s6(), None),
     ("P1", "undeclared model refused by the proxy", lambda: check_p1(), None),
-    ("C1", "agent spend counted on crash", lambda: check_c1(), KNOWN_FAILS["C1"]),
-    ("C2", "agent spend counted on timeout", lambda: check_c2(), KNOWN_FAILS["C2"]),
-    ("C3", "proxy enforces the cost cap", lambda: check_c3(), KNOWN_FAILS["C3"]),
+    ("C1", "agent spend counted on crash", lambda: check_c1(), None),
+    ("C2", "agent spend counted on timeout", lambda: check_c2(), None),
+    ("C3", "proxy enforces the cost cap", lambda: check_c3(), None),
     ("K1", "agent children die on kill", lambda: check_k1(), None),
     ("H1", "no key over plain http", lambda: check_h1(), None),
-    ("E1", "upstream 5xx reaches the maker as an error", lambda: check_e1(), None),
+    ("E1", "upstream 5xx reaches the maker as an error", check_e1, None),
+    ("E2", "billed unparseable reply still meters", check_e2, None),
     ("G1", "seat script edited after freeze is refused", lambda: check_g1(), None),
     ("G2", "$0 prices refused at freeze", lambda: check_g2(), None),
     ("R1", "resume after a hard kill is clean", lambda: check_r1(), KNOWN_FAILS["R1"]),
