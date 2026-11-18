@@ -1,9 +1,0 @@
-{
-  "dimension": "D2",
-  "evaluator": "E1",
-  "round": 2,
-  "run": 2,
-  "score": 5.0,
-  "observation": "docstrings present, imports clean, signature exact",
-  "remedy": ""
-}
