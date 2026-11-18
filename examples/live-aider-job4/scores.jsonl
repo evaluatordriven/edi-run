@@ -1,0 +1,4 @@
+{"id": "K-B1-E1-D1-clean", "batch": "B1", "evaluator": "E1", "expected": "conforms", "score": 5.0, "threshold": 4.0}
+{"id": "K-B1-E1-D1-planted", "batch": "B1", "evaluator": "E1", "expected": "does_not_conform", "score": 1.0, "threshold": 4.0}
+{"id": "K-B1-E1-D2-clean", "batch": "B1", "evaluator": "E1", "expected": "conforms", "score": 5.0, "threshold": 4.0}
+{"id": "K-B1-E1-D2-planted", "batch": "B1", "evaluator": "E1", "expected": "does_not_conform", "score": 1.0, "threshold": 4.0}

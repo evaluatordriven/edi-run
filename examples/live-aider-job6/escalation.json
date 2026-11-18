@@ -1,0 +1,30 @@
+{
+  "terminalState": "needs_owner",
+  "reason": "maker_failed",
+  "incumbentRound": 1,
+  "tried": [
+    {
+      "round": 1,
+      "digest": "c58d06661362cc9b47beb6fde5455e6078792cecd8b1f6bd6161c950c1a3a2d3",
+      "dimScores": {
+        "D1": 1.0,
+        "D2": 5.0
+      }
+    }
+  ],
+  "why": {
+    "reason": "maker_failed",
+    "detail": "ch file or directory: '/private/var/folders/76/h5s889993b96s5t3kb9g38g40000gp/T/edi_maker_dp0idomd/Library/Aider/venv/bin/aider' | cmd[0:4]=['sandbox-exec', '-f', '/private/var/folders/76/h5s889993b96s5t3kb9g38g40000gp/T/edi_maker_dp0idomd/agent.sb', '/Users/smoitozo/Library/Aider/venv/bin/python3']"
+  },
+  "options": [
+    {
+      "id": "fix-maker",
+      "action": "The Maker command failed; state.json maker_error has the stderr tail"
+    },
+    {
+      "id": "abandon",
+      "action": "Finalize with --disposition declined"
+    }
+  ],
+  "recommendation": "fix-maker"
+}

@@ -1,0 +1,382 @@
+{
+  "status": "frozen",
+  "pins": {
+    "bar": "4797abce441e29a0c53f3f57a896b97043a19d7883b90ffa5ca0b12e28623b6a",
+    "method": "8cf0b9e7c0362df8fb2e23be0780e32c84771d19f88e1e8d89f8fa442e589d96",
+    "rubric": "e94f8eec6227e5195a101aaa2b60ef9c7b627fb979472bdd6fe1f5ded4207f3a",
+    "runner": "97c76e8befd14cdabd8aaf49c704919c14b6b26713f7fe1b45aecc5626568a0b",
+    "job": "98985f2e1435197b61bd2d6d1199ab39295226f46e7764cd57ced7ea876e7ec7",
+    "seat_files": "49a5bcdb4431e2160542cc32a2eed6248371f66847e39d3e67591edc6cf36b72",
+    "scripts": "5f9270f22a1b915b3d9c7a8474e32efee87ae00c51ad65b6c55ea9c8aa5f0706"
+  },
+  "startedAt": "2026-11-18T18:15:42.298545Z",
+  "frozenAt": "2026-11-18T18:15:42.277856Z",
+  "demonstrations": [],
+  "incumbent_round": 2,
+  "incumbent_digest": "0fc7c63fc59449068b2bb77737c49ea912b9be0cfeff5aa86b55295dc4e53894",
+  "incumbent_scores": {
+    "D1": 5.0,
+    "D2": 5.0
+  },
+  "last_candidate_digest": "0fc7c63fc59449068b2bb77737c49ea912b9be0cfeff5aa86b55295dc4e53894",
+  "defects": [],
+  "solutions": [
+    {
+      "dimension": "D1",
+      "evaluator": "E1",
+      "score": 5.0,
+      "round": 2
+    },
+    {
+      "dimension": "D1",
+      "evaluator": "E1",
+      "score": 5.0,
+      "round": 2
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E1",
+      "score": 5.0,
+      "round": 2
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E1",
+      "score": 5.0,
+      "round": 2
+    }
+  ],
+  "rounds": {
+    "1": {
+      "producedAt": "2026-11-18T18:15:44.045301Z",
+      "digest": "c58d06661362cc9b47beb6fde5455e6078792cecd8b1f6bd6161c950c1a3a2d3",
+      "checks": [
+        {
+          "dimension": "D1",
+          "evaluator": "E1",
+          "run": 1,
+          "batch": "B1",
+          "at": "2026-11-18T18:15:44.229847Z",
+          "outcome": "does_not_conform",
+          "score": 1.0,
+          "failureCondition": "score < 4.0",
+          "evidence": {
+            "name": "reading-D1-E1-r1-run1.json",
+            "sha256": "ced9f6bf83bbfa6d58172003b5fb09d52ceb2aa481d8a7c60330edf8b46498a3"
+          },
+          "unobserved": null
+        },
+        {
+          "dimension": "D1",
+          "evaluator": "E1",
+          "run": 2,
+          "batch": "B1",
+          "at": "2026-11-18T18:15:44.266313Z",
+          "outcome": "does_not_conform",
+          "score": 1.0,
+          "failureCondition": "score < 4.0",
+          "evidence": {
+            "name": "reading-D1-E1-r1-run2.json",
+            "sha256": "1c23abaf8cef2547ae31acd14d421155122fec9dc98a44b27d122c6f7d60b01c"
+          },
+          "unobserved": null
+        },
+        {
+          "dimension": "D2",
+          "evaluator": "E1",
+          "run": 1,
+          "batch": "B1",
+          "at": "2026-11-18T18:15:44.317240Z",
+          "outcome": "conforms",
+          "score": 5.0,
+          "failureCondition": "score < 4.0",
+          "evidence": {
+            "name": "reading-D2-E1-r1-run1.json",
+            "sha256": "5e70b31b0b7c7ea6022e22c13d156c1325dd7041e96b081ace68705838f8b123"
+          },
+          "unobserved": null
+        },
+        {
+          "dimension": "D2",
+          "evaluator": "E1",
+          "run": 2,
+          "batch": "B1",
+          "at": "2026-11-18T18:15:44.353619Z",
+          "outcome": "conforms",
+          "score": 5.0,
+          "failureCondition": "score < 4.0",
+          "evidence": {
+            "name": "reading-D2-E1-r1-run2.json",
+            "sha256": "d1f7afda2f41b18aa5d5c501ee8f19123980d5c940e097486cd007c99b983c98"
+          },
+          "unobserved": null
+        }
+      ],
+      "controls": [
+        {
+          "id": "K-B1-E1-D1-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "dimension": "D1",
+          "case": {
+            "sha256": "d6ae08161d8e3dccf097bf2daed5dfcb7816da3a909367e5ccaf437203d84269"
+          },
+          "expected": "conforms",
+          "outcome": "conforms"
+        },
+        {
+          "id": "K-B1-E1-D1-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "dimension": "D1",
+          "case": {
+            "sha256": "cfd0940890225845f94de6d9148b169902d14988387078048e2b1a404c207cdf"
+          },
+          "expected": "does_not_conform",
+          "outcome": "does_not_conform"
+        },
+        {
+          "id": "K-B1-E1-D2-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "dimension": "D2",
+          "case": {
+            "sha256": "d6ae08161d8e3dccf097bf2daed5dfcb7816da3a909367e5ccaf437203d84269"
+          },
+          "expected": "conforms",
+          "outcome": "conforms"
+        },
+        {
+          "id": "K-B1-E1-D2-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "dimension": "D2",
+          "case": {
+            "sha256": "cfd0940890225845f94de6d9148b169902d14988387078048e2b1a404c207cdf"
+          },
+          "expected": "does_not_conform",
+          "outcome": "does_not_conform"
+        }
+      ],
+      "scores": [
+        {
+          "id": "K-B1-E1-D1-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "conforms",
+          "score": 5.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E1-D1-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "does_not_conform",
+          "score": 1.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E1-D2-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "conforms",
+          "score": 5.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E1-D2-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "does_not_conform",
+          "score": 1.0,
+          "threshold": 4.0
+        }
+      ],
+      "external": [],
+      "dim_scores": {
+        "D1": 1.0,
+        "D2": 5.0
+      }
+    },
+    "2": {
+      "producedAt": "2026-11-18T18:16:36.470833Z",
+      "digest": "0fc7c63fc59449068b2bb77737c49ea912b9be0cfeff5aa86b55295dc4e53894",
+      "checks": [
+        {
+          "dimension": "D1",
+          "evaluator": "E1",
+          "run": 1,
+          "batch": "B2",
+          "at": "2026-11-18T18:16:36.740592Z",
+          "outcome": "conforms",
+          "score": 5.0,
+          "failureCondition": "score < 4.0",
+          "evidence": {
+            "name": "reading-D1-E1-r2-run1.json",
+            "sha256": "157bcaae85c76674df3d94d081752d5f542677a4d5eb8ee947b7df8ea461bb82"
+          },
+          "unobserved": null
+        },
+        {
+          "dimension": "D1",
+          "evaluator": "E1",
+          "run": 2,
+          "batch": "B2",
+          "at": "2026-11-18T18:16:36.782555Z",
+          "outcome": "conforms",
+          "score": 5.0,
+          "failureCondition": "score < 4.0",
+          "evidence": {
+            "name": "reading-D1-E1-r2-run2.json",
+            "sha256": "be75dfcc06a496a5b5237cb6f1f95c9555659e8cf4f65abb1359cc6afad30b26"
+          },
+          "unobserved": null
+        },
+        {
+          "dimension": "D2",
+          "evaluator": "E1",
+          "run": 1,
+          "batch": "B2",
+          "at": "2026-11-18T18:16:36.826481Z",
+          "outcome": "conforms",
+          "score": 5.0,
+          "failureCondition": "score < 4.0",
+          "evidence": {
+            "name": "reading-D2-E1-r2-run1.json",
+            "sha256": "bffa3e0b4bdfabc6e68a53b4fe67f17e32ab26701c5fc2f8a4ae1e9d9168b956"
+          },
+          "unobserved": null
+        },
+        {
+          "dimension": "D2",
+          "evaluator": "E1",
+          "run": 2,
+          "batch": "B2",
+          "at": "2026-11-18T18:16:36.870281Z",
+          "outcome": "conforms",
+          "score": 5.0,
+          "failureCondition": "score < 4.0",
+          "evidence": {
+            "name": "reading-D2-E1-r2-run2.json",
+            "sha256": "befc4a6944c106562ce9c21668b734d4b64066967371f1751a616a05aacb9292"
+          },
+          "unobserved": null
+        }
+      ],
+      "controls": [
+        {
+          "id": "K-B2-E1-D1-clean",
+          "batch": "B2",
+          "evaluator": "E1",
+          "dimension": "D1",
+          "case": {
+            "sha256": "d6ae08161d8e3dccf097bf2daed5dfcb7816da3a909367e5ccaf437203d84269"
+          },
+          "expected": "conforms",
+          "outcome": "conforms"
+        },
+        {
+          "id": "K-B2-E1-D1-planted",
+          "batch": "B2",
+          "evaluator": "E1",
+          "dimension": "D1",
+          "case": {
+            "sha256": "cfd0940890225845f94de6d9148b169902d14988387078048e2b1a404c207cdf"
+          },
+          "expected": "does_not_conform",
+          "outcome": "does_not_conform"
+        },
+        {
+          "id": "K-B2-E1-D2-clean",
+          "batch": "B2",
+          "evaluator": "E1",
+          "dimension": "D2",
+          "case": {
+            "sha256": "d6ae08161d8e3dccf097bf2daed5dfcb7816da3a909367e5ccaf437203d84269"
+          },
+          "expected": "conforms",
+          "outcome": "conforms"
+        },
+        {
+          "id": "K-B2-E1-D2-planted",
+          "batch": "B2",
+          "evaluator": "E1",
+          "dimension": "D2",
+          "case": {
+            "sha256": "cfd0940890225845f94de6d9148b169902d14988387078048e2b1a404c207cdf"
+          },
+          "expected": "does_not_conform",
+          "outcome": "does_not_conform"
+        }
+      ],
+      "scores": [
+        {
+          "id": "K-B2-E1-D1-clean",
+          "batch": "B2",
+          "evaluator": "E1",
+          "expected": "conforms",
+          "score": 5.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B2-E1-D1-planted",
+          "batch": "B2",
+          "evaluator": "E1",
+          "expected": "does_not_conform",
+          "score": 1.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B2-E1-D2-clean",
+          "batch": "B2",
+          "evaluator": "E1",
+          "expected": "conforms",
+          "score": 5.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B2-E1-D2-planted",
+          "batch": "B2",
+          "evaluator": "E1",
+          "expected": "does_not_conform",
+          "score": 1.0,
+          "threshold": 4.0
+        }
+      ],
+      "external": [],
+      "dim_scores": {
+        "D1": 5.0,
+        "D2": 5.0
+      }
+    }
+  },
+  "terminal_state": "accepted",
+  "reason": "all_conform",
+  "cost_usd": 0.00119,
+  "seed": {
+    "dir": "seed",
+    "author": "VizH",
+    "digests": {
+      "median.py": "e3114a747c47099d8f47f0624aae7fef1199e18d17271042820468d0bfb5ba63"
+    }
+  },
+  "open_round": null,
+  "usage_anchor": [
+    1,
+    "0b6d09dd9282be5a70e6f3c3e9bf42d70f0b67c13ee5a8d7e5ab269cbd69b71d",
+    0.00119023,
+    2,
+    "bafbe9a91ec4f01571c12c91e61d69143cb0c091d36e36b4f294009d3c608008"
+  ],
+  "seed_round": 1,
+  "wall_spent_seconds": 52.82969979095459,
+  "token_usage": {
+    "qwen/qwen3-32b": {
+      "prompt_tokens": 887,
+      "completion_tokens": 1555,
+      "total_tokens": 2442,
+      "cost": 0.00075954,
+      "is_byok": 0
+    }
+  }
+}

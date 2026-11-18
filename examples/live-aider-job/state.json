@@ -1,0 +1,197 @@
+{
+  "status": "frozen",
+  "pins": {
+    "bar": "75ef841a74dd27dd6b41a045eabb43c1a7b3b4c3191af77ef0894130e30363bb",
+    "method": "8cf0b9e7c0362df8fb2e23be0780e32c84771d19f88e1e8d89f8fa442e589d96",
+    "rubric": "e94f8eec6227e5195a101aaa2b60ef9c7b627fb979472bdd6fe1f5ded4207f3a",
+    "runner": "97c76e8befd14cdabd8aaf49c704919c14b6b26713f7fe1b45aecc5626568a0b",
+    "job": "0fec83215ac02632699413451c697bdd182a7909a9148dfdd04369a88ca2e92c",
+    "seat_files": "859079a2f91fc1562a6385662fb60c060b74b62cb81827dbc14174d979bbefd2",
+    "scripts": "30fd3f214a888e0c241438d015a5343c51c0606acf9942de1024cd4be5c56ba5"
+  },
+  "startedAt": "2026-11-18T18:05:19.922047Z",
+  "frozenAt": "2026-11-18T18:05:19.902666Z",
+  "demonstrations": [],
+  "incumbent_round": 1,
+  "incumbent_digest": "c58d06661362cc9b47beb6fde5455e6078792cecd8b1f6bd6161c950c1a3a2d3",
+  "incumbent_scores": {
+    "D1": 0.0,
+    "D2": 0.0
+  },
+  "last_candidate_digest": "c58d06661362cc9b47beb6fde5455e6078792cecd8b1f6bd6161c950c1a3a2d3",
+  "defects": [],
+  "solutions": [],
+  "rounds": {
+    "1": {
+      "producedAt": "2026-11-18T18:05:21.865346Z",
+      "digest": "c58d06661362cc9b47beb6fde5455e6078792cecd8b1f6bd6161c950c1a3a2d3",
+      "checks": [
+        {
+          "dimension": "D1",
+          "evaluator": "E1",
+          "run": 1,
+          "batch": "B1",
+          "at": "2026-11-18T18:05:22.083467Z",
+          "outcome": "unobserved",
+          "score": null,
+          "failureCondition": "score < 4.0",
+          "evidence": null,
+          "unobserved": {
+            "channel": "E1",
+            "reason": "Traceback (most recent call last):\n  File \"/Users/smoitozo/Code/edi-run/examples/live-aider-job/scripts/eval_median.py\", line 67, in <module>\n    sys.exit(main())\n             ~~~~^^\n  File \"/Users/smoitozo/Code/edi-run/examples/live-aider-job/scripts/eval_median.py\", line 10, in main\n    pkt = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding=\"utf-8\"))\n                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py\", line 787, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:\n         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py\", line 771, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nIsADirectoryError: [Errno 21] Is a directory: '/var/folders/76/h5s889993b96s5t3kb9g38g40000gp/T/edi_eval_w4zsx46b/target'"
+          }
+        },
+        {
+          "dimension": "D1",
+          "evaluator": "E1",
+          "run": 2,
+          "batch": "B1",
+          "at": "2026-11-18T18:05:22.121413Z",
+          "outcome": "unobserved",
+          "score": null,
+          "failureCondition": "score < 4.0",
+          "evidence": null,
+          "unobserved": {
+            "channel": "E1",
+            "reason": "Traceback (most recent call last):\n  File \"/Users/smoitozo/Code/edi-run/examples/live-aider-job/scripts/eval_median.py\", line 67, in <module>\n    sys.exit(main())\n             ~~~~^^\n  File \"/Users/smoitozo/Code/edi-run/examples/live-aider-job/scripts/eval_median.py\", line 10, in main\n    pkt = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding=\"utf-8\"))\n                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py\", line 787, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:\n         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py\", line 771, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nIsADirectoryError: [Errno 21] Is a directory: '/var/folders/76/h5s889993b96s5t3kb9g38g40000gp/T/edi_eval_jtxeic16/target'"
+          }
+        },
+        {
+          "dimension": "D2",
+          "evaluator": "E1",
+          "run": 1,
+          "batch": "B1",
+          "at": "2026-11-18T18:05:22.160326Z",
+          "outcome": "unobserved",
+          "score": null,
+          "failureCondition": "score < 4.0",
+          "evidence": null,
+          "unobserved": {
+            "channel": "E1",
+            "reason": "Traceback (most recent call last):\n  File \"/Users/smoitozo/Code/edi-run/examples/live-aider-job/scripts/eval_median.py\", line 67, in <module>\n    sys.exit(main())\n             ~~~~^^\n  File \"/Users/smoitozo/Code/edi-run/examples/live-aider-job/scripts/eval_median.py\", line 10, in main\n    pkt = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding=\"utf-8\"))\n                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py\", line 787, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:\n         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py\", line 771, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nIsADirectoryError: [Errno 21] Is a directory: '/var/folders/76/h5s889993b96s5t3kb9g38g40000gp/T/edi_eval__2bcn5f4/target'"
+          }
+        },
+        {
+          "dimension": "D2",
+          "evaluator": "E1",
+          "run": 2,
+          "batch": "B1",
+          "at": "2026-11-18T18:05:22.199018Z",
+          "outcome": "unobserved",
+          "score": null,
+          "failureCondition": "score < 4.0",
+          "evidence": null,
+          "unobserved": {
+            "channel": "E1",
+            "reason": "Traceback (most recent call last):\n  File \"/Users/smoitozo/Code/edi-run/examples/live-aider-job/scripts/eval_median.py\", line 67, in <module>\n    sys.exit(main())\n             ~~~~^^\n  File \"/Users/smoitozo/Code/edi-run/examples/live-aider-job/scripts/eval_median.py\", line 10, in main\n    pkt = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding=\"utf-8\"))\n                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py\", line 787, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:\n         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py\", line 771, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nIsADirectoryError: [Errno 21] Is a directory: '/var/folders/76/h5s889993b96s5t3kb9g38g40000gp/T/edi_eval_ho9ltx65/target'"
+          }
+        }
+      ],
+      "controls": [
+        {
+          "id": "K-B1-E1-D1-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "dimension": "D1",
+          "case": {
+            "sha256": "62bb348d77588eeb16ad4cca269b46cf4c370a246b29981bf097988402e5e058"
+          },
+          "expected": "conforms",
+          "outcome": "does_not_conform"
+        },
+        {
+          "id": "K-B1-E1-D1-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "dimension": "D1",
+          "case": {
+            "sha256": "b6420be713faff7f82765c99a43bf840c80d1836139a792fb5c579487abec89f"
+          },
+          "expected": "does_not_conform",
+          "outcome": "conforms"
+        },
+        {
+          "id": "K-B1-E1-D2-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "dimension": "D2",
+          "case": {
+            "sha256": "62bb348d77588eeb16ad4cca269b46cf4c370a246b29981bf097988402e5e058"
+          },
+          "expected": "conforms",
+          "outcome": "does_not_conform"
+        },
+        {
+          "id": "K-B1-E1-D2-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "dimension": "D2",
+          "case": {
+            "sha256": "b6420be713faff7f82765c99a43bf840c80d1836139a792fb5c579487abec89f"
+          },
+          "expected": "does_not_conform",
+          "outcome": "conforms"
+        }
+      ],
+      "scores": [
+        {
+          "id": "K-B1-E1-D1-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "conforms",
+          "score": 3.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E1-D1-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "does_not_conform",
+          "score": 4.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E1-D2-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "conforms",
+          "score": 3.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E1-D2-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "does_not_conform",
+          "score": 4.0,
+          "threshold": 4.0
+        }
+      ],
+      "external": [],
+      "dim_scores": {
+        "D1": 0.0,
+        "D2": 0.0
+      }
+    }
+  },
+  "terminal_state": "needs_owner",
+  "reason": "no_observation",
+  "cost_usd": 0,
+  "seed": {
+    "dir": "seed",
+    "author": "VizH",
+    "digests": {
+      "median.py": "e3114a747c47099d8f47f0624aae7fef1199e18d17271042820468d0bfb5ba63"
+    }
+  },
+  "open_round": null,
+  "usage_anchor": [
+    0,
+    "",
+    0,
+    0,
+    ""
+  ],
+  "seed_round": 1,
+  "wall_spent_seconds": 0.3428187370300293
+}

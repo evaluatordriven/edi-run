@@ -1,0 +1,233 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "median.py",
+      "digest": {
+        "sha256": "c25db1c38670c4019eb1fb65d5c2c63fb28b6e9ff0186db61ebe75d319679319"
+      }
+    }
+  ],
+  "predicateType": "https://evaluatordriven.com/custody/v1",
+  "predicate": {
+    "specVersion": "0.9.8",
+    "levelClaimed": "CL1",
+    "bar": {
+      "digest": {
+        "sha256": "4797abce441e29a0c53f3f57a896b97043a19d7883b90ffa5ca0b12e28623b6a"
+      },
+      "frozenAt": "2026-11-18T18:17:22.342613Z",
+      "author": "Steve Moitozo II",
+      "dimensions": [
+        {
+          "id": "D1",
+          "criterion": "weighted_median returns the standard weighted median for all public cases and raises ValueError on empty input or mismatched lengths",
+          "scale": {
+            "anchors": {
+              "1": "wrong result, missing error, or exception on valid input",
+              "5": "all cases pass"
+            },
+            "floor": 0.0,
+            "threshold": 4.0
+          }
+        },
+        {
+          "id": "D2",
+          "criterion": "module docstring, function docstring stating the definition, no imports beyond typing, exact signature def weighted_median(values, weights)",
+          "scale": {
+            "anchors": {
+              "1": "missing required structure",
+              "5": "all elements present"
+            },
+            "floor": 0.0,
+            "threshold": 4.0
+          }
+        }
+      ],
+      "approvals": [
+        {
+          "role": "buyer",
+          "by": "Steve Moitozo II",
+          "at": "2026-11-18T18:17:22.346584Z",
+          "barDigest": {
+            "sha256": "4797abce441e29a0c53f3f57a896b97043a19d7883b90ffa5ca0b12e28623b6a"
+          },
+          "adopted": null
+        },
+        {
+          "role": "specialist",
+          "by": "Steve Moitozo II",
+          "at": "2026-11-18T18:17:22.350796Z",
+          "barDigest": {
+            "sha256": "4797abce441e29a0c53f3f57a896b97043a19d7883b90ffa5ca0b12e28623b6a"
+          },
+          "adopted": null
+        }
+      ],
+      "publishedAt": null,
+      "groundTruth": [],
+      "dissent": []
+    },
+    "maker": {
+      "name": "AiderMaker",
+      "kind": "model",
+      "version": "aider-0.9x",
+      "method": {
+        "sha256": "8cf0b9e7c0362df8fb2e23be0780e32c84771d19f88e1e8d89f8fa442e589d96"
+      },
+      "model": {
+        "family": "qwen",
+        "identifier": "qwen/qwen3-32b",
+        "endpoint": "openrouter.ai",
+        "readOnly": false
+      }
+    },
+    "startedAt": "2026-11-18T18:17:22.366094Z",
+    "producedAt": "2026-11-18T18:18:17.399610Z",
+    "instrument": {
+      "rubric": {
+        "sha256": "e94f8eec6227e5195a101aaa2b60ef9c7b627fb979472bdd6fe1f5ded4207f3a"
+      },
+      "runner": {
+        "sha256": "97c76e8befd14cdabd8aaf49c704919c14b6b26713f7fe1b45aecc5626568a0b"
+      }
+    },
+    "evaluators": [
+      {
+        "id": "E1",
+        "name": "MedianGate",
+        "kind": "script",
+        "model": null,
+        "script": {
+          "name": "eval_median.py",
+          "author": "VizH",
+          "digest": {
+            "sha256": "65268d11f3fc496e97a5d6e149965a3d6db7872adc0aa57c44679893b92ebf36"
+          }
+        }
+      }
+    ],
+    "checks": [
+      {
+        "at": "2026-11-18T18:18:17.713006Z",
+        "batch": "B2",
+        "dimension": "D1",
+        "evaluator": "E1",
+        "evidence": {
+          "name": "reading-D1-E1-r2-run1.json",
+          "sha256": "157bcaae85c76674df3d94d081752d5f542677a4d5eb8ee947b7df8ea461bb82"
+        },
+        "failureCondition": "score < 4.0",
+        "outcome": "conforms",
+        "run": 1,
+        "score": 5.0,
+        "unobserved": null
+      },
+      {
+        "at": "2026-11-18T18:18:17.756615Z",
+        "batch": "B2",
+        "dimension": "D1",
+        "evaluator": "E1",
+        "evidence": {
+          "name": "reading-D1-E1-r2-run2.json",
+          "sha256": "be75dfcc06a496a5b5237cb6f1f95c9555659e8cf4f65abb1359cc6afad30b26"
+        },
+        "failureCondition": "score < 4.0",
+        "outcome": "conforms",
+        "run": 2,
+        "score": 5.0,
+        "unobserved": null
+      },
+      {
+        "at": "2026-11-18T18:18:17.795909Z",
+        "batch": "B2",
+        "dimension": "D2",
+        "evaluator": "E1",
+        "evidence": {
+          "name": "reading-D2-E1-r2-run1.json",
+          "sha256": "bffa3e0b4bdfabc6e68a53b4fe67f17e32ab26701c5fc2f8a4ae1e9d9168b956"
+        },
+        "failureCondition": "score < 4.0",
+        "outcome": "conforms",
+        "run": 1,
+        "score": 5.0,
+        "unobserved": null
+      },
+      {
+        "at": "2026-11-18T18:18:17.835222Z",
+        "batch": "B2",
+        "dimension": "D2",
+        "evaluator": "E1",
+        "evidence": {
+          "name": "reading-D2-E1-r2-run2.json",
+          "sha256": "befc4a6944c106562ce9c21668b734d4b64066967371f1751a616a05aacb9292"
+        },
+        "failureCondition": "score < 4.0",
+        "outcome": "conforms",
+        "run": 2,
+        "score": 5.0,
+        "unobserved": null
+      }
+    ],
+    "controls": [
+      {
+        "batch": "B2",
+        "case": {
+          "sha256": "d6ae08161d8e3dccf097bf2daed5dfcb7816da3a909367e5ccaf437203d84269"
+        },
+        "dimension": "D1",
+        "evaluator": "E1",
+        "expected": "conforms",
+        "id": "K-B2-E1-D1-clean",
+        "outcome": "conforms"
+      },
+      {
+        "batch": "B2",
+        "case": {
+          "sha256": "cfd0940890225845f94de6d9148b169902d14988387078048e2b1a404c207cdf"
+        },
+        "dimension": "D1",
+        "evaluator": "E1",
+        "expected": "does_not_conform",
+        "id": "K-B2-E1-D1-planted",
+        "outcome": "does_not_conform"
+      },
+      {
+        "batch": "B2",
+        "case": {
+          "sha256": "d6ae08161d8e3dccf097bf2daed5dfcb7816da3a909367e5ccaf437203d84269"
+        },
+        "dimension": "D2",
+        "evaluator": "E1",
+        "expected": "conforms",
+        "id": "K-B2-E1-D2-clean",
+        "outcome": "conforms"
+      },
+      {
+        "batch": "B2",
+        "case": {
+          "sha256": "cfd0940890225845f94de6d9148b169902d14988387078048e2b1a404c207cdf"
+        },
+        "dimension": "D2",
+        "evaluator": "E1",
+        "expected": "does_not_conform",
+        "id": "K-B2-E1-D2-planted",
+        "outcome": "does_not_conform"
+      }
+    ],
+    "disagreements": [],
+    "violations": [],
+    "separationGaps": [],
+    "retention": {
+      "location": "examples/live-aider-job",
+      "public": false
+    },
+    "external": [],
+    "disposition": {
+      "acknowledgesUnobserved": [],
+      "state": "given",
+      "by": "Steve Moitozo II",
+      "at": "2026-11-18T18:18:36.915890Z"
+    }
+  }
+}

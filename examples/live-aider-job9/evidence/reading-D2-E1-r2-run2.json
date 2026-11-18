@@ -1,0 +1,9 @@
+{
+  "dimension": "D2",
+  "evaluator": "E1",
+  "round": 2,
+  "run": 2,
+  "score": 3.0,
+  "observation": "signature is not def weighted_median(values, weights)",
+  "remedy": "signature is not def weighted_median(values, weights)"
+}

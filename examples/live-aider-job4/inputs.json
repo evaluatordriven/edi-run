@@ -1,0 +1,224 @@
+{
+  "subject": {
+    "dir": "artifact"
+  },
+  "specVersion": "0.9.8",
+  "levelClaimed": "CL1",
+  "bar": {
+    "digest": {
+      "sha256": null
+    },
+    "frozenAt": "2026-11-18T18:11:04.703209Z",
+    "author": "Steve Moitozo II",
+    "dimensions": [
+      {
+        "id": "D1",
+        "criterion": "weighted_median returns the standard weighted median for all public cases and raises ValueError on empty input or mismatched lengths",
+        "scale": {
+          "anchors": {
+            "1": "wrong result, missing error, or exception on valid input",
+            "5": "all cases pass"
+          },
+          "floor": 0.0,
+          "threshold": 4.0
+        }
+      },
+      {
+        "id": "D2",
+        "criterion": "module docstring, function docstring stating the definition, no imports beyond typing, exact signature def weighted_median(values, weights)",
+        "scale": {
+          "anchors": {
+            "1": "missing required structure",
+            "5": "all elements present"
+          },
+          "floor": 0.0,
+          "threshold": 4.0
+        }
+      }
+    ],
+    "approvals": [
+      {
+        "role": "buyer",
+        "by": "Steve Moitozo II",
+        "barDigest": {
+          "sha256": "75ef841a74dd27dd6b41a045eabb43c1a7b3b4c3191af77ef0894130e30363bb"
+        },
+        "at": "2026-11-18T13:05:00Z",
+        "adopted": null
+      },
+      {
+        "role": "specialist",
+        "by": "Steve Moitozo II",
+        "barDigest": {
+          "sha256": "75ef841a74dd27dd6b41a045eabb43c1a7b3b4c3191af77ef0894130e30363bb"
+        },
+        "at": "2026-11-18T13:05:00Z",
+        "adopted": null
+      }
+    ],
+    "publishedAt": null,
+    "groundTruth": [],
+    "dissent": []
+  },
+  "maker": {
+    "name": "VizH",
+    "kind": "person",
+    "version": "operator draft for the Maker to repair",
+    "method": {
+      "file": "method.md"
+    },
+    "model": null
+  },
+  "startedAt": "2026-11-18T18:11:04.729707Z",
+  "producedAt": "2026-11-18T18:11:06.191357Z",
+  "instrument": {
+    "rubric": {
+      "file": "rubric.md"
+    },
+    "runner": {
+      "file": "runner.md"
+    }
+  },
+  "evaluators": [
+    {
+      "id": "E1",
+      "name": "MedianGate",
+      "kind": "script",
+      "model": null,
+      "script": {
+        "name": "eval_median.py",
+        "author": "VizH",
+        "digest": {
+          "sha256": "69db352e3dd0424fab569642743c678a4f2c3e839bc3c7cd9017f035ed377b3a"
+        }
+      }
+    }
+  ],
+  "checks": [
+    {
+      "dimension": "D1",
+      "evaluator": "E1",
+      "run": 1,
+      "batch": "B1",
+      "at": "2026-11-18T18:11:06.374954Z",
+      "outcome": "does_not_conform",
+      "score": 1.0,
+      "failureCondition": "score < 4.0",
+      "evidence": {
+        "name": "reading-D1-E1-r1-run1.json",
+        "sha256": "ced9f6bf83bbfa6d58172003b5fb09d52ceb2aa481d8a7c60330edf8b46498a3"
+      },
+      "unobserved": null
+    },
+    {
+      "dimension": "D1",
+      "evaluator": "E1",
+      "run": 2,
+      "batch": "B1",
+      "at": "2026-11-18T18:11:06.418348Z",
+      "outcome": "does_not_conform",
+      "score": 1.0,
+      "failureCondition": "score < 4.0",
+      "evidence": {
+        "name": "reading-D1-E1-r1-run2.json",
+        "sha256": "1c23abaf8cef2547ae31acd14d421155122fec9dc98a44b27d122c6f7d60b01c"
+      },
+      "unobserved": null
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E1",
+      "run": 1,
+      "batch": "B1",
+      "at": "2026-11-18T18:11:06.458816Z",
+      "outcome": "conforms",
+      "score": 5.0,
+      "failureCondition": "score < 4.0",
+      "evidence": {
+        "name": "reading-D2-E1-r1-run1.json",
+        "sha256": "5e70b31b0b7c7ea6022e22c13d156c1325dd7041e96b081ace68705838f8b123"
+      },
+      "unobserved": null
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E1",
+      "run": 2,
+      "batch": "B1",
+      "at": "2026-11-18T18:11:06.498186Z",
+      "outcome": "conforms",
+      "score": 5.0,
+      "failureCondition": "score < 4.0",
+      "evidence": {
+        "name": "reading-D2-E1-r1-run2.json",
+        "sha256": "d1f7afda2f41b18aa5d5c501ee8f19123980d5c940e097486cd007c99b983c98"
+      },
+      "unobserved": null
+    }
+  ],
+  "controls": [
+    {
+      "id": "K-B1-E1-D1-clean",
+      "batch": "B1",
+      "evaluator": "E1",
+      "dimension": "D1",
+      "case": {
+        "sha256": "d6ae08161d8e3dccf097bf2daed5dfcb7816da3a909367e5ccaf437203d84269"
+      },
+      "expected": "conforms",
+      "outcome": "conforms"
+    },
+    {
+      "id": "K-B1-E1-D1-planted",
+      "batch": "B1",
+      "evaluator": "E1",
+      "dimension": "D1",
+      "case": {
+        "sha256": "cfd0940890225845f94de6d9148b169902d14988387078048e2b1a404c207cdf"
+      },
+      "expected": "does_not_conform",
+      "outcome": "does_not_conform"
+    },
+    {
+      "id": "K-B1-E1-D2-clean",
+      "batch": "B1",
+      "evaluator": "E1",
+      "dimension": "D2",
+      "case": {
+        "sha256": "d6ae08161d8e3dccf097bf2daed5dfcb7816da3a909367e5ccaf437203d84269"
+      },
+      "expected": "conforms",
+      "outcome": "conforms"
+    },
+    {
+      "id": "K-B1-E1-D2-planted",
+      "batch": "B1",
+      "evaluator": "E1",
+      "dimension": "D2",
+      "case": {
+        "sha256": "cfd0940890225845f94de6d9148b169902d14988387078048e2b1a404c207cdf"
+      },
+      "expected": "does_not_conform",
+      "outcome": "does_not_conform"
+    }
+  ],
+  "disagreements": [],
+  "violations": [
+    {
+      "dimension": "D1",
+      "description": "D1 failed conform threshold"
+    }
+  ],
+  "separationGaps": [],
+  "retention": {
+    "location": "examples/live-aider-job",
+    "public": false
+  },
+  "external": [],
+  "disposition": {
+    "state": "declined",
+    "by": "Steve Moitozo II",
+    "at": "2026-11-18T18:11:31.479108Z",
+    "acknowledgesUnobserved": []
+  }
+}

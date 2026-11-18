@@ -1,0 +1,38 @@
+{
+  "round": 2,
+  "mode": "pass_r2",
+  "best_artifact_digest": "c58d06661362cc9b47beb6fde5455e6078792cecd8b1f6bd6161c950c1a3a2d3",
+  "defects": [
+    {
+      "round": 1,
+      "dimension": "D1",
+      "evaluator": "E1",
+      "score": 1.0,
+      "observation": "a public case or error contract failed",
+      "remedy": "implement the standard weighted median; raise ValueError on empty or mismatched input"
+    },
+    {
+      "round": 1,
+      "dimension": "D1",
+      "evaluator": "E1",
+      "score": 1.0,
+      "observation": "a public case or error contract failed",
+      "remedy": "implement the standard weighted median; raise ValueError on empty or mismatched input"
+    }
+  ],
+  "workable_solutions": [
+    {
+      "dimension": "D2",
+      "evaluator": "E1",
+      "score": 5.0,
+      "round": 1
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E1",
+      "score": 5.0,
+      "round": 1
+    }
+  ],
+  "withheld": 0
+}

@@ -1,0 +1,9 @@
+{
+  "dimension": "D1",
+  "evaluator": "E1",
+  "round": 1,
+  "run": 1,
+  "score": 1.0,
+  "observation": "a public case or error contract failed",
+  "remedy": "implement the standard weighted median; raise ValueError on empty or mismatched input"
+}

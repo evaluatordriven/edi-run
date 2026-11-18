@@ -1,0 +1,44 @@
+{
+  "terminalState": "needs_owner",
+  "reason": "dimension_tradeoff",
+  "incumbentRound": 1,
+  "tried": [
+    {
+      "round": 1,
+      "digest": "c58d06661362cc9b47beb6fde5455e6078792cecd8b1f6bd6161c950c1a3a2d3",
+      "dimScores": {
+        "D1": 1.0,
+        "D2": 5.0
+      }
+    },
+    {
+      "round": 2,
+      "digest": "5359c487262cbb4e3a6fc941aa25870b02261ca19ed55ba40bda092d2aa70c57",
+      "dimScores": {
+        "D1": 5.0,
+        "D2": 3.0
+      }
+    }
+  ],
+  "why": {
+    "reason": "dimension_tradeoff",
+    "detail": null,
+    "improved": [
+      "D1"
+    ],
+    "regressed": [
+      "D2"
+    ]
+  },
+  "options": [
+    {
+      "id": "owner-ruling",
+      "action": "The revision is better on one dimension and worse on another; pick which artifact ships and finalize accordingly"
+    },
+    {
+      "id": "abandon",
+      "action": "Finalize with --disposition declined"
+    }
+  ],
+  "recommendation": "owner-ruling"
+}

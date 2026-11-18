@@ -1,0 +1,40 @@
+{
+  "terminalState": "needs_owner",
+  "reason": "no_observation",
+  "incumbentRound": 1,
+  "tried": [
+    {
+      "round": 1,
+      "digest": "c58d06661362cc9b47beb6fde5455e6078792cecd8b1f6bd6161c950c1a3a2d3",
+      "dimScores": {
+        "D1": 0.0,
+        "D2": 5.0
+      }
+    }
+  ],
+  "why": {
+    "reason": "no_observation",
+    "detail": null,
+    "unobserved": [
+      [
+        "E1",
+        "D1"
+      ]
+    ]
+  },
+  "options": [
+    {
+      "id": "inspect-evidence",
+      "action": "Read evidence/ and scores.jsonl; the evaluator channel failed its controls or errored"
+    },
+    {
+      "id": "accept-incumbent",
+      "action": "Finalize with --disposition given --ack-unobserved <DIMS> to accept with acknowledged gaps"
+    },
+    {
+      "id": "abandon",
+      "action": "Finalize with --disposition declined"
+    }
+  ],
+  "recommendation": "inspect-evidence first; accept-incumbent only with explicit --ack-unobserved"
+}
