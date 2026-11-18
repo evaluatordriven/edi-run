@@ -244,6 +244,13 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 def log_message(self, format, *args):  # noqa: A002 -- stdlib signature
                     return
 
+                def _reply(self, status, out):
+                    self.send_response(status)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(out)))
+                    self.end_headers()
+                    self.wfile.write(out)
+
                 def do_POST(self):
                     body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
                     try:
@@ -254,21 +261,11 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         req = gates.strict_json_loads(body.decode("utf-8")) if body else {}
                     except ValueError as parse_err:
                         calls.append({"host": None, "model": None, "usage": None, "refused": f"unparseable request body: {parse_err}"})
-                        out = json.dumps({"error": {"code": 400, "message": f"request body refused at the parse boundary: {parse_err}"}}).encode("utf-8")
-                        self.send_response(400)
-                        self.send_header("Content-Type", "application/json")
-                        self.send_header("Content-Length", str(len(out)))
-                        self.end_headers()
-                        self.wfile.write(out)
+                        self._reply(400, json.dumps({"error": {"code": 400, "message": f"request body refused at the parse boundary: {parse_err}"}}).encode("utf-8"))
                         return
                     if not isinstance(req, dict):
                         calls.append({"host": None, "model": None, "usage": None, "refused": "request body is not a JSON object"})
-                        out = json.dumps({"error": {"code": 400, "message": "request body must be a JSON object"}}).encode("utf-8")
-                        self.send_response(400)
-                        self.send_header("Content-Type", "application/json")
-                        self.send_header("Content-Length", str(len(out)))
-                        self.end_headers()
-                        self.wfile.write(out)
+                        self._reply(400, json.dumps({"error": {"code": 400, "message": "request body must be a JSON object"}}).encode("utf-8"))
                         return
                     declared = (maker_cfg.get("model") or {}).get("identifier")
                     if req.get("model") != declared:
@@ -280,12 +277,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                     # streamed call would be recorded as free. Refuse it loudly.
                     if req.get("stream"):
                         calls.append({"host": None, "model": req.get("model"), "usage": None, "refused": "stream:true refused (metering streams is out of scope)"})
-                        out = json.dumps({"error": {"code": 400, "message": "stream:true is refused by the metering proxy: streamed responses cannot be metered; omit stream or set it false"}}).encode("utf-8")
-                        self.send_response(400)
-                        self.send_header("Content-Type", "application/json")
-                        self.send_header("Content-Length", str(len(out)))
-                        self.end_headers()
-                        self.wfile.write(out)
+                        self._reply(400, json.dumps({"error": {"code": 400, "message": "stream:true is refused by the metering proxy: streamed responses cannot be metered; omit stream or set it false"}}).encode("utf-8"))
                         return
                     # C4: the cap fires BEFORE each paid call — a trip mid-round
                     # halts with no unbillable spend. Round-3 external review #1:
@@ -301,13 +293,8 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                     if cap_flag and cap_flag[0] is not None:
                         # review #3: once accounting has latched a failure, the
                         # budget stays CLOSED — no further call is forwarded
-                        out = json.dumps({"error": {"code": 503, "message": "meter unavailable (latched); the budget is closed"}}).encode("utf-8")
-                        self.send_response(503)
-                        self.send_header("Content-Type", "application/json")
-                        self.send_header("Content-Length", str(len(out)))
-                        self.end_headers()
                         calls.append({"host": None, "model": req.get("model"), "usage": None, "refused": "meter accounting latched"})
-                        self.wfile.write(out)
+                        self._reply(503, json.dumps({"error": {"code": 503, "message": "meter unavailable (latched); the budget is closed"}}).encode("utf-8"))
                         return
                     # Verification re-review blockers 3+4 (final round): the priced
                     # output bound is ENFORCED provider-side, the limit is PORTABLE
@@ -329,13 +316,8 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                     # reservation cannot bound n>1 completions
                     if req.get("n") not in (None, 1):
                         calls.append({"host": None, "model": req.get("model"), "usage": None, "refused": f"n={req.get('n')} multi-completion refused"})
-                        out = json.dumps({"error": {"code": 400, "message": f"n={req.get('n')} is refused by the metering proxy: a multi-completion request "
-                                                                    "cannot be bounded by a single-output reservation; omit n or set n=1"}}).encode("utf-8")
-                        self.send_response(400)
-                        self.send_header("Content-Type", "application/json")
-                        self.send_header("Content-Length", str(len(out)))
-                        self.end_headers()
-                        self.wfile.write(out)
+                        self._reply(400, json.dumps({"error": {"code": 400, "message": f"n={req.get('n')} is refused by the metering proxy: a multi-completion request "
+                                                                    "cannot be bounded by a single-output reservation; omit n or set n=1"}}).encode("utf-8"))
                         return
                     # BOTH families are ACCEPTED as input; the limit must be a
                     # positive finite integer (NaN, negatives, fractions,
@@ -346,26 +328,16 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                                            or not math.isfinite(float(mt)) or float(mt) != int(float(mt))
                                            or float(mt) <= 0 or float(mt) > 1e9):
                         calls.append({"host": None, "model": req.get("model"), "usage": None, "refused": f"invalid output token limit {mt!r}"})
-                        out = json.dumps({"error": {"code": 400, "message": f"the output token limit {mt!r} is refused by the metering proxy: it must be "
-                                                                     "a positive finite integer no greater than 10^9 (a fraction, negative, NaN, "
-                                                                     "non-numeric or oversized limit cannot bound the billed output)"}}).encode("utf-8")
-                        self.send_response(400)
-                        self.send_header("Content-Type", "application/json")
-                        self.send_header("Content-Length", str(len(out)))
-                        self.end_headers()
-                        self.wfile.write(out)
+                        self._reply(400, json.dumps({"error": {"code": 400, "message": f"the output token limit {mt!r} is refused by the metering proxy: it must be "
+                                                                      "a positive finite integer no greater than 10^9 (a fraction, negative, NaN, "
+                                                                     "non-numeric or oversized limit cannot bound the billed output)"}}).encode("utf-8"))
                         return
                     bound = meter.output_bound(model_id) if meter is not None else None
                     if bound is not None:
                         if mt is not None and float(mt) > bound:
                             calls.append({"host": None, "model": req.get("model"), "usage": None, "refused": f"requested {emit_key} {mt} exceeds the priced allowance {int(bound)}"})
-                            out = json.dumps({"error": {"code": 400, "message": f"requested {emit_key} {mt} exceeds the priced allowance of {int(bound)} output tokens for model {model_id}: "
-                                                                     "the metering proxy reserves and prices that allowance, so a larger output limit is refused (spend integrity)"}}).encode("utf-8")
-                            self.send_response(400)
-                            self.send_header("Content-Type", "application/json")
-                            self.send_header("Content-Length", str(len(out)))
-                            self.end_headers()
-                            self.wfile.write(out)
+                            self._reply(400, json.dumps({"error": {"code": 400, "message": f"requested {emit_key} {mt} exceeds the priced allowance of {int(bound)} output tokens for model {model_id}: "
+                                                                     "the metering proxy reserves and prices that allowance, so a larger output limit is refused (spend integrity)"}}).encode("utf-8"))
                             return
                         # emit EXACTLY the configured family: set/override the
                         # priced allowance on the emit key and STRIP the other
@@ -380,24 +352,14 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         closed = _admission_closed(pathlib.Path(job_dir).resolve() if job_dir else None)
                         if closed:
                             calls.append({"host": None, "model": req.get("model"), "usage": None, "refused": closed})
-                            out = json.dumps({"error": {"code": 409, "message": closed}}).encode("utf-8")
-                            self.send_response(409)
-                            self.send_header("Content-Type", "application/json")
-                            self.send_header("Content-Length", str(len(out)))
-                            self.end_headers()
-                            self.wfile.write(out)
+                            self._reply(409, json.dumps({"error": {"code": 409, "message": closed}}).encode("utf-8"))
                             return
                         try:
                             reservation = meter.reserve(body, model=model_id)
                         except Exception as cap_err:
                             cap_flag[0] = cap_err
                             calls.append({"host": None, "model": req.get("model"), "usage": None, "refused": "cost cap"})
-                            out = json.dumps({"error": {"code": 402, "message": "cost cap reached"}}).encode("utf-8")
-                            self.send_response(402)
-                            self.send_header("Content-Type", "application/json")
-                            self.send_header("Content-Length", str(len(out)))
-                            self.end_headers()
-                            self.wfile.write(out)
+                            self._reply(402, json.dumps({"error": {"code": 402, "message": "cost cap reached"}}).encode("utf-8"))
                             return
                     headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})}
                     host, status, err = urllib.parse.urlparse(upstream).hostname or "", 200, None
@@ -440,12 +402,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                             cap_flag[0] = meter_err
                             calls.append({"host": host, "model": req.get("model"), "usage": None,
                                           "billed_unmetered": True, "meter_error": str(meter_err)[-200:]})
-                            out = json.dumps({"error": {"code": 503, "message": "meter unavailable; the billed call could not be recorded"}}).encode("utf-8")
-                            self.send_response(503)
-                            self.send_header("Content-Type", "application/json")
-                            self.send_header("Content-Length", str(len(out)))
-                            self.end_headers()
-                            self.wfile.write(out)
+                            self._reply(503, json.dumps({"error": {"code": 503, "message": "meter unavailable; the billed call could not be recorded"}}).encode("utf-8"))
                             return
                     if reservation is not None and meter is not None and not settled:
                         # the upstream call was NOT billed (error/refusal): release
@@ -454,11 +411,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         # 200 path settled above, so this is the only release)
                         meter.release(reservation)
                     calls.append({"host": host, "model": req.get("model"), "usage": usage, **({"upstream_error": err} if err else {})})
-                    self.send_response(status)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("Content-Length", str(len(out)))
-                    self.end_headers()
-                    self.wfile.write(out)
+                    self._reply(status, out)
 
             inner_port = _INNER_PROXY_PORT_BASE + (os.getpid() % 2000)  # per-launch offset; concurrent jobs must not collide
             if (maker_cfg.get("sandbox") or {}).get("type") == "bwrap":
