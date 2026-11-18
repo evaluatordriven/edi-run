@@ -189,17 +189,25 @@ def _canon_map(s):
     return "".join(out), idx
 
 
+def _line_bounded(c, at, ln):
+    """True when the needle occurrence at `at` is delimited by word boundaries:
+    start/end of the canonical text or a non-alphanumeric character on each side
+    (spaces AND punctuation/JSON quotes -- a bare JSON value or a quoted echo is
+    as much a leak as a prose echo).""" 
+    end = at + len(ln)
+    before_ok = at == 0 or not c[at - 1].isalnum()
+    after_ok = end == len(c) or not c[end].isalnum()
+    return before_ok and after_ok
+
+
 def _line_cover(c, lines, cover):
     """Mark whole-line needle spans: a line needle matches only when delimited by
-    word boundaries (start/end or a space on each side) in the canonical text."""
+    word boundaries in the canonical text."""
     for ln in lines:
         at = c.find(ln)
         while at != -1:
-            before_ok = at == 0 or c[at - 1] == " "
-            after = at + len(ln)
-            after_ok = after == len(c) or c[after] == " "
-            if before_ok and after_ok:
-                cover[at:after] = [True] * len(ln)
+            if _line_bounded(c, at, ln):
+                cover[at:at + len(ln)] = [True] * len(ln)
             at = c.find(ln, at + 1)
 
 
@@ -280,6 +288,6 @@ def gate_packet(packet, job_dir, expected_incumbent_digest):
     for ln in lines:  # whole-line needles: word-bounded, so common short words do not fire
         at = low.find(ln)
         while at != -1:
-            if (at == 0 or low[at - 1] == " ") and (at + len(ln) == len(low) or low[at + len(ln)] == " "):
+            if _line_bounded(low, at, ln):
                 raise GateError("held-out content or digest leaked into Maker packet (I-04)")
             at = low.find(ln, at + 1)

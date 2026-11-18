@@ -143,6 +143,15 @@ class FindingI_ShortLineNeedle(_R2Base):
             [{"a": "the no-header and no-figure here-abouts clause"}],
             gates.held_out_needles(job))
         self.assertEqual(w3, 0)  # word-boundary respected: mid-word echo survives
+        # verification follow-ups: punctuation- and quote-delimited echoes are leaks too
+        out4, w4 = gates.scrub_held_out(
+            [{"a": "the verdict was '" + short_line + "', so revise."}],
+            gates.held_out_needles(job))
+        self.assertEqual(w4, 1)
+        out5, w5 = gates.scrub_held_out(
+            [{"a": "Summary: " + short_line + "."}],
+            gates.held_out_needles(job))
+        self.assertEqual(w5, 1)
 
 
 class FindingJ_HttpUpstream(_R2Base):
