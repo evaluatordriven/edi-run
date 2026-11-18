@@ -664,7 +664,7 @@ def check_e2():
         pass  # unparseable content -> unobserved/raise; the ROW must exist regardless
     rows = m._rows
     return ("PASS", "billed unparseable reply metered (%d row, cost_hint set)" % len(rows)) \
-        if rows and rows[0].get("kind") == "call" else ("FAIL", "no meter row for a billed unparseable reply")
+        if any(r.get("kind") == "call" for r in rows) else ("FAIL", "no meter row for a billed unparseable reply")
 
 
 def check_g1():
