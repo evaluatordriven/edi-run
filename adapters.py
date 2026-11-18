@@ -50,7 +50,7 @@ _HOME_DOTFILE_FILES = ("netrc", "git-credentials", "zsh_history", "bash_history"
                        "gitcookies", "dockercfg", "yarnrc.yml", "pgpass", "my.cnf", "vault-token", "s3cfg", "boto", "hgrc")
 
 
-def sandbox_prefix(stype, jd, sb_p, reads="denylist"):
+def sandbox_prefix(stype, jd, sb_p, reads="allowlist"):
     """The sandbox argv prefix for one launch, shared by the launcher and the
     capability probe so the probe exercises the exact flag shape used at runtime.
     Masks are applied ONLY to paths that already exist: bwrap creates missing mount
@@ -60,8 +60,9 @@ def sandbox_prefix(stype, jd, sb_p, reads="denylist"):
     /lib64 /etc /opt /var/lib are also bound read-only (runner tool caches,
     resolver and TLS material live there; file permissions protect root-owned
     secrets, and the agent is non-root) — every other host path simply does not
-    exist inside the namespace. Default remains the deny-list profile until the
-    S7-S9 probes prove the allowlist on every CI leg."""
+    exist inside the namespace. OWNER RULING 2026-11-18 (decision A): allowlist is
+    the default for bwrap; denylist remains by explicit sandbox.reads config or
+    for the seatbelt, whose allowlist mode is not shippable on this OS build."""
     allowlist = reads == "allowlist"
     if stype == "sandbox-exec":
         profile = sb_p / "agent.sb"
@@ -301,7 +302,9 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                        "AGENT_PROXY_URL": proxy_url, "AGENT_MODEL": maker_cfg.get("model", {}).get("identifier", "")}
                 cmd = _resolve_cmd(list(maker_cfg["command"]), job_dir)
                 stype = (maker_cfg.get("sandbox") or {}).get("type")
-                reads = (maker_cfg.get("sandbox") or {}).get("reads") or "denylist"
+                # Owner ruling 2026-11-18: bwrap defaults to allowlist. The seatbelt
+                # branch below checks its own reads config — macOS stays denylist.
+                reads = (maker_cfg.get("sandbox") or {}).get("reads") or "allowlist"
                 jd = pathlib.Path(job_dir).resolve()  # seatbelt matches canonical paths only
                 home = pathlib.Path.home().resolve()  # seatbelt matches canonical paths only
                 if stype not in ("sandbox-exec", "bwrap"):
