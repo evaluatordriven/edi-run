@@ -520,9 +520,9 @@ class TestEDIRuntime(unittest.TestCase):
         self.assertIn("recommendation", esc)
         # a Maker crash halts as needs_owner/maker_failed, never a traceback
         job3 = self._make_base_job(subdir="job_makerfail")
-        loop.freeze_job(job3)
         maker = job3 / "scripts" / "maker.py"
-        maker.write_text("import sys\nsys.stderr.write('boom')\nsys.exit(3)\n", encoding="utf-8")
+        maker.write_text("import sys\nsys.stderr.write('boom')\nsys.exit(3)\n", encoding="utf-8")  # before freeze: scripts are pinned at freeze (G1)
+        loop.freeze_job(job3)
         self.assertEqual(loop.run_job(job3), 2)
         st3 = json.loads((job3 / "state.json").read_text())
         self.assertEqual((st3["terminal_state"], st3["reason"]), ("needs_owner", "maker_failed"))
@@ -556,12 +556,75 @@ class TestEDIRuntime(unittest.TestCase):
         self.assertEqual(oct(ho.stat().st_mode & 0o777), "0o700")
         self.assertEqual(oct((ho / "controls" / "clean.md").stat().st_mode & 0o777), "0o600")
 
+    def test_scripts_pinned_at_freeze_and_zero_pricing_refused(self):
+        # G1: a seat script edited after freeze is refused at run start, like an edited seed
+        job = self._make_base_job(subdir="job_g1")
+        loop.freeze_job(job)
+        (job / "scripts" / "maker.py").write_text("# tampered after freeze\n", encoding="utf-8")
+        with self.assertRaises(gates.GateError) as cm:
+            loop.run_job(job)
+        self.assertIn("frozen instruments", str(cm.exception))
+        # G2: a $0 pricing entry is refused at freeze
+        job2 = self._make_base_job(subdir="job_g2")
+        cfg = json.loads((job2 / "job.json").read_text())
+        cfg["pricing"] = {"default": {"input_usd_per_mtok": 0, "output_usd_per_mtok": 1.0}}
+        (job2 / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        with self.assertRaises(gates.GateError) as cm2:
+            loop.freeze_job(job2)
+        self.assertIn("zero", str(cm2.exception))
+
+    def test_g1_bypasses_closed(self):
+        # (1) NaN pricing must be refused: float('nan') <= 0 is False, and the cap
+        # check is False for NaN -- unbounded unpriced spend
+        job = self._make_base_job(subdir="job_g2nan")
+        cfg = json.loads((job / "job.json").read_text())
+        cfg["pricing"] = {"default": {"input_usd_per_mtok": float("nan"), "output_usd_per_mtok": 1.0}}
+        (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        with self.assertRaises(gates.GateError):
+            loop.freeze_job(job)
+        # (2) an empty model identifier skips pricing entirely -- refused
+        job2 = self._make_base_job(subdir="job_g2empty")
+        cfg2 = json.loads((job2 / "job.json").read_text())
+        cfg2["maker"]["kind"] = "model"
+        cfg2["maker"]["url"] = "https://example.invalid/v1"
+        cfg2["maker"]["model"] = {"family": "m", "identifier": "", "endpoint": "example.invalid", "readOnly": True}
+        (job2 / "job.json").write_text(json.dumps(cfg2, indent=2), encoding="utf-8")
+        with self.assertRaises(gates.GateError):
+            loop.freeze_job(job2)
+        # (3) a command argument pointing outside the job dir is refused at freeze
+        job3 = self._make_base_job(subdir="job_g1cmd")
+        cfg3 = json.loads((job3 / "job.json").read_text())
+        outside = self.tmp / "outside_helper.py"
+        outside.write_text("# helper\n", encoding="utf-8")
+        cfg3["maker"]["command"] = [sys.executable, str(outside)]
+        (job3 / "job.json").write_text(json.dumps(cfg3, indent=2), encoding="utf-8")
+        with self.assertRaises(gates.GateError) as cm3:
+            loop.freeze_job(job3)
+        self.assertIn("outside the job dir", str(cm3.exception))
+        # (4) a symlinked DIRECTORY under scripts/ is refused at freeze (fail-closed)
+        job4 = self._make_base_job(subdir="job_g1sym")
+        outside_dir = self.tmp / "outside_dir"
+        outside_dir.mkdir(exist_ok=True)
+        (outside_dir / "helper.py").write_text("# helper\n", encoding="utf-8")
+        (job4 / "scripts" / "vend").symlink_to(outside_dir)
+        with self.assertRaises(gates.GateError) as cm4:
+            loop.freeze_job(job4)
+        self.assertIn("symlinked directory", str(cm4.exception))
+        # (5) a python helper at the JOB ROOT is pinned: editing it after freeze is refused
+        job5 = self._make_base_job(subdir="job_g1helper")
+        (job5 / "helper_mod.py").write_text("X = 1\n", encoding="utf-8")
+        loop.freeze_job(job5)
+        (job5 / "helper_mod.py").write_text("X = 2\n", encoding="utf-8")
+        with self.assertRaises(gates.GateError) as cm5:
+            loop.run_job(job5)
+        self.assertIn("frozen instruments", str(cm5.exception))
+
     def test_evaluator_crash_halts_cleanly_and_run_once(self):
         # an evaluator that prints non-JSON must not traceback the run
         job = self._make_base_job(subdir="job_evalcrash")
-        loop.freeze_job(job)
         ev = job / "scripts" / "eval_e1.py"
-        ev.write_text("import sys\nsys.stdout.write('I am not json')\n", encoding="utf-8")
+        ev.write_text("import sys\nsys.stdout.write('I am not json')\n", encoding="utf-8")  # before freeze: scripts are pinned at freeze (G1)
+        loop.freeze_job(job)
         self.assertEqual(loop.run_job(job), 2)
         st = json.loads((job / "state.json").read_text())
         self.assertEqual((st["terminal_state"], st["reason"]), ("needs_owner", "no_observation"))
@@ -791,7 +854,7 @@ class TestEDIRuntime(unittest.TestCase):
                         "url": "https://example.invalid/v1", "model": {"family": "m", "identifier": "m1", "endpoint": "example.invalid", "readOnly": False},
                         "sandbox": {"type": _SANDBOX_TYPE},
                         "command": [sys.executable, str(agent)]}
-        cfg["pricing"] = {"default": {"input_usd_per_mtok": 0, "output_usd_per_mtok": 0}}
+        cfg["pricing"] = {"default": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}}
         (job / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         loop.freeze_job(job)
         self.assertEqual(loop.run_job(job), 2)

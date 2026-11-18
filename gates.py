@@ -1,7 +1,7 @@
 """Deterministic invariant gates (I-01 through I-04) for edi-run. Standard library only."""
 from collections import Counter
 from datetime import datetime
-import hashlib, json, math, os
+import hashlib, json, math, os, pathlib
 
 UNDISCLOSED = "undisclosed"
 
@@ -68,7 +68,63 @@ def gate_instruments(cfg, job_dir):
         if not f:
             raise GateError(f"instrument.{k} file missing (CL1-5)")
         pins[k] = sha256_file(safe_rel(f, job_dir))
+    # the code the seats execute is an instrument too: pin the scripts tree at freeze
+    # so an edit after freeze is refused at run start, like an edited seed (recheck G1)
+    sdir = job_dir / "scripts"
+    if sdir.is_dir():
+        h = hashlib.sha256()
+        import os as _os
+        for root, dirs, files in _os.walk(sdir, followlinks=False):
+            for d in dirs:
+                if (pathlib.Path(root) / d).is_symlink():
+                    raise GateError(f"symlinked directory {pathlib.Path(root, d).relative_to(job_dir)} under scripts/; pinned seat code must be plain files (G1)")
+            for fn in files:
+                f = pathlib.Path(root) / fn
+                if f.is_symlink():
+                    raise GateError(f"symlinked file {f.relative_to(job_dir)} under scripts/ (G1)")
+                h.update(str(f.relative_to(job_dir)).encode())
+                h.update(sha256_file(f).encode())
+        # a seat script can import a helper from anywhere under the job dir, not
+        # just scripts/ -- pin every python file in the job so the import graph
+        # cannot escape the pin (frontier finding: job-root helper edited after
+        # freeze landed tampered output with the scripts pin untouched)
+        for f in sorted(job_dir.rglob("*.py")):
+            if f.is_symlink():
+                raise GateError(f"symlinked python file {f.relative_to(job_dir)} (G1)")
+            if sdir in f.parents:
+                continue
+            h.update(str(f.relative_to(job_dir)).encode())
+            h.update(sha256_file(f).encode())
+        pins["scripts"] = h.hexdigest()
     return pins
+
+
+def gate_commands(cfg, job_dir):
+    """Seat commands must not point outside the job dir: pinned seat code lives
+    in the job (frontier finding: an absolute command path executed a file
+    tampered after freeze while the scripts pin stayed clean)."""
+    cmds = []
+    m = cfg.get("maker") or {}
+    if m.get("command"):
+        cmds.append(("maker", m["command"]))
+    for e in cfg.get("evaluators") or []:
+        if e.get("command"):
+            cmds.append((e.get("id", "evaluator"), e["command"]))
+    for who, cmd in cmds:
+        if not isinstance(cmd, list):
+            raise GateError(f"{who} command must be a list of argv tokens")
+        # argv[0] is the interpreter, resolved from the host PATH at run time -- it is
+        # environment, not seat code. Only the arguments must live in the job.
+        for tok in cmd[1:]:
+            if not isinstance(tok, str):
+                raise GateError(f"{who} command tokens must be strings")
+            cand = pathlib.Path(tok)
+            if not cand.is_absolute():
+                cand = job_dir / tok
+            if cand.exists():
+                rp = cand.resolve()
+                if not rp.is_relative_to(job_dir.resolve()):
+                    raise GateError(f"{who} command references {tok} outside the job dir; seat code must live in the job (G1)")
 
 
 def gate_seats(cfg, job_dir, approver_by=None):
