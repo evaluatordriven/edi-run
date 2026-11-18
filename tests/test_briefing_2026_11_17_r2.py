@@ -121,8 +121,28 @@ class FindingI_ShortLineNeedle(_R2Base):
         job = self.tmp / "job-short"
         (job / "held_out").mkdir(parents=True)
         (job / "held_out" / "key.txt").write_text("No header and no figure here.\n")
-        needles = gates.held_out_needles(job)
-        self.assertIn(gates._canon("No header and no figure here."), needles)
+        windows, digests, lines = gates.held_out_needles(job)
+        self.assertIn(gates._canon("No header and no figure here."), lines)
+        # frontier-review blocker regression: short common words must NOT become
+        # substring needles (they scrubbed legitimate feedback and GateError-ed legal packets)
+        (job / "held_out" / "labels.txt").write_text("yes\nno\nN/A\nStep 1\n")
+        _, _, short = gates.held_out_needles(job)
+        self.assertEqual(short, {gates._canon("No header and no figure here.")})  # <MIN_LINE skipped
+        item = {"feedback": "The script prints yes at the end. We note the northern approach; do not reformat."}
+        out, _ = gates.scrub_held_out([item], gates.held_out_needles(job))
+        self.assertNotIn(gates.WITHHELD, out[0]["feedback"])  # no false-positive scrub
+        # the 29-char line IS matched, but only whole-line: mid-word echoes survive,
+        # a line-echo is redacted
+        short_line = "No header and no figure here."
+        out2, w2 = gates.scrub_held_out(
+            [{"a": "Overall there was " + short_line + " in the control."}],
+            gates.held_out_needles(job))
+        self.assertEqual(w2, 1)
+        self.assertIn(gates.WITHHELD, out2[0]["a"])
+        out3, w3 = gates.scrub_held_out(
+            [{"a": "the no-header and no-figure here-abouts clause"}],
+            gates.held_out_needles(job))
+        self.assertEqual(w3, 0)  # word-boundary respected: mid-word echo survives
 
 
 class FindingJ_HttpUpstream(_R2Base):

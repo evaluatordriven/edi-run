@@ -107,6 +107,11 @@ def gate_seats(cfg, job_dir, approver_by=None):
         import adapters as _adapters
         if not _adapters.sandbox_usable(stype):
             raise GateError(f"maker.sandbox type {stype} cannot launch on this host (missing binary or user namespaces forbidden); refusing to run an unconfined agent (ruling R3)")
+        import adapters as _adapters  # fail at freeze, not at round 1 (frontier review)
+        try:
+            _adapters._require_https(maker.get("url", ""))
+        except ValueError as e:
+            raise GateError(f"agent maker upstream refused: {e}")
     if cfg.get("levelClaimed") in ("CL2", "CL3"):
         mk_name = maker.get("name", "")
         if any(same(a.get("by", ""), mk_name) for a in bar.get("approvals") or []) or same(bar.get("author", ""), mk_name):
@@ -131,29 +136,37 @@ def _canon(s):
 WINDOW = 32  # characters, after case/whitespace canonicalization
 
 
+MIN_LINE = 16  # whole-line needles shorter than this are skipped: a 2-char "needle"
+               # substring-matched would scrub legitimate words and deny D4.9 feedback
+
+
 def held_out_needles(job_dir):
-    """D4.9 needle set: full-file digests plus every WINDOW-character window of every held-out
-    line (case/whitespace-canonicalized), minus any window that also occurs in bar.md or
-    method.md -- wording the Maker is already given is not held-out (D3.held-out). Disclosed
-    limits: paraphrase is not matched; held-out lines shorter than WINDOW are matched whole-line."""
-    held_dir, needles = job_dir / "held_out", set()
+    """D4.9 needle set, classified: (windows, digests, lines).
+    windows: every WINDOW-character window of every held-out line (case/whitespace-
+    canonicalized); digests: full-file sha256; lines: canonical held-out lines of
+    MIN_LINE..WINDOW-1 chars, matched as WHOLE lines with word boundaries. Minus any
+    needle that also occurs in bar.md or method.md -- wording the Maker is already
+    given is not held-out (D3.held-out). Disclosed limits: paraphrase is not matched;
+    held-out lines shorter than MIN_LINE are not matched (the sandbox is the
+    exclusion mechanism for those)."""
+    held_dir, windows, digests, lines = job_dir / "held_out", set(), set(), set()
     pub = _canon("\n".join((job_dir / f).read_text(encoding="utf-8", errors="ignore") for f in ("bar.md", "method.md") if (job_dir / f).is_file()))
     marker = _canon(WITHHELD)
     for p in (p for p in (held_dir.rglob("*") if held_dir.is_dir() else []) if p.is_file()):
-        needles.add(sha256_file(p).casefold())
+        digests.add(sha256_file(p).casefold())
         for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines():
             c = _canon(ln)
-            if 0 < len(c) < WINDOW:
-                # short held-out lines never yield a full window — take the whole
-                # canonical line as one needle (round-2 recheck #3)
-                if c not in pub and c not in marker:
-                    needles.add(c)
+            if not c or c in pub or c in marker:
+                continue
+            if len(c) < WINDOW:
+                if len(c) >= MIN_LINE:  # whole-line needle, word-bounded at match time
+                    lines.add(c)
                 continue
             for i in range(0, len(c) - WINDOW + 1):
                 w = c[i:i + WINDOW]
                 if w not in pub and w not in marker:
-                    needles.add(w)
-    return needles
+                    windows.add(w)
+    return windows, digests, lines
 
 
 WITHHELD = "[withheld: matches held-out material]"
@@ -176,7 +189,21 @@ def _canon_map(s):
     return "".join(out), idx
 
 
-def _redact(s, needles, digests):
+def _line_cover(c, lines, cover):
+    """Mark whole-line needle spans: a line needle matches only when delimited by
+    word boundaries (start/end or a space on each side) in the canonical text."""
+    for ln in lines:
+        at = c.find(ln)
+        while at != -1:
+            before_ok = at == 0 or c[at - 1] == " "
+            after = at + len(ln)
+            after_ok = after == len(c) or c[after] == " "
+            if before_ok and after_ok:
+                cover[at:after] = [True] * len(ln)
+            at = c.find(ln, at + 1)
+
+
+def _redact(s, needles, digests, lines):
     """Replace only the spans of s that match held-out material; everything else survives."""
     c, idx = _canon_map(s)
     cover = [False] * len(c)
@@ -188,6 +215,7 @@ def _redact(s, needles, digests):
         while at != -1:
             cover[at:at + len(d)] = [True] * len(d)
             at = c.find(d, at + 1)
+    _line_cover(c, lines, cover)
     spans, j = [], 0
     while j < len(c):
         if cover[j]:
@@ -203,31 +231,31 @@ def _redact(s, needles, digests):
     return s, len(spans)
 
 
-def _scrub_walk(v, needles, digests):
+def _scrub_walk(v, needles, digests, lines):
     if isinstance(v, str):
-        return _redact(v, needles, digests) if v else (v, 0)
+        return _redact(v, needles, digests, lines) if v else (v, 0)
     if isinstance(v, dict):
         out, n = {}, 0
         for k, sv in v.items():
-            out[k], w = _scrub_walk(sv, needles, digests)
+            out[k], w = _scrub_walk(sv, needles, digests, lines)
             n += w
         return out, n
     if isinstance(v, list):
         out, n = [], 0
         for sv in v:
-            nv, w = _scrub_walk(sv, needles, digests)
+            nv, w = _scrub_walk(sv, needles, digests, lines)
             out.append(nv)
             n += w
         return out, n
     return v, 0
 
 
-def scrub_held_out(items, needles):
+def scrub_held_out(items, needle_set):
     """Return (items with held-out spans replaced anywhere in the structure, spans withheld) -- D4.9 filters, never forwards."""
-    digests = [n for n in needles if len(n) != WINDOW]
+    needles, digests, lines = needle_set
     out, n = [], 0
     for it in items:
-        it, w = _scrub_walk(it, needles, digests)
+        it, w = _scrub_walk(it, needles, digests, lines)
         n += w
         out.append(it)
     return out, n
@@ -242,6 +270,16 @@ def gate_packet(packet, job_dir, expected_incumbent_digest):
         # wording the Maker is already given (bar/method) is not a leak (D3.held-out)
         if k in low and (k not in pub_words or k == "scores.jsonl" or k == "job.jsonl"):
             raise GateError("held-out path marker leaked into Maker packet (I-04)")
-    for nd in held_out_needles(job_dir):
+    needles, digests, lines = held_out_needles(job_dir)
+    for nd in needles:
         if nd in low:
             raise GateError("held-out content or digest leaked into Maker packet (I-04)")
+    for d in digests:
+        if d in low:
+            raise GateError("held-out content or digest leaked into Maker packet (I-04)")
+    for ln in lines:  # whole-line needles: word-bounded, so common short words do not fire
+        at = low.find(ln)
+        while at != -1:
+            if (at == 0 or low[at - 1] == " ") and (at + len(ln) == len(low) or low[at + len(ln)] == " "):
+                raise GateError("held-out content or digest leaked into Maker packet (I-04)")
+            at = low.find(ln, at + 1)

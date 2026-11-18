@@ -142,7 +142,7 @@ _RELAY = (
     "            except OSError:\n"
     "                import time; time.sleep(0.05)\n"
     "        else:\n"
-    "            c.close(); continue\n"  # never kill the serve loop (recheck #6)
+    "            c.close(); u.close(); continue\n"  # never kill the serve loop; no FD leak (review LOW #3)
     "        threading.Thread(target=pipe, args=(c, u), daemon=True).start()\n"
     "        threading.Thread(target=pipe, args=(u, c), daemon=True).start()\n"
     "threading.Thread(target=serve, daemon=True).start()\n"
