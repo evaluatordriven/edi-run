@@ -1,6 +1,6 @@
 """Deterministic invariant gates (I-01 through I-04) for edi-run. Standard library only."""
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib, json, math, os, pathlib
 
 UNDISCLOSED = "undisclosed"
@@ -45,7 +45,9 @@ def gate_bounds(cfg):
         raise GateError("invalid subjectFiles entry")
 
 
-def gate_freeze(cfg, job_dir, started_at):
+def gate_freeze_pre(cfg, job_dir):
+    """Bar-level refusal checks that must run BEFORE the first log write: a
+    refused freeze leaves nothing behind (I-01 no-trace)."""
     bar = cfg.get("bar") or {}
     actual = sha256_file(safe_rel(bar.get("file", "bar.md"), job_dir))
     if actual != (bar.get("digest") or {}).get("sha256"):
@@ -54,6 +56,28 @@ def gate_freeze(cfg, job_dir, started_at):
         apps = [a for a in (bar.get("approvals") or []) if a.get("role") == role]
         if not apps or any((a.get("barDigest") or {}).get("sha256") != actual for a in apps):
             raise GateError(f"missing or mismatched {role} approval on bar.digest (CL1-3)")
+    if cfg.get("levelClaimed") == "baseline" and not isinstance(cfg.get("readsBeforeFreeze"), list):
+        raise GateError("baseline jobs must record readsBeforeFreeze (BL-1)")
+    # frozenAt must be parseable and, for CL1+, strictly in the past: both are
+    # refusals, so both run before the first log write (the post-append ordering
+    # predicate is then construction-guaranteed: the work-started event is
+    # emitted after freeze, so a past frozenAt can never satisfy f_dt >= s_dt)
+    f_raw = (cfg.get("bar") or {}).get("frozenAt")
+    if cfg.get("levelClaimed") != "baseline":
+        if not f_raw:
+            raise GateError("CL1+ jobs must carry bar.frozenAt (CL1-1)")
+        try:
+            f_dt = when(f_raw)
+        except Exception as e:
+            raise GateError(f"bar.frozenAt is not a parseable timestamp: {f_raw!r}") from e
+        if f_dt >= datetime.now(timezone.utc):
+            raise GateError(f"bar.frozenAt {f_raw} is not in the past; a bar frozen after work began is not a frozen bar (CL1-1)")
+
+
+def gate_freeze(cfg, job_dir, started_at):
+    bar = cfg.get("bar") or {}
+    gate_freeze_pre(cfg, job_dir)
+    actual = sha256_file(safe_rel(bar.get("file", "bar.md"), job_dir))
     f_dt, s_dt = when(bar["frozenAt"]), when(started_at)
     if (cfg.get("levelClaimed") == "baseline" and not (f_dt > s_dt and isinstance(cfg.get("readsBeforeFreeze"), list))) or (cfg.get("levelClaimed") != "baseline" and f_dt >= s_dt):
         raise GateError("bar.frozenAt ordering invalid for claimed level (CL1-1/BL-1)")

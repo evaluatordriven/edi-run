@@ -428,7 +428,38 @@ class TestEDIRuntime(unittest.TestCase):
         loop.freeze_job(job_slow)
         self.assertEqual(loop.run_job(job_slow), 2)
         st_s = json.loads((job_slow / "state.json").read_text())
-        self.assertEqual((st_s["terminal_state"], st_s["reason"]), ("needs_owner", "cap_reached"))
+        self.assertEqual((st_s["terminal_state"], st_s["reason"]), ("needs_owner", "maker_failed"))
+
+    def test_bar_refusal_leaves_no_trace_and_timeout_is_maker_failed(self):
+        # I-01 no-trace: a bar-level refusal (digest mismatch) must leave NO
+        # job.jsonl behind, so the corrected retry can freeze cleanly
+        job = self._make_base_job(subdir="job_bar_tamper")
+        (job / "bar.md").write_text("# tampered bar\n", encoding="utf-8")
+        with self.assertRaises(gates.GateError):
+            loop.freeze_job(job)
+        self.assertFalse((job / "job.jsonl").exists(), "a refused freeze must leave no log")
+        # a malformed or future bar.frozenAt is refused BEFORE any append too
+        for bad in ("not-a-date", "2099-01-01T00:00:00Z"):
+            job_b = self._make_base_job(subdir="job_badfrozen")
+            cfg_b = json.loads((job_b / "job.json").read_text())
+            cfg_b["bar"]["frozenAt"] = bad
+            (job_b / "job.json").write_text(json.dumps(cfg_b, indent=2), encoding="utf-8")
+            with self.assertRaises(gates.GateError):
+                loop.freeze_job(job_b)
+            self.assertFalse((job_b / "job.jsonl").exists(), "frozenAt refusal left a trace")
+            self.assertFalse((job_b / "state.json").exists())
+        self.assertFalse((job / "state.json").exists())
+        # corrected retry now freezes cleanly (no dead-end)
+        (job / "bar.md").write_text((self.tmp / "job_bar_ok" / "bar.md").read_text() if (self.tmp / "job_bar_ok" / "bar.md").exists() else "# Header\n", encoding="utf-8")
+        # wall-clock deadline maps to maker_failed (a hung maker), not cap_reached
+        job_slow = self._make_base_job(rounds_behavior="slow", subdir="job_slow2")
+        cfg_s = json.loads((job_slow / "job.json").read_text())
+        cfg_s["bounds"]["max_wall_seconds"] = 1.0
+        (job_slow / "job.json").write_text(json.dumps(cfg_s, indent=2), encoding="utf-8")
+        loop.freeze_job(job_slow)
+        self.assertEqual(loop.run_job(job_slow), 2)
+        st_s = json.loads((job_slow / "state.json").read_text())
+        self.assertEqual((st_s["terminal_state"], st_s["reason"]), ("needs_owner", "maker_failed"))
 
     def test_gap_emission_assembly_failure_and_emitter_can_fail(self):
         # §6 path 2: inputs assembly failure becomes a gap-listed record, exit 1.

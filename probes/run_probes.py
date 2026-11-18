@@ -42,7 +42,7 @@ import loop  # noqa: E402
 KNOWN_FAILS = {
     "S1": "reads outside the deny list are still default-allow; exfil via artifact possible (open: read-allowlist)",
     "C1": "agent spend on crash is lost — metering accrues only on clean maker exit",
-    "C2": "agent spend on timeout is lost — same root as C1",
+    "C2": "agent spend on timeout is lost — same root as C1 (terminal maker_failed: wall deadline)",
     "C3": "the proxy does not enforce the cost cap",
     "R1": "no resume after a hard kill (runtime_error; restart = new job)",
 }
