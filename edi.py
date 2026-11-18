@@ -4,6 +4,15 @@ import argparse, pathlib, sys
 import gates, loop
 
 
+# 1 and 2 belong to the process (gate refusal, argparse usage error); run outcomes
+# and record verdicts get their own codes so an operator can never confuse them.
+# The mapping lives ONLY here: loop.* still returns 0/1/2 for library callers.
+EXIT_CODES = {"ok": 0, "refused": 1, "usage": 2, "rejected": 3, "needs_owner": 4,
+              "record_failed": 5, "record_undecided": 6}
+_RUN = {0: 0, 1: EXIT_CODES["rejected"], 2: EXIT_CODES["needs_owner"]}
+_RECORD = {0: 0, 1: EXIT_CODES["record_failed"], 2: EXIT_CODES["record_undecided"]}
+
+
 def main():
     ap = argparse.ArgumentParser(description="E-DI minimal reference runtime")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -25,10 +34,14 @@ def main():
             return loop.init_job(a.job_dir)
         if a.cmd == "finalize":
             ack = [x.strip() for x in a.ack_unobserved.split(",") if x.strip()] if a.ack_unobserved else None
-            return loop.finalize_job(a.job_dir, state=a.disposition, by=a.by, ack_unobserved=ack)
+            return _RECORD.get(loop.finalize_job(a.job_dir, state=a.disposition, by=a.by, ack_unobserved=ack),
+                               EXIT_CODES["record_undecided"])
         if a.cmd == "freeze":
             return loop.freeze_job(a.job_dir, dry_run=a.dry_run)
-        return getattr(loop, f"{a.cmd}_job")(a.job_dir)
+        rc = getattr(loop, f"{a.cmd}_job")(a.job_dir)
+        if a.cmd in ("run", "resume"):
+            return _RUN.get(rc, EXIT_CODES["needs_owner"])
+        return _RECORD.get(rc, EXIT_CODES["record_undecided"])  # verify
     except gates.GateError as e:
         # a gate refusal is an expected outcome, not a crash: one clean line,
         # exit 1 (argparse usage errors still exit 2 on their own)

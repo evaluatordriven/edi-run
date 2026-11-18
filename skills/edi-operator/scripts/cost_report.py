@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""P5 cost_report: spend figures from state.json ONLY (read-only).
+"""P5 cost_report: spend from usage.jsonl (the spend source of truth, every billed
+call including discarded rounds); tokens from state.json; the cap from job.json (read-only).
 
 Missing fields become null, never invented. No cross-checks against job.json.
 """
 import argparse
+import json
 import pathlib
 import sys
 
@@ -44,10 +46,16 @@ def main():
     if state is None:
         refuse(f"no state.json in {job_dir}: nothing has been frozen yet")
 
+    spent = state.get("cost_usd")
+    usage_p = job_dir / "usage.jsonl"
+    if usage_p.is_file():  # every billed call, including discarded rounds (they were billed)
+        rows = [json.loads(ln) for ln in usage_p.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        spent = round(sum(float(r.get("cost", 0.0)) for r in rows if r.get("kind") == "call"), 6)
+    cfg = load_json(job_dir / "job.json") or {}
     emit({
         "job_dir": str(job_dir),
-        "spent_usd": state.get("cost_usd"),
-        "cap_usd": state.get("cap_usd"),
+        "spent_usd": spent,
+        "cap_usd": (cfg.get("bounds") or {}).get("max_cost_usd"),
         "per_model_tokens": per_model_tokens(state),
         "wall_seconds": state.get("wall_spent_seconds"),
     })

@@ -41,6 +41,16 @@ def gate_bounds(cfg):
         v = b.get(k)
         if v is None or isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0:
             raise GateError(f"bounds.{k} must be a finite number > 0 (I-07)")
+    # round-3 external review #1: admission control needs an output bound
+    mo = b.get("max_output_tokens")
+    if mo is not None:
+        def _ok(v):
+            return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v > 0
+        if isinstance(mo, dict):
+            if not all(_ok(v) for v in mo.values()):
+                raise GateError("bounds.max_output_tokens (per-model map) entries must be finite numbers > 0 (review #1)")
+        elif not _ok(mo):
+            raise GateError("bounds.max_output_tokens must be a finite number > 0 (or a per-model map of them) (review #1)")
     if any(not isinstance(sf, str) or os.path.isabs(sf) or ".." in sf.replace("\\", "/").split("/") for sf in cfg.get("subjectFiles") or []):
         raise GateError("invalid subjectFiles entry")
 
@@ -179,6 +189,116 @@ def gate_instruments(cfg, job_dir):
         if not f:
             raise GateError(f"instrument.{k} file missing (CL1-5)")
         pins[k] = sha256_file(safe_rel(f, job_dir))
+    # P1: the settings the loop scores against (dimensions, thresholds, evaluator
+    # wiring, controls, bounds) live in job.json and are as frozen as bar.md.
+    # Only the Owner's disposition block is chosen later, at finalize.
+    # Round-3 external review #7: the digest is computed from the cfg INSTANCE the
+    # caller passes — the same single read the gate and the Meter consume — never
+    # from a second read of job.json, which a two-read TOCTOU could split.
+    j = {k: v for k, v in (cfg or {}).items() if k != "disposition"}
+    pins["job"] = hashlib.sha256(json.dumps(j, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    # NOTE round 3 (c): EVERY file a seat command can run is pinned, not just *.py
+    # under the job tree -- an Evaluator script in another language at the job root
+    # was swapped after freeze while the pins stayed clean.
+    h = hashlib.sha256()
+    seat_cmds = []
+    mk = cfg.get("maker") or {}
+    if mk.get("command"):
+        seat_cmds.append(mk["command"])
+    for e in cfg.get("evaluators") or []:
+        if e.get("command"):
+            seat_cmds.append(e["command"])
+        sn = (e.get("script") or {}).get("name")
+        if sn:
+            seat_cmds.append([sn])
+    seen_files = {}
+    for cmd in seat_cmds:
+        for tok in cmd:
+            if not isinstance(tok, str) or tok.startswith("-"):
+                continue
+            cand = pathlib.Path(tok)
+            if not cand.is_absolute():
+                cand = job_dir / tok
+            try:
+                rp = cand.resolve()
+                inside = rp.is_relative_to(job_dir.resolve())
+            except OSError:
+                continue
+            if inside and rp.is_file():
+                seen_files[str(rp)] = rp
+    # Round-3 external review #9: the pin must cover the dependencies a seat
+    # script actually invokes, not only the files named in the command tokens.
+    # (a) Python seat scripts: AST-walk local imports (transitively, bounded to
+    #     the job dir, stdlib-only); (b) non-Python seat scripts: scan the text
+    # for referenced files that exist under the job dir (seed/ and held_out/ are
+    # material, not seat code, and stay out of the seat-code pin).
+    def _local_imports(py_path, acc):
+        """AST-walk a Python seat script's local imports; return newly found files."""
+        import ast
+        try:
+            tree = ast.parse(py_path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, ValueError) as e:
+            raise GateError(f"pinned seat script {py_path.relative_to(job_dir)} is not parseable Python "
+                            f"({e}); seat code must be statically analyzable (G1)")
+        names = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names += [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names.append(node.module)
+        bases = [py_path.parent, job_dir]
+        found = []
+        for name in names:
+            rel = name.replace(".", "/")
+            for base in bases:
+                for cand in (base / rel / "__init__.py", base / (rel + ".py")):
+                    try:
+                        rp = cand.resolve()
+                    except OSError:
+                        continue
+                    if rp.is_file() and rp.is_relative_to(job_dir.resolve()) and str(rp) not in acc:
+                        found.append(rp)
+        return found
+
+    def _text_refs(path, acc):
+        """Scan a non-Python seat script's text for referenced job files; return newly found files."""
+        try:
+            txt = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return []
+        found = []
+        for tok in re.findall(r"[A-Za-z0-9_][A-Za-z0-9_./-]*\.[A-Za-z0-9]{1,8}", txt):
+            cands = [(path.parent / tok).resolve(), (job_dir / tok).resolve()]
+            for cand in cands:
+                try:
+                    inside = cand.is_relative_to(job_dir.resolve())
+                except OSError:
+                    continue
+                if not inside or not cand.is_file() or str(cand) in acc or str(cand) == str(path):
+                    continue
+                relp = cand.relative_to(job_dir.resolve())
+                if relp.parts and relp.parts[0] in ("seed", "held_out", "evidence", "rounds", "partial"):
+                    continue  # material, not seat code
+                found.append(cand)
+        return found
+
+    # bounded transitive walk: imports of Python seats, referenced files of others
+    frontier = list(seen_files.values())
+    for _ in range(64):  # bound the walk; job dirs are small
+        newly = []
+        for fp in frontier:
+            finder = _local_imports if pathlib.Path(fp).suffix == ".py" else _text_refs
+            newly += [p for p in finder(fp, seen_files) if str(p) not in seen_files]
+        for p in newly:
+            seen_files[str(p)] = p
+        frontier = newly
+        if not frontier:
+            break
+    for rp in sorted(seen_files):
+        h.update(str(pathlib.Path(rp).relative_to(job_dir.resolve())).encode())
+        h.update(sha256_file(seen_files[rp]).encode())
+    if seen_files:
+        pins["seat_files"] = h.hexdigest()
     # the code the seats execute is an instrument too: pin the scripts tree at freeze
     # so an edit after freeze is refused at run start, like an edited seed (recheck G1)
     sdir = job_dir / "scripts"
@@ -208,6 +328,47 @@ def gate_instruments(cfg, job_dir):
             h.update(sha256_file(f).encode())
         pins["scripts"] = h.hexdigest()
     return pins
+
+
+def _chain_job_pins(job_dir):
+    """The pins recorded in the custody chain at freeze (the last job-pin event).
+    The chain is written once at freeze and is not editable state: it is the
+    freeze commitment that state.json's pins are checked AGAINST (round-3
+    external review #7)."""
+    log = pathlib.Path(job_dir) / "job.jsonl"
+    if not log.is_file():
+        raise GateError("no custody log; the job pin is not anchored in the chain (P7)")
+    last = None
+    for line in log.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            e = json.loads(line)
+        except ValueError as er:
+            raise GateError(f"custody log is not valid JSON: {er}") from er
+        if e.get("type") == "job-pin":
+            last = (e.get("data") or {}).get("pins")
+    if last is None:
+        raise GateError("no job-pin event in the custody chain; the job pin is not anchored (P7)")
+    return last
+
+
+def check_pins(cfg, job_dir, frozen):
+    """Refuse when any frozen pin moved, and NAME which (P1: run, resume and
+    finalize all compare through here). Three-way check: the current cfg digest,
+    state.json's frozen pins, AND the freeze-time job-pin event in the custody
+    chain must all agree — editing job.json and re-digesting state.json in
+    lockstep cannot forge a pin past the chain."""
+    cur, frozen = gate_instruments(cfg, job_dir), frozen or {}
+    drift = sorted(k for k in set(cur) | set(frozen) if cur.get(k) != frozen.get(k))
+    if drift:
+        what = ", ".join("job.json settings" if k == "job" else k for k in drift)
+        raise GateError(f"frozen instruments modified after freeze: {what} (I-01/I-02)")
+    chain = _chain_job_pins(job_dir) or {}
+    drift = sorted(k for k in set(cur) | set(chain) if cur.get(k) != chain.get(k))
+    if drift:
+        what = ", ".join("job.json settings" if k == "job" else k for k in drift)
+        raise GateError(f"state.json pins do not match the freeze-time job-pin event in the custody chain: {what} (P7)")
 
 
 def gate_commands(cfg, job_dir):
@@ -441,15 +602,36 @@ def scrub_held_out(items, needle_set):
     return out, n
 
 
-def gate_packet(packet, job_dir, expected_incumbent_digest):
+def gate_packet(packet, job_dir, expected_incumbent_digest, artifact_text=""):
     if packet.get("best_artifact_digest") != expected_incumbent_digest:
         raise GateError("Maker packet best_artifact_digest does not match Pareto-best incumbent (I-04/I-06)")
     low, held_dir = _canon(json.dumps(packet, sort_keys=True)), job_dir / "held_out"
     pub_words = _canon("\n".join((job_dir / f).read_text(encoding="utf-8", errors="ignore") for f in ("bar.md", "method.md") if (job_dir / f).is_file()))
+    # P4 (round-3 external review #12): the exemption is narrowed to text the
+    # CANDIDATE authored — a feedback string is exempt from the path-marker scan
+    # only when it is a quotation of the artifact itself. Every field the runtime
+    # writes itself (including evaluator-authored observations that are NOT
+    # artifact quotes) gets the full scan.
+    c_art = _canon(artifact_text or "")
+
+    def _strings(v, feedback=False):
+        if isinstance(v, str):
+            yield v, feedback
+        elif isinstance(v, dict):
+            for k, sv in v.items():
+                yield from _strings(sv, feedback or k in ("defects", "workable_solutions"))
+        elif isinstance(v, list):
+            for sv in v:
+                yield from _strings(sv, feedback)
+
     for k in ("held_out", "scores.jsonl", "job.jsonl"):
         # wording the Maker is already given (bar/method) is not a leak (D3.held-out)
-        if k in low and (k not in pub_words or k == "scores.jsonl" or k == "job.jsonl"):
-            raise GateError("held-out path marker leaked into Maker packet (I-04)")
+        for s, fb in _strings(packet):
+            c = _canon(s)
+            if fb and c and c in c_art:
+                continue  # the candidate's own words, quoted back
+            if k in c and (k not in pub_words or k == "scores.jsonl" or k == "job.jsonl"):
+                raise GateError("held-out path marker leaked into Maker packet (I-04)")
     needles, digests, lines = held_out_needles(job_dir)
     for nd in needles:
         if nd in low:

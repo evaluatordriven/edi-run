@@ -2,8 +2,8 @@
 """P4 record_summary: run `edi.py verify <job>` and summarize the record.
 
 All custody fields (record.json) are read read-only. Reports the verify exit
-code verbatim; verdict maps it (0→OK, 1→FAILED, 2→UNKNOWN) unless the record
-itself carries a verdict.
+code verbatim; verdict maps it (0→OK, 5→FAILED, 6→UNKNOWN, 1→REFUSED — the
+edi.py EXIT_CODES) unless the record itself carries a verdict.
 """
 import argparse
 import pathlib
@@ -12,7 +12,7 @@ import sys
 from common import (EXIT_OK, EXIT_REFUSE, EXIT_USAGE, emit, load_json, refuse,
                     require_agent_id, run_edi)
 
-_VERDICT_BY_EXIT = {0: "OK", 1: "FAILED", 2: "UNKNOWN"}
+_VERDICT_BY_EXIT = {0: "OK", 5: "FAILED", 6: "UNKNOWN", 1: "REFUSED"}  # edi.py EXIT_CODES
 
 
 def scores_from_record(pred):

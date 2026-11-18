@@ -253,7 +253,7 @@ class TestCostReport(OperatorScriptTest):
         self.assertEqual(out["spent_usd"], json.loads((job / "state.json").read_text())["cost_usd"])
         self.assertEqual(out["wall_seconds"],
                          json.loads((job / "state.json").read_text())["wall_spent_seconds"])
-        self.assertEqual(out["cap_usd"], None)  # absent from state.json -> null, never invented
+        self.assertEqual(out["cap_usd"], json.loads((job / "job.json").read_text())["bounds"]["max_cost_usd"])  # read from job.json
         self.assertIsNone(out["per_model_tokens"])  # script seats burn no tokens
 
     def test_per_model_tokens_parsed(self):
@@ -299,7 +299,7 @@ class TestRecordSummary(OperatorScriptTest):
         self.assertEqual(r.returncode, 1)
         out = json.loads(r.stdout)
         self.assertFalse(out["verified"])
-        self.assertEqual(out["verify_exit_code"], 1)
+        self.assertEqual(out["verify_exit_code"], 5)  # edi.py EXIT_CODES["record_failed"]
 
     def test_unobserved_dimension_becomes_gap(self):
         job = self._make_base_job()
@@ -407,6 +407,23 @@ class TestWatchEscalations(OperatorScriptTest):
         lines = r3.stdout.strip().splitlines()
         self.assertEqual(len(lines), 1)
         self.assertTrue(lines[0].endswith("job-b\tno_artifact\tfix-maker"))
+
+    def test_a_new_escalation_is_never_missed_even_when_its_mtime_ties_the_marker(self):
+        """NOTE round 3: the old `-newer $MARKER` scan missed escalations whose
+        mtime tied the marker (strictly-newer comparison) — new escalations must
+        never be missed. Dedup is per-job by (mtime_ns, size), not one timestamp."""
+        self._escalate("job-a")
+        self._watch()  # marker exists
+        self._escalate("job-b", reason="maker_failed", reco="fix-maker")
+        t = 1_700_000_000.0
+        os.utime(self.home / ".watched", (t, t))
+        os.utime(self.home / "job-b" / "escalation.json", (t, t))
+        r = self._watch()
+        lines = r.stdout.strip().splitlines()
+        self.assertEqual(len(lines), 1, "a new escalation was missed because its mtime tied the marker")
+        self.assertTrue(lines[0].endswith("job-b\tmaker_failed\tfix-maker"))
+        r2 = self._watch()
+        self.assertEqual(r2.stdout.strip(), "")
 
     def test_marker_is_the_only_file_written(self):
         self._escalate("job-c")

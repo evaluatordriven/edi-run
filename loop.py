@@ -2,7 +2,7 @@
 from collections import Counter
 import json, math, os, pathlib, shutil, signal, subprocess, sys, time
 import adapters, gates
-from metering import Meter, CapExceeded
+from metering import Meter, CapExceeded, UnboundedOutput
 
 VENDOR = pathlib.Path(__file__).resolve().parent / "vendor"
 sys.path.insert(0, str(VENDOR))
@@ -10,8 +10,16 @@ import check as custody_check, record as custody_record  # noqa: E402
 
 
 def _append(job_dir, etype, actor, files, data):
-    cwd = pathlib.Path.cwd().resolve()
-    rel = {str(f.resolve().relative_to(cwd) if f.resolve().is_relative_to(cwd) else f.resolve()): gates.sha256_file(f) for f in files}
+    # P5: file keys are relative to the JOB, never to the caller's working
+    # directory, so finalize and verify give the same answer from anywhere.
+    jd = pathlib.Path(job_dir).resolve()
+    # Round-3 external review #10: a disposition is a LIFECYCLE BARRIER, enforced
+    # at the append level — no custody event of ANY kind (including round events
+    # from a run still in flight) may follow a disposition in the chain.
+    log = jd / "job.jsonl"
+    if log.is_file() and any(e.get("type") == "disposition" for e in custody_record.read(str(log))):
+        raise gates.GateError("job already has a disposition; no custody event may follow it — the job is closed (P6 lifecycle barrier)")
+    rel = {(f.resolve().relative_to(jd).as_posix() if f.resolve().is_relative_to(jd) else str(f.resolve())): gates.sha256_file(f) for f in files}
     return custody_record.append(str(job_dir / "job.jsonl"), {"type": etype, "at": custody_record.now(), "actor": actor, "source": "", "files": rel, "data": data})
 
 
@@ -28,7 +36,10 @@ def custody_verify(job_dir):  # job_dir may also be the log path itself
     problems = custody_record.verify(str(log_path), files=False)  # chain + content, all events
     events = custody_record.read(str(log_path))
     superseded = set()
+    legacy = True  # pre-P5 logs (no job-pin event) may resolve caller-relative keys
     for e in events:
+        if e.get("type") == "job-pin":
+            legacy = False
         d = e.get("data") or {}
         if e.get("type") == "round-discarded":
             superseded.update(d.get("supersedes") or [])
@@ -37,6 +48,27 @@ def custody_verify(job_dir):  # job_dir may also be the log path itself
             continue
         for path, h in (e.get("files") or {}).items():
             p = pathlib.Path(path)
+            # P5: job-relative keys are the new canonical form. Round-3 external
+            # review #11: the caller-relative fallback is for LEGACY logs only —
+            # a modern log's evidence must live under the job dir, so a
+            # byte-identical stand-in placed in the caller's directory cannot
+            # stand in for missing job evidence. For legacy logs, conflicting
+            # candidates are ambiguous and refused, naming both.
+            if not p.is_absolute():
+                jd_cand = log_path.parent / p
+                cw = pathlib.Path.cwd() / p
+                jd_file, cw_file = jd_cand.is_file(), cw.is_file()
+                if jd_file and (not legacy or not cw_file
+                                or custody_record.digest_file(jd_cand) == custody_record.digest_file(cw)):
+                    p = jd_cand  # job-relative first (a byte-identical caller copy is harmless)
+                elif legacy and cw_file:
+                    if jd_file:  # both candidates exist and DISAGREE: ambiguous — name both
+                        problems.append(f"event {i}: ambiguous custody file for {path}: job-relative candidate "
+                                        f"{jd_cand} and caller-relative {cw} disagree")
+                        continue
+                    p = cw  # legacy fallback: the log was written from the caller's directory
+                else:
+                    p = jd_cand  # modern log without the job file: report it missing, never resolve via cwd
             if not p.is_file():
                 problems.append(f"event {i}: file not found: {path}")
             elif custody_record.digest_file(p) != h:
@@ -231,9 +263,23 @@ def freeze_job(job_dir, started_at=None, dry_run=False):
     demos, rub_txt = [], gates.safe_rel(cfg["instrument"]["rubric"]["file"], job_dir).read_text(encoding="utf-8")
     if cfg["levelClaimed"] == "CL3":
         p_case = gates.safe_rel(cfg["controls"]["planted"], job_dir)
+        # P7: demonstration calls are billed like any other — metered against the
+        # cap (a trip there is a freeze refusal), and never made by a dry run,
+        # which promises to touch nothing and spend nothing.
+        demo_meter = None if dry_run else Meter(job_dir, pricing=pricing_map, bounds=cfg.get("bounds"))
+        if demo_meter is not None:
+            demo_meter._round = 0
         for ev in cfg["evaluators"]:
+            if dry_run and ev.get("kind") == "model":
+                print(f"freeze --dry-run: skipped the paid CL3 planted-case demonstration for evaluator {ev.get('id')}", file=sys.stderr)
+                continue
             for d in cfg["bar"]["dimensions"]:
-                res = adapters.run_evaluator(ev, p_case, d["id"], job_dir=job_dir, dim_cfg=d, rubric_txt=rub_txt)
+                try:
+                    res = adapters.run_evaluator(ev, p_case, d["id"], job_dir=job_dir, dim_cfg=d, rubric_txt=rub_txt, meter=demo_meter)
+                except CapExceeded as e:
+                    if isinstance(e, UnboundedOutput):
+                        raise gates.GateError(str(e))  # review #1: refuse unbounded output by name
+                    raise gates.GateError(f"cost cap reached during the CL3 planted-case demonstration: {e}")
                 if res.get("score") is None or float(res["score"]) >= float((d.get("scale") or {}).get("threshold", 4.0)):
                     raise gates.GateError(f"CL3 planted case did not fail on {ev['id']}/{d['id']} (CL3-1)")
                 demos.append({"dimension": d["id"], "evaluator": ev["id"], "planted": {"sha256": gates.sha256_file(p_case)}, "outcome": "does_not_conform", "at": custody_record.now()})
@@ -271,6 +317,10 @@ def freeze_job(job_dir, started_at=None, dry_run=False):
             _append(job_dir, "approval", a["by"], [bar_p], {"role": a["role"], "barDigest": a["barDigest"]["sha256"], "adopted": a.get("adopted")})
         time.sleep(0.002)
         s_at = started_at or _append(job_dir, "work-started", cfg["maker"]["name"], [], {})["at"]
+    # Round-3 external review #7: the freeze-time pins are anchored OUTSIDE
+    # editable state.json — in the custody chain, which the agent/operator cannot
+    # rewrite. check_pins verifies state.json's pins AGAINST this event.
+    _append(job_dir, "job-pin", "edi-run", [], {"pins": pins})
     gates.gate_freeze(cfg, job_dir, started_at=s_at)
     ho = job_dir / "held_out"
     if ho.is_dir():
@@ -340,7 +390,14 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, deadline, meter=None):
     return checks, controls, scores_rows, externals, {k: min(v) if v else 0.0 for k, v in per_dim.items()}, defects, solutions, usages
 
 
-def _write_state(job_dir, state):
+def _write_state(job_dir, state, meter=None):
+    if meter is not None:
+        # P9 (round-3 external review #5): every state write anchors the usage log
+        # as (row count, head digest, accrued TOTAL) — the anchor proves the
+        # LATEST billed total, not a prefix. A later state write re-anchors any
+        # suffix appended in the meantime.
+        state["usage_anchor"] = list(meter.anchor())
+        state.pop("usage_unanchored", None)  # the log is anchored now
     tmp = job_dir / "state.json.tmp"
     tmp.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     os.replace(tmp, job_dir / "state.json")
@@ -393,9 +450,17 @@ def _write_escalation(job_dir, state, cfg):
     (job_dir / "escalation.json").write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
 
 
+def _refuse_after_disposition(job_dir):
+    """P6: a disposition ends the job — no seat work may follow it in the chain."""
+    log = pathlib.Path(job_dir) / "job.jsonl"
+    if log.is_file() and any(e.get("type") == "disposition" for e in custody_record.read(str(log))):
+        raise gates.GateError("job already has a disposition; finalize ends the job and no seat work may follow it (start a successor job)")
+
+
 def run_job(job_dir):
     job_dir = pathlib.Path(job_dir).resolve()
     cfg, state = json.loads((job_dir / "job.json").read_text(encoding="utf-8")), json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
+    _refuse_after_disposition(job_dir)
     if state.get("open_round"):
         # R1: a hard-killed run is recoverable, never silently resumable — the
         # explicit resume re-verifies every pin and re-accrues spend from the
@@ -405,16 +470,20 @@ def run_job(job_dir):
         # must stay untouched so `resume` can proceed.
         raise gates.GateError(f"round {state['open_round']} was interrupted without a named end state; recover explicitly with 'edi.py resume' (R1)")
     try:
-        if gates.gate_instruments(cfg, job_dir) != state["pins"]:
-            raise gates.GateError("frozen instruments modified after freeze (I-01/I-02)")
+        gates.check_pins(cfg, job_dir, state["pins"])
         if state.get("terminal_state"):
             raise gates.GateError(f"job already reached terminal state {state['terminal_state']} ({state.get('reason')}); run executes once")
         # the meter loads the durable usage log at construction — a torn or
         # tampered log must be an integrity refusal HERE, inside the mapped try
         try:
             meter = Meter(job_dir, pricing=cfg.get("pricing", {}), bounds=cfg.get("bounds"))
-            if (job_dir / "usage.jsonl").is_file():
-                meter.verify()
+            if (job_dir / "usage.jsonl").is_file() or state.get("usage_anchor"):
+                meter.verify(anchor=state.get("usage_anchor"))  # P9: the anchor catches truncated newest rows
+                if (job_dir / "usage.jsonl").is_file() and not state.get("usage_anchor"):
+                    # review #5: a missing anchor never DISABLES the check — the run
+                    # may proceed, but the unanchored log is recorded in state and
+                    # the very next state write re-anchors it.
+                    state["usage_unanchored"] = True
         except ValueError as e:
             raise gates.GateError(f"usage.jsonl failed integrity verification: {e} (spend integrity)")
     except gates.GateError as e:
@@ -452,14 +521,21 @@ def run_job(job_dir):
         # mark work in flight durably: a hard kill leaves open_round set with no
         # terminal state, which run_job refuses (recovery is explicit `edi.py resume`)
         state["open_round"] = r
-        _write_state(job_dir, state)
+        _write_state(job_dir, state, meter)
         r_dir, art_dir = job_dir / "rounds" / f"round-{r:02d}", job_dir / "rounds" / f"round-{r:02d}" / "artifact"
         r_dir.mkdir(parents=True, exist_ok=True)
         needles = gates.held_out_needles(job_dir)
         pk_def, w1 = gates.scrub_held_out(list(state["defects"]) + list(state.get("rejected_defects", [])), needles)
         pk_sol, w2 = gates.scrub_held_out(state["solutions"], needles)
         pkt = {"round": r, "mode": cfg.get("mode", "pass_r2"), "best_artifact_digest": state["incumbent_digest"], "defects": pk_def, "workable_solutions": pk_sol, "withheld": w1 + w2}
-        gates.gate_packet(pkt, job_dir, state["incumbent_digest"])
+        # review #12: the P4 exemption covers only text the candidate authored —
+        # pass the incumbent artifact so a feedback string is exempt exactly when
+        # it quotes the artifact; evaluator-invented text gets the full scan.
+        art_text = ""
+        if state.get("incumbent_round"):
+            inc_art_dir = job_dir / "rounds" / f"round-{int(state['incumbent_round']):02d}" / "artifact"
+            art_text = "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in sorted(inc_art_dir.rglob("*")) if p.is_file())
+        gates.gate_packet(pkt, job_dir, state["incumbent_digest"], artifact_text=art_text)
         (r_dir / "packet.json").write_text(json.dumps(pkt, indent=2) + "\n", encoding="utf-8")
         if state["incumbent_round"]:
             shutil.copytree(job_dir / "rounds" / f"round-{state['incumbent_round']:02d}" / "artifact", art_dir, dirs_exist_ok=True)
@@ -492,7 +568,11 @@ def run_job(job_dir):
                 state.update(terminal_state="needs_owner", reason="maker_failed",
                              maker_error="maker wall-clock deadline exceeded (max_wall_seconds=%s)" % (cfg.get("bounds") or {}).get("max_wall_seconds"))
                 break
-            except CapExceeded:
+            except CapExceeded as e:
+                if isinstance(e, UnboundedOutput):
+                    state.update(terminal_state="needs_owner", reason="integrity_error",
+                                 integrity_error=str(e)[-300:])
+                    raise gates.GateError(str(e))  # unbounded output is an integrity refusal, not a cap trip
                 state.update(terminal_state="needs_owner", reason="cap_reached")  # a mid-round cap trip is the same terminal as a boundary trip
                 break
             except gates.GateError:
@@ -509,7 +589,10 @@ def run_job(job_dir):
             ev_prod = _append(job_dir, "artifact-produced", cfg["maker"]["name"], [art_dir / f for f in cfg["subjectFiles"]], {})
         try:
             checks, ctls, s_rows, exts, d_scores, defects, solutions, usages = _eval_batch(cfg, job_dir, r, art_dir, t0 + max_wall - wall_base, meter=meter)
-        except CapExceeded:
+        except CapExceeded as e:
+            if isinstance(e, UnboundedOutput):
+                state.update(terminal_state="needs_owner", reason="integrity_error", integrity_error=str(e)[-300:])
+                raise gates.GateError(str(e))
             state.update(terminal_state="needs_owner", reason="cap_reached")  # emitted checks stay; the round never becomes incumbent
             break
         state["rounds"][str(r)] = {"producedAt": ev_prod["at"], "digest": cand_digest, "checks": checks, "controls": ctls, "scores": s_rows, "external": exts, "dim_scores": d_scores}
@@ -539,7 +622,7 @@ def run_job(job_dir):
         state["wall_spent_seconds"] = round(state.get("wall_spent_seconds", 0.0) + (time.time() - t0), 3)
         state["open_round"] = None  # boundary write: a kill here discards nothing — the round is complete
         t0 = time.time()
-        _write_state(job_dir, state)
+        _write_state(job_dir, state, meter)
     except gates.GateError as e:
         state.update(terminal_state="needs_owner", reason="integrity_error", integrity_error=str(e)[-300:])
         raise  # integrity/security violations fail loud (finally still records the halt)
@@ -559,7 +642,7 @@ def run_job(job_dir):
         state["wall_spent_seconds"] = float(state.get("wall_spent_seconds", 0.0)) + (time.time() - t0)
         if state.get("terminal_state") == "needs_owner":
             _write_escalation(job_dir, state, cfg)
-        _write_state(job_dir, state)
+        _write_state(job_dir, state, meter)
     return {"accepted": 0, "rejected": 1, "needs_owner": 2}[state["terminal_state"]]
 
 
@@ -572,17 +655,19 @@ def resume_job(job_dir):
     max_rounds slot (the attempt was made and paid for)."""
     job_dir = pathlib.Path(job_dir).resolve()
     cfg, state = json.loads((job_dir / "job.json").read_text(encoding="utf-8")), json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
+    _refuse_after_disposition(job_dir)  # P6: no seat work may follow a disposition
     if state.get("terminal_state"):
         raise gates.GateError(f"job already reached terminal state {state['terminal_state']} ({state.get('reason')}); nothing to resume")
     if not state.get("open_round"):
         raise gates.GateError("no interrupted round to resume (this job was not hard-killed mid-round)")
     r = int(state["open_round"])
     # pins re-verified: the custody chain never continues onto moved ground
-    if gates.gate_instruments(cfg, job_dir) != state["pins"]:
-        raise gates.GateError("frozen instruments modified after freeze (I-01/I-02)")
+    gates.check_pins(cfg, job_dir, state["pins"])
     try:
         meter = Meter(job_dir, pricing=cfg.get("pricing", {}), bounds=cfg.get("bounds"))
-        meter.verify()  # a damaged usage log refuses the resume; spend re-accrues from it verbatim
+        meter.verify(anchor=state.get("usage_anchor"))  # a damaged or truncated usage log refuses the resume; spend re-accrues from it verbatim
+        if (job_dir / "usage.jsonl").is_file() and not state.get("usage_anchor"):
+            state["usage_unanchored"] = True  # review #5: proceed, but record and re-anchor
     except ValueError as e:
         # typed, like run_job: a damaged spend log is an integrity refusal, not a crash
         raise gates.GateError(f"usage.jsonl failed integrity verification: {e} (spend integrity)")
@@ -611,7 +696,7 @@ def resume_job(job_dir):
              "discarded_spend_usd": round(sum(meter.row_cost(d) for d in round_rows), 6) if round_rows else 0.0})
     state["resume_from"] = r  # the resumed attempt reuses the number and consumes the slot
     state["open_round"] = None
-    _write_state(job_dir, state)
+    _write_state(job_dir, state, meter)
     return run_job(job_dir)
 
 
@@ -627,8 +712,22 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
         raise gates.GateError("custody log does not begin with job-start; refusing to finalize a truncated or foreign log")
     if any(e.get("type") == "disposition" for e in log_events):
         raise gates.GateError("job already finalized (disposition event exists); finalize runs once")
-    if gates.gate_instruments(cfg, job_dir) != st["pins"]:
-        raise gates.GateError("frozen instruments modified after freeze (I-01/I-02)")
+    gates.check_pins(cfg, job_dir, st["pins"])
+    # P6: finalize binds the Owner's word on a FINISHED outcome — never on a run
+    # that is still mid-round or that produced a best artifact without an end
+    # state. `declined` stays available: a clean way to abandon an interrupted job.
+    # Round-3 external review #10: the end-state check applies to EVERY non-
+    # declined finalize, including a frozen-never-run job (which used to slip to
+    # the no-incumbent branch and bind a disposition without any end state).
+    if state != "declined" and (st.get("open_round") or not st.get("terminal_state")):
+        raise gates.GateError("job has no end state (a run was interrupted mid-round, ended without a terminal state, or never ran): "
+                              "resume it to an end state, or finalize --disposition declined to abandon it (P6)")
+    try:
+        meter = Meter(job_dir, pricing=cfg.get("pricing", {}), bounds=cfg.get("bounds"))
+        if (job_dir / "usage.jsonl").is_file() or st.get("usage_anchor"):
+            meter.verify(anchor=st.get("usage_anchor"))  # P9: spend enters the chain only from a verified log
+    except ValueError as e:
+        raise gates.GateError(f"usage.jsonl failed integrity verification: {e} (spend integrity)")
     gates.gate_seats(cfg, job_dir, approver_by=by)
     ack = ack_unobserved if ack_unobserved is not None else cfg["disposition"].get("acknowledgesUnobserved", [])
     if not st.get("incumbent_round"):
@@ -650,6 +749,26 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
         prod_at = ev_prod["at"]
     else:
         checks, prod_at = win["checks"], win["producedAt"]
+    if (job_dir / "usage.jsonl").is_file():
+        # P9 + round-3 external review #5/#6: the spend attestation happens under
+        # the meter's cross-process lock, with the log RE-READ and verified
+        # EXACTLY against the anchor first — the verified bytes and the attested
+        # bytes are the same bytes. A null anchor never disables the check: an
+        # unanchored log is refused (run/resume may proceed and re-anchor; a
+        # finalize may not attest).
+        if not st.get("usage_anchor"):
+            raise gates.GateError("usage.jsonl is present but state.json has no spend anchor (unanchored log); "
+                                  "refusing to attest spend that no state write vouched for (P9)")
+        try:
+            with meter.file_lock():
+                meter.refresh()
+                meter.verify(anchor=st.get("usage_anchor"), exact=True)
+                rows_n, head_d, _total = meter.anchor()
+                _append(job_dir, "spend", "edi-run", [job_dir / "usage.jsonl"],
+                        {"usd": round(meter.accrued(), 6), "discardedUsd": round(meter.discarded(), 6),
+                         "rows": rows_n, "head": head_d})
+        except ValueError as e:
+            raise gates.GateError(f"usage.jsonl failed integrity verification: {e} (spend integrity)")
     ev_disp = _append(job_dir, "disposition", by, [], {"state": state, "acknowledgesUnobserved": ack})
     violations = [{"dimension": d["id"], "description": f"{d['id']} failed conform threshold"} for d in cfg["bar"]["dimensions"] if any(c["dimension"] == d["id"] and c["outcome"] == "does_not_conform" for c in checks)]
     disagreements = [{"dimension": d["id"], "checks": [i for i, c in enumerate(checks) if c["dimension"] == d["id"]], "note": "evaluators disagreed"} for d in cfg["bar"]["dimensions"] if len({c["outcome"] for c in checks if c["dimension"] == d["id"]}) > 1]

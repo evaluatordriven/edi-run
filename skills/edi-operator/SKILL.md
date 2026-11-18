@@ -43,12 +43,26 @@ python3 $EDI_REPO/edi.py verify <job_dir>
 python3 $EDI_REPO/edi.py resume <job_dir>
 ```
 
-Exit codes: **0** = success, **1** = refusal or defect (a `GateError` — the runtime
-tells you what rule fired), **2** = usage error. A `GateError` is a diagnosis input,
+Exit codes (one meaning each; the mapping lives only in `edi.py`):
+
+| Code | `run` / `resume` | `finalize` / `verify` | Any command |
+|---|---|---|---|
+| **0** | accepted | record verifies OK | success |
+| **1** | | | refusal or defect (a `GateError` — the message names the rule) |
+| **2** | | | usage error (bad arguments) |
+| **3** | rejected (below the floor) | | |
+| **4** | needs_owner (escalation.json written) | | |
+| **5** | | record does not verify (includes a gap-listed record) | |
+| **6** | | verifier could not decide | |
+
+A `GateError` is a diagnosis input,
 never a retry trigger: read the message, determine which invariant fired, and either
 fix the job configuration (pre-freeze) or escalate to the Owner (post-freeze).
-`freeze --dry-run` runs every freeze gate read-only; preflight through it before any
-real freeze.
+`freeze --dry-run` runs the freeze gates read-only, EXCEPT the CL3 paid demonstration
+calls: those are SKIPPED in dry-run (nothing is spent, and the planted-case refusals
+are not actually demonstrated); in a real freeze they are made and METERED against
+the cap. Preflight through dry-run before any real freeze, and read the skipped-check
+note on stderr.
 
 ## §4 Job authoring
 
@@ -59,11 +73,16 @@ A job is a directory: `job.json`, `bar.md` (the bar — what the artifact must s
 **you author all content** — the scaffold is empty by design, and filling it with
 starter text is a defect.
 
-`job.json` essentials: `subjectFiles` (must match the files present in `seed/`),
-`bounds` (rounds/attempt limits), `seats` (Maker/Evaluator identities),
-`level` (CL1/CL2), `maker.model.identifier` and `pricing` per model seat (real prices —
-a `$0` placeholder passes the runtime but lies to the cost report; using one without
-telling the Owner first is prohibited), `sandbox` (`type`, optional `reads`).
+`job.json` essentials (the scaffold from `edi.py init` shows every key):
+`levelClaimed` (`CL1`/`CL2`/`CL3`), `subjectFiles` (must match the files present in
+`seed/`), `bounds` (`max_rounds`, `max_cost_usd`, `max_wall_seconds`), `bar` (`file`,
+`author`, `dimensions` with each `scale`, `approvals`), `maker` (`name`, `kind`,
+`method`, `model`, `command`, `sandbox` with `type` and optional `reads`),
+`evaluators` (one entry per judge: `id`, `name`, `kind`, `model` or `script`,
+`runs`), `controls` (`clean`, `planted`), `retention`, and `pricing` per model seat —
+the provider's real rates; freeze refuses a zero, negative or missing rate.
+Everything in `job.json` except `disposition` is pinned at freeze: an edit afterwards
+is refused at run, resume and finalize (the job pin names `job.json settings`).
 
 Provenance rules: an artifact-supplied figure appears in the seed; an artifact-produced
 figure is generated during rounds. Freeze precedes evaluation — nothing authored after
@@ -83,8 +102,8 @@ Each procedure ends in exactly one of: **report-to-Owner**, **execute-ruled-acti
 - **P2 Preflight** — `preflight.py <job_dir>` (thin wrapper over `freeze --dry-run`).
   PASS → proceed to P3. FAIL → fix what you authored, re-run; a failure you cannot fix
   is → report-to-Owner. Never freezes on its own.
-- **P3 Freeze + run** — `edi.py freeze` then `edi.py run`. Exit 0 → P4 by outcome.
-  Exit 2 → correct your own usage. GateError → P6.
+- **P3 Freeze + run** — `edi.py freeze` then `edi.py run`. Exit 0 or 3 → P4.
+  Exit 4 → P5. Exit 1 → P6. Exit 2 → correct your own usage.
 - **P4 Close-out (accepted/rejected)** — `record_summary.py <job_dir>` runs
   verification and reports verdict, per-dimension scores, maker of record, and spend.
   → report-to-Owner with the summary; finalization happens only on an explicit
@@ -125,7 +144,7 @@ show — not to echo them. An option list identical to the runtime's is unfinish
 3. Never retry a job with a terminal state; a rerun is a new job.
 4. Never bypass, weaken, or work around a gate; `GateError` means diagnose.
 5. Never fabricate, hand-enter, or "fix" scores or checks.
-6. Never run a job with missing or `$0`-placeholder pricing without telling the Owner.
+6. Never invent prices: `pricing` carries the provider's real rates (freeze refuses $0, negative or missing rates).
 7. Never send an API key anywhere except through edi-run's own adapters; never print one.
 8. Never finalize without an explicit Owner ruling naming the disposition.
 9. Never claim a result without `record_summary.py` (which runs verification) having run.

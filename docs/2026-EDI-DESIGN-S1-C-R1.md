@@ -49,8 +49,12 @@ control are not counted (C5); a billed reply that cannot be parsed is not counte
     the remaining model checks of that batch do not run. A partially evaluated
     round never produces D4.9 feedback and never becomes incumbent — the run
     halts `needs_owner/cap_reached`; on `resume` (R1) the round restarts fresh
-    under the same round number (its meter rows are kept and marked via the
-    amendment row so a re-accrual cannot double-count).
+    under the same round number (its meter rows are kept and labelled via the
+    amendment row. AMENDED AS IMPLEMENTED (2026-11-18, round 3 / P2): the
+    amendment LABELS rows for reporting only — it does NOT remove them from the
+    cap total. Discarded work was billed; `accrued()` counts every billed call
+    and `discarded()` reports the labelled subset. Rerun rounds make new rows,
+    so nothing is counted twice).
 - **C5/C6/C7:** model evaluators and model makers call `meter_call` too — with
   `who` distinguishing maker/evaluator/check/control. A parse failure after a
   billed reply still counts the row (the bill exists).

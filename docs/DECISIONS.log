@@ -1,5 +1,51 @@
 # edi-run DECISIONS.log — newest at TOP
 
+## 2026-11-18 — Round-3 deep-review defects: disposition and implementation notes
+
+**Disposition.** All nine deep-review defects (P1–P9), the operator-skill items,
+and the NOTE-to-maintainer's four priority items plus its medium items that the
+round-3 ask named were implemented and gated RED-first on
+`tests/test_briefing_r3.py` (15 tests, delivered unchanged as the acceptance
+gate) plus new concern-named tests (`test_proxy_spend.py`, `test_probe_gate.py`,
+and additions to `test_briefing.py` / `test_operator_skill.py`).
+
+**Decisions taken in implementation (Owner-visible, not new doctrine):**
+- P1 job pin: `gate_instruments` adds a `job` pin (canonical sha256 of job.json
+  minus its `disposition` block); a new `gates.check_pins` names which pin moved
+  and run/resume/finalize compare through it. Nothing else moved.
+- P2: amendments are labels, not subtractions — `accrued()` counts every billed
+  call; `discarded()` reports the labelled subset (design doc R1 section
+  amended in the same change; the four tests the briefing listed as updated
+  were updated, none weakened beyond that).
+- P6: `finalize` refuses a mid-round or best-artifact-no-end-state job unless
+  the disposition is `declined`; `run`/`resume` refuse once a disposition
+  exists in the chain.
+- Exit codes: the briefing's 0–6 table implemented in `edi.py` only; `loop.*`
+  still returns 0/1/2 for library callers. SKILL.md, `record_summary.py` (5 =
+  FAILED) and `cost_report.py` (spend from usage.jsonl, cap from job.json)
+  updated to match.
+- P7: `freeze --dry-run` makes no paid CL3 demonstration calls and says so on
+  stderr; a real CL3 freeze meters the demonstrations and a cap trip there is
+  a `GateError`.
+- NOTE items: the proxy RESERVES each call's worst-case spend under the meter
+  lock before forwarding (parallel calls cannot race past the cap — disclosed
+  residual: reservation is the conservative estimate, actual usage above it is
+  the same one-call overshoot already disclosed) and refuses `stream: true`
+  (400, refused calls logged to `proxy-usage.jsonl`). Seat-command files in any
+  language anywhere in the job are pinned (`seat_files` pin). The escalation
+  watcher dedups per-job by (mtime_ns, size) instead of one `-newer` marker, so
+  new escalations are never missed even when their mtime ties the marker.
+- Probes/CI: the probe gate's S1 entry is macOS-only (Linux skips it — the
+  allowlist already passes it there; the KNOWN_FAILS entry names the seatbelt
+  posture); CI requires a WORKING sandbox on both legs (sandbox_usable probe
+  step) and fails the leg instead of letting agent tests skip silently.
+
+**Not done (out of scope per the briefing):** self-signed CL1-15 evidence;
+controls the judge can tell apart from real work; injection canaries in the
+live examples' planted controls (optional); readings mode (R1) still awaits a
+ruling. The live examples' $0 pricing is now documented as non-re-runnable as
+committed (README) — supplying real rates remains an Owner call.
+
 ## 2026-11-18 — Review bar demoted from standing gate to tiered (Owner: S2)
 
 **Ruling.** The hardening sprint is over; the last three changes were flip-a-default

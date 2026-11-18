@@ -19,9 +19,15 @@ jobs:
       # The agent tests run under bwrap, which needs unprivileged user namespaces.
       # Ubuntu 24.04 runner images forbid them by AppArmor default; the hosted runner
       # is throwaway, so the restriction is lifted for this run only. If the sysctl
-      # is absent (older image), the suite still runs and the agent tests skip as before.
+      # is absent (older image), the sandbox check below fails the leg instead of
+      # letting the agent tests skip silently (fail-not-skip ruling).
       - name: Allow unprivileged user namespaces (throwaway hosted runner)
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      # Green must mean the sandbox was TESTED: if bwrap cannot actually launch
+      # here, the agent tests would silently skip — fail the leg instead.
+      - name: Require a working sandbox (fail, never skip)
+        run: |
+          python3 -c "import sys, adapters; sys.exit(0 if adapters.sandbox_usable('bwrap') else 'no working bwrap sandbox on this runner: agent coverage would silently skip')"
       - name: Run test suite
         run: python3 -m unittest discover -s tests -p 'test_*.py'
       # External-recheck probe gate: deterministic, loopback-only, no real key.
@@ -39,6 +45,11 @@ jobs:
       # Homebrew python 3.14 directly -- setup-python's tool cache defaults to
       # /Users/runner, which does not exist on this machine; stdlib-only suite
       # needs no managed interpreter, and 3.14 adds newer-interpreter coverage.
+      # Green must mean the sandbox was TESTED (self-hosted runner: sandbox-exec
+      # must exist and launch; a missing sandbox would silently skip agent tests).
+      - name: Require a working sandbox (fail, never skip)
+        run: |
+          /opt/homebrew/bin/python3 -c "import sys, adapters; sys.exit(0 if adapters.sandbox_usable('sandbox-exec') else 'no working sandbox-exec on this runner: agent coverage would silently skip')"
       - name: Run test suite
         run: /opt/homebrew/bin/python3 -m unittest discover -s tests -p 'test_*.py'
       # External-recheck probe gate: deterministic, loopback-only, no real key.

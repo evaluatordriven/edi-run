@@ -40,7 +40,7 @@ import loop  # noqa: E402
 
 # --- known-still-open defects, per the 2026-11-17b recheck -----------------
 KNOWN_FAILS = {
-    "S1": "reads outside the deny list are still default-allow; exfil via artifact possible (open: read-allowlist)",
+    "S1": "reads outside the deny list are still default-allow on the macOS seatbelt; exfil via artifact possible (open: read-allowlist; macOS-only — the Linux allowlist passes)",
 }
 
 FAKE_KEY = "probe-fake-key"
@@ -146,7 +146,7 @@ def make_job(root, subdir, maker_kind="script", url=None, pricing=None, bounds=N
         mk.update(maker_body)
     cfg = {
         "job": subdir, "levelClaimed": "CL1", "specVersion": "0.9.8",
-        "bounds": bounds or {"max_rounds": 2, "max_cost_usd": 1.0, "max_wall_seconds": 60},
+        "bounds": bounds or {"max_rounds": 2, "max_cost_usd": 1.0, "max_wall_seconds": 60, "max_output_tokens": 200000},
         "mode": "pass_r2", "subjectFiles": ["memo.md"],
         "bar": {"file": "bar.md", "digest": {"sha256": bar_digest}, "frozenAt": "2026-10-05T09:00:00Z",
                 "author": "Jordan Blake",
@@ -437,6 +437,11 @@ def check_s2():
 
 
 def check_s1():
+    if OS != "darwin":
+        # S1 (denylist read exposure) is macOS-only: the Linux bwrap allowlist
+        # already passes this check, so running it there only prints a stale
+        # KNOWN-FAIL. The open defect is the seatbelt posture.
+        return "SKIP", "S1 (denylist read exposure) is macOS-only; the Linux allowlist already passes it"
     if SANDBOX_TYPE is None:
         return "SKIP", "no sandbox on host"
     job = agent_job("s1", "read_jobsroot_canary", url=ENV.upstream_url,
@@ -554,7 +559,7 @@ def check_c1():
         return "SKIP", "no sandbox on host"
     reset_upstream()
     job = agent_job("c1", "crash_after_calls", url=ENV.upstream_url,
-                    pricing=P1_PRICING, bounds={"max_rounds": 2, "max_cost_usd": 10.0, "max_wall_seconds": 120})
+                    pricing=P1_PRICING, bounds={"max_rounds": 2, "max_cost_usd": 10.0, "max_wall_seconds": 120, "max_output_tokens": 200000})
     loop.run_job(job)
     cost, ts, reason = metered_spend(job)
     calls = len(_FakeUpstream.calls)
@@ -570,7 +575,7 @@ def check_c2():
         return "SKIP", "no sandbox on host"
     reset_upstream()
     job = agent_job("c2", "slow_calls", url=ENV.upstream_url,
-                    pricing=P1_PRICING, bounds={"max_rounds": 2, "max_cost_usd": 10.0, "max_wall_seconds": 6})
+                    pricing=P1_PRICING, bounds={"max_rounds": 2, "max_cost_usd": 10.0, "max_wall_seconds": 6, "max_output_tokens": 200000})
     loop.run_job(job)
     cost, ts, reason = metered_spend(job)
     calls = len(_FakeUpstream.calls)
@@ -586,7 +591,7 @@ def check_c3():
         return "SKIP", "no sandbox on host"
     reset_upstream()
     job = agent_job("c3", "many_calls", url=ENV.upstream_url,
-                    pricing=P1_PRICING, bounds={"max_rounds": 2, "max_cost_usd": 0.0003, "max_wall_seconds": 60})
+                    pricing=P1_PRICING, bounds={"max_rounds": 2, "max_cost_usd": 0.0003, "max_wall_seconds": 60, "max_output_tokens": 100})
     loop.run_job(job)
     cost, ts, reason = metered_spend(job)
     if cost <= 0.0003 and reason == "cap_reached":
@@ -649,7 +654,7 @@ def check_e2():
     # written from the envelope BEFORE the content parse
     reset_upstream("unparseable")
     import metering
-    m = metering.Meter(ENV.jobs / "e2-meter", pricing={"default": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}}, bounds={"max_cost_usd": 1.0})
+    m = metering.Meter(ENV.jobs / "e2-meter", pricing={"default": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}}, bounds={"max_cost_usd": 1.0, "max_output_tokens": 200000})
     ev = {"id": "E1", "kind": "model", "url": ENV.upstream_url, "model": {"identifier": "declared-model"}, "apiKeyEnv": "PROBE_NONE"}
     target = ENV.jobs / "e2-target.md"
     target.write_text("# target\n", encoding="utf-8")

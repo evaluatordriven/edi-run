@@ -155,7 +155,7 @@ class TestEDIRuntime(unittest.TestCase):
             "job": "test-memo-job",
             "levelClaimed": level,
             "specVersion": "0.9.8",
-            "bounds": {"max_rounds": 2, "max_cost_usd": 1.0, "max_wall_seconds": 60},
+            "bounds": {"max_rounds": 2, "max_cost_usd": 1.0, "max_wall_seconds": 60, "max_output_tokens": 200000},
             "mode": rounds_behavior,
             "subjectFiles": ["memo.md"],
             "bar": {
@@ -534,9 +534,10 @@ class TestEDIRuntime(unittest.TestCase):
         r2 = m.meter_call("evaluator:E1", "m1", "https://x/v1", None, usage={"prompt_tokens": 100, "completion_tokens": 0})
         self.assertAlmostEqual(m.accrued(), (1600 / 1e6), places=9)  # 1500 + 100 tokens
         m.verify()  # chain intact
-        # amendment marks rows as discarded: they stop counting, history intact
+        # amendment labels rows as discarded; billed work keeps counting toward the cap (P2)
         m.amend([r1["digest"]], note="discarded round")
-        self.assertAlmostEqual(m.accrued(), (100 / 1e6), places=9)  # only the un-amended row remains
+        self.assertAlmostEqual(m.accrued(), (1600 / 1e6), places=9)
+        self.assertAlmostEqual(m.discarded(), (1500 / 1e6), places=9)
         m.verify()
         # tamper is refused at verify: a hand-edited log cannot re-accrue
         rows = [json.loads(ln) for ln in (job / "usage.jsonl").read_text().splitlines()]
@@ -556,12 +557,10 @@ class TestEDIRuntime(unittest.TestCase):
         job_rej = self._make_base_job(subdir="job_gap_asm")
         cfg = json.loads((job_rej / "job.json").read_text())
         cfg["rejectFloor"] = 2.0
+        del cfg["retention"]  # required custody field -> assembly fails (job.json is pinned at freeze: P1)
         (job_rej / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         loop.freeze_job(job_rej)
         self.assertEqual(loop.run_job(job_rej), 1)
-        cfg = json.loads((job_rej / "job.json").read_text())
-        del cfg["retention"]  # required custody field -> assembly fails
-        (job_rej / "job.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         self.assertEqual(loop.finalize_job(job_rej, state="given", by="Casey Park"), 1)
         rec = json.loads((job_rej / "record.json").read_text())
         self.assertEqual(rec["recordType"], "edi-run/gap-record")
