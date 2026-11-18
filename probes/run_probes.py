@@ -334,7 +334,9 @@ class ProbeEnv:
         self.jobs.mkdir()
         self.canary2 = self.root / "canary-next-to-jobs-root.txt"
         self.canary2.write_text(CANARY, encoding="utf-8")
-        self.code_target = self.root / "code-target.txt"
+        # a canary INSIDE the repo checkout: the sandbox must treat the whole
+        # checkout as read-only. NOT under /tmp (mounted writable for tempfile).
+        self.code_target = REPO / (".edi_probe_canary_" + uuid.uuid4().hex[:8] + ".txt")
         self.code_target.write_text("untouched", encoding="utf-8")
         self._old_env = {k: os.environ.get(k) for k in ("PROBE_FAKE_KEY", "PROBE_CANARY2", "PROBE_CODE_TARGET", "TMPDIR")}
         os.environ["PROBE_FAKE_KEY"] = FAKE_KEY
@@ -349,6 +351,8 @@ class ProbeEnv:
         except Exception:
             pass
         shutil.rmtree(self.root, ignore_errors=True)
+        if self.code_target.is_file():
+            self.code_target.unlink()  # never leave the repo canary behind
         for k, v in self._old_env.items():
             if v is None:
                 os.environ.pop(k, None)
@@ -482,7 +486,7 @@ def check_s4():
     job = agent_job("s4", "read_proc_environ", url=ENV.upstream_url,
                     pricing={"default": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}})
     loop.run_job(job)
-    val = agent_leak(job)
+    val = agent_leak(job).replace("LEAK=", "", 1)
     return ("PASS", "parent /proc/1/environ unreachable") if val in ("DENIED", "CLEAN") else ("FAIL", val)
 
 
