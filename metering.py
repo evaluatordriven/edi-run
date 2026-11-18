@@ -70,6 +70,12 @@ class Meter:
             prev = row.get("digest")
         return True
 
+    def row_cost(self, digest):
+        for row in self._rows:
+            if row.get("digest") == digest:
+                return float(row.get("cost", 0.0))
+        return 0.0
+
     def accrued(self):
         total = 0.0
         amended = set()

@@ -15,6 +15,34 @@ def _append(job_dir, etype, actor, files, data):
     return custody_record.append(str(job_dir / "job.jsonl"), {"type": etype, "at": custody_record.now(), "actor": actor, "source": "", "files": rel, "data": data})
 
 
+def custody_verify(job_dir):  # job_dir may also be the log path itself
+    """Chain + content verification of job.jsonl with file re-hash checks, EXCLUDING
+    events superseded by a round-discarded record: a resumed attempt legitimately
+    rewrites the same artifact path with new content, and the discarded attempt's
+    event must stop pinning that path (append-only history is never rewritten —
+    the supersession is itself recorded in the chain)."""
+    log_path = pathlib.Path(job_dir).resolve()  # accepts a job dir or a log path
+    if log_path.is_dir():
+        log_path = log_path / "job.jsonl"
+    job_dir = log_path.parent
+    problems = custody_record.verify(str(log_path), files=False)  # chain + content, all events
+    events = custody_record.read(str(log_path))
+    superseded = set()
+    for e in events:
+        d = e.get("data") or {}
+        if e.get("type") == "round-discarded":
+            superseded.update(d.get("supersedes") or [])
+    for i, e in enumerate(events, 1):
+        if i in superseded:
+            continue
+        for path, h in (e.get("files") or {}).items():
+            p = pathlib.Path(path)
+            if not p.is_file():
+                problems.append(f"event {i}: file not found: {path}")
+            elif custody_record.digest_file(p) != h:
+                problems.append(f"event {i}: file changed since recorded: {path}")
+    return problems
+
 def _subject_digest(art_dir, files, held_hashes):
     parts = [f"{f}:{gates.sha256_file(gates.safe_rel(f, art_dir))}" for f in sorted(files) if gates.safe_rel(f, art_dir).is_file()]
     if len(parts) != len(files):
@@ -400,7 +428,8 @@ def run_job(job_dir):
             state.update(terminal_state="accepted" if all(c["outcome"] == "conforms" for c in win_checks) else "needs_owner", reason="all_conform" if all(c["outcome"] == "conforms" for c in win_checks) else "cap_reached")
             break
         # wall clock never pauses: bank elapsed time before the next round
-        state["wall_spent_seconds"] = wall_base + (time.time() - t0)
+        state["wall_spent_seconds"] = round(state.get("wall_spent_seconds", 0.0) + (time.time() - t0), 3)
+        state["open_round"] = None  # boundary write: a kill here discards nothing — the round is complete
         t0 = time.time()
         _write_state(job_dir, state)
     except gates.GateError as e:
@@ -443,9 +472,20 @@ def resume_job(job_dir):
     # pins re-verified: the custody chain never continues onto moved ground
     if gates.gate_instruments(cfg, job_dir) != state["pins"]:
         raise gates.GateError("frozen instruments modified after freeze (I-01/I-02)")
-    meter = Meter(job_dir, pricing=cfg.get("pricing", {}), bounds=cfg.get("bounds"))
-    meter.verify()  # a damaged usage log refuses the resume; spend re-accrues from it verbatim
+    try:
+        meter = Meter(job_dir, pricing=cfg.get("pricing", {}), bounds=cfg.get("bounds"))
+        meter.verify()  # a damaged usage log refuses the resume; spend re-accrues from it verbatim
+    except ValueError as e:
+        # typed, like run_job: a damaged spend log is an integrity refusal, not a crash
+        raise gates.GateError(f"usage.jsonl failed integrity verification: {e} (spend integrity)")
     partial = job_dir / "rounds" / f"round-{r:02d}"
+    superseded_seqs = []
+    events = custody_record.read(str(job_dir / "job.jsonl"))
+    for i, e in enumerate(events, 1):
+        # the killed attempt's artifact events pin files under the round dir that the
+        # resumed attempt will rewrite — record the supersession in the chain itself
+        if any(f"rounds/round-{r:02d}/" in str(p) for p in (e.get("files") or {})):
+            superseded_seqs.append(i)
     if partial.is_dir():
         dst = job_dir / "partial" / f"round-{r:02d}"
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -455,6 +495,12 @@ def resume_job(job_dir):
     round_rows = [row["digest"] for row in meter._rows if row.get("kind") == "call" and row.get("round") == r and "discarded_round" not in row]
     if round_rows:
         meter.amend(round_rows, note=f"round {r} discarded by resume")  # append-only: history intact, no double-count
+    # the resume IS a custody event: it marks the supersession (which artifact events
+    # no longer pin their files), notes the spend preserved from the killed attempt,
+    # and satisfies the design's resumed_after_interrupt disclosure
+    _append(job_dir, "round-discarded", "edi-run", [],
+            {"round": r, "supersedes": superseded_seqs, "resumed_after_interrupt": True,
+             "discarded_spend_usd": round(sum(meter.row_cost(d) for d in round_rows), 6) if round_rows else 0.0})
     state["resume_from"] = r  # the resumed attempt reuses the number and consumes the slot
     state["open_round"] = None
     _write_state(job_dir, state)
@@ -465,7 +511,7 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
     job_dir = pathlib.Path(job_dir).resolve()
     cfg, st = json.loads((job_dir / "job.json").read_text(encoding="utf-8")), json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
     log_path = job_dir / "job.jsonl"
-    log_problems = custody_record.verify(str(log_path), files=True)
+    log_problems = custody_verify(log_path)
     if log_problems:
         raise gates.GateError("custody log chain broken; refusing to finalize: " + "; ".join(map(str, log_problems[:3])))
     log_events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
@@ -526,7 +572,7 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
 
 def verify_job(job_dir):
     job_dir, cfg = pathlib.Path(job_dir).resolve(), json.loads((pathlib.Path(job_dir) / "job.json").read_text(encoding="utf-8"))
-    if custody_record.verify(str(job_dir / "job.jsonl"), files=True):
+    if custody_verify(job_dir):
         return 1
     rep = custody_check.verify(json.loads((job_dir / "record.json").read_text(encoding="utf-8")), files=str(job_dir / "artifact"), evidence=str(job_dir / "evidence"), bar=str(job_dir / cfg["bar"]["file"]))
     return 0 if rep["verdict"] == "OK" else (1 if rep["verdict"] == "FAILED" else 2)

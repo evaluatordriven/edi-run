@@ -660,6 +660,7 @@ def check_r1():
         if "edi.py resume" not in str(e):
             return "FAIL", "refusal does not name the remedy: %s" % str(e)[:120]
     # explicit resume: pins re-verified, partial round discarded, run completes
+    time.sleep(31)  # the single-threaded fake upstream is still inside its hang sleep; let it drain
     reset_upstream()  # the resumed run gets a healthy upstream
     st = json.loads((job / "state.json").read_text())
     cost_before = st.get("cost_usd", 0.0)
@@ -669,7 +670,12 @@ def check_r1():
         return "FAIL", "resume did not reach a named end state: %s/%s" % (st.get("terminal_state"), st.get("reason"))
     if st.get("cost_usd", 0.0) < cost_before - 1e-9:
         return "FAIL", "resume lost spend: %s < %s" % (st.get("cost_usd"), cost_before)
-    return "PASS", "silent resume refused; explicit resume completed (%s/%s, spend %s -> %s)" % (
+    # the resume must leave the job FINALIZABLE: the superseded artifact events
+    # must not pin files the resumed attempt rewrote (record.verify files=True)
+    frc = loop.finalize_job(job, state="given", by="Probe R1")
+    if frc != 0:
+        return "FAIL", "finalize after resume refused (rc=%s) — superseded events still pin artifacts" % frc
+    return "PASS", "silent resume refused; explicit resume completed (%s/%s, spend %s -> %s); finalize OK" % (
         st.get("terminal_state"), st.get("reason"), cost_before, st.get("cost_usd"))
 
 
