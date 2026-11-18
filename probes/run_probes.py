@@ -546,9 +546,9 @@ def check_c3():
                     pricing=P1_PRICING, bounds={"max_rounds": 2, "max_cost_usd": 0.0003, "max_wall_seconds": 60})
     loop.run_job(job)
     cost, ts, reason = metered_spend(job)
-    if cost <= 0.0003:
-        return "PASS", "cap held ($%s <= 0.0003)" % cost
-    return "FAIL", "cap $0.0003 exceeded: cost_usd=%s (%s/%s) with %d upstream calls" % (cost, ts, reason, len(_FakeUpstream.calls))
+    if cost <= 0.0003 and reason == "cap_reached":
+        return "PASS", "cap held and named ($%s <= 0.0003, terminal cap_reached)" % cost
+    return "FAIL", "cap $0.0003: cost_usd=%s terminal %s/%s with %d upstream calls" % (cost, ts, reason, len(_FakeUpstream.calls))
 
 
 def check_k1():

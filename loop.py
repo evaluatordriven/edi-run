@@ -280,12 +280,13 @@ def run_job(job_dir):
     pricing = cfg.get("pricing", {})
     # the spend source of truth: durable, hash-chained usage rows (C1-C7). A
     # pre-existing log is verified before anything accrues onto it.
-    meter = Meter(job_dir, pricing=pricing, bounds=cfg.get("bounds"))
-    if (job_dir / "usage.jsonl").is_file():
-        try:
+    try:
+        meter = Meter(job_dir, pricing=pricing, bounds=cfg.get("bounds"))
+        if (job_dir / "usage.jsonl").is_file():
             meter.verify()
-        except ValueError as e:
-            raise gates.GateError(f"usage.jsonl failed chain verification: {e} (spend integrity)")
+    except ValueError as e:
+        # a torn or damaged usage log is an integrity refusal, not a crash
+        raise gates.GateError(f"usage.jsonl failed integrity verification: {e} (spend integrity)")
     prev_term = None
     if hasattr(signal, "SIGTERM"):
         def _on_term(signum, frame):

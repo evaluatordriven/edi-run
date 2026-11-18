@@ -210,7 +210,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                         try:
                             meter.check_cap(body)
                         except Exception as cap_err:
-                            cap_flag.append(cap_err)
+                            cap_flag[0] = cap_err
                             calls.append({"host": None, "model": req.get("model"), "usage": None, "refused": "cost cap"})
                             out = json.dumps({"error": {"code": 402, "message": "cost cap reached"}}).encode("utf-8")
                             self.send_response(402)
@@ -248,6 +248,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                             self.send_header("Content-Type", "application/json")
                             self.send_header("Content-Length", str(len(out)))
                             self.end_headers()
+                            calls.append({"host": None, "model": req.get("model"), "usage": None, "refused": "meter failure"})
                             self.wfile.write(out)
                             return
                     calls.append({"host": host, "model": req.get("model"), "usage": usage, **({"upstream_error": err} if err else {})})

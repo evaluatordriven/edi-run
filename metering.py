@@ -120,6 +120,8 @@ class Meter:
             raise CapExceeded(f"next call would breach the cap: ${accrued:.6f} + est ${max(est, last):.6f} >= ${self.max_cost:.6f}")
 
     def estimate(self, body):
+        if isinstance(body, (bytes, bytearray)):  # the proxy passes raw request bytes
+            body = body.decode("utf-8", "replace")
         try:
             n = len(json.dumps(body))
         except Exception:
