@@ -41,12 +41,13 @@ def cost_of(usage, pricing):
     """Deterministic price of a usage envelope under a pricing entry (per-Mtok rates)."""
     if not isinstance(usage, dict) or not pricing:
         return 0.0
+    rate_in, rate_out = float(pricing.get("input_usd_per_mtok", 0.0)), float(pricing.get("output_usd_per_mtok", 0.0))
     in_tok = usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0
     out_tok = usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0
     total = usage.get("total_tokens")
     if total and not (in_tok or out_tok):
-        in_tok, out_tok = 0, total  # providers reporting only total_tokens price at the higher rate
-    return (in_tok / 1e6) * float(pricing.get("input_usd_per_mtok", 0.0)) + (out_tok / 1e6) * float(pricing.get("output_usd_per_mtok", 0.0))
+        return (float(total) / 1e6) * max(rate_in, rate_out)  # providers reporting only total_tokens price at the higher rate
+    return (in_tok / 1e6) * rate_in + (out_tok / 1e6) * rate_out
 
 
 def _positive(v):
@@ -166,6 +167,18 @@ class Meter:
         amended = {d for r in self._rows if r.get("kind") == "amendment" for d in r.get("amends", [])}
         return sum(float(r.get("cost", 0.0)) for r in self._rows if r.get("kind") == "call" and r.get("digest") in amended)
 
+    def token_usage(self):
+        out = {}
+        for r in self._rows:
+            if r.get("kind") != "call":
+                continue
+            key = r.get("model") or r.get("who")
+            if not key:
+                continue
+            prev = out.get(key, {})
+            out[key] = {k: prev.get(k, 0) + v for k, v in (r.get("usage") or {}).items() if isinstance(v, (int, float))}
+        return out
+
     def _open(self):
         """Open reservations: reserve rows no call or release row has retired (by id)."""
         retired = {r.get("reservation_id") for r in self._rows if r.get("kind") == "call"} | \
@@ -208,6 +221,35 @@ class Meter:
             return self._append_locked({"kind": "amendment", "amends": list(digests), "discarded_round": True, "note": note})
 
     # -- admission (C3/C4) -----------------------------------------------------
+    def max_tokens_param(self, model=None):
+        return ((self.bounds or {}).get("max_tokens_param")
+                or ((self.pricing.get(model) or {}).get("max_tokens_param") if isinstance(self.pricing.get(model), dict) else None)
+                or ((self.pricing.get("default") or {}).get("max_tokens_param") if isinstance(self.pricing.get("default"), dict) else None)
+                or "max_tokens")
+
+    @contextmanager
+    def hold(self, who, model, endpoint, req_dict, round_no=None):
+        """Enforce output-token bound on req_dict, durably reserve worst-case spend,
+        and settle or release on exit."""
+        emit_key = self.max_tokens_param(model)
+        other_key = "max_completion_tokens" if emit_key == "max_tokens" else "max_tokens"
+        mt = req_dict.get("max_tokens", req_dict.get("max_completion_tokens"))
+        bound = self.output_bound(model)
+        if bound is not None:
+            req_dict.pop(other_key, None)
+            req_dict[emit_key] = int(mt) if mt is not None and float(mt) <= bound else int(bound)
+        body = json.dumps(req_dict, sort_keys=True).encode("utf-8")
+        rid = self.reserve(body, model=model)
+        settled = [False]
+        def settle(usage):
+            self.meter_call(who, model, endpoint, body, usage=usage, round_no=round_no if round_no is not None else getattr(self, "_round", None), settle_reservation=rid)
+            settled[0] = True
+        try:
+            yield body, settle
+        finally:
+            if not settled[0]:
+                self.release(rid)
+
     def output_bound(self, model=None):
         return output_bound(self.bounds, self.pricing, model)
 
@@ -236,17 +278,6 @@ class Meter:
                 "(set bounds.max_output_tokens or pricing[<model>].max_output_tokens); "
                 "refusing to admit a call whose output spend cannot be bounded")
         return (n / 4.0) / 1e6 * rate + (bound / 1e6) * self._output_rate(model)
-
-    def check_cap(self, body=None):
-        """Sequential callers (evaluators, single-call makers): accrued + worst case."""
-        with self._lock:
-            self._rows = self._load()
-            spent = self.accrued()
-            if spent >= self.max_cost:
-                raise CapExceeded(f"cost cap reached: ${spent:.6f} accrued >= ${self.max_cost:.6f} cap")
-            nxt = max(self.estimate(body) if body is not None else 0.0, self._last_call_cost())
-            if spent + nxt >= self.max_cost:
-                raise CapExceeded(f"next call would breach the cap: ${spent:.6f} + est ${nxt:.6f} >= ${self.max_cost:.6f}")
 
     def reserve(self, body=None, model=None):
         """Durably reserve the next call's worst case before it is forwarded; returns its id."""

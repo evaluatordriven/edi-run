@@ -481,33 +481,14 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, deadline, meter=None):
 
 def _write_state(job_dir, state, meter=None):
     if meter is not None:
-        # P9 (round-3 external review #5): every state write anchors the usage log
-        # as (row count, head digest, accrued TOTAL) — the anchor proves the
-        # LATEST billed total, not a prefix. A later state write re-anchors any
-        # suffix appended in the meantime.
         state["usage_anchor"] = list(meter.anchor())
-        state.pop("usage_unanchored", None)  # the log is anchored now
+        state.pop("usage_unanchored", None)
+        tu = meter.token_usage()
+        if tu:
+            state["token_usage"] = tu
     tmp = job_dir / "state.json.tmp"
     tmp.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     os.replace(tmp, job_dir / "state.json")
-
-
-def _cost_of(usage, pricing):
-    u = usage or {}
-    rate_in, rate_out = float(pricing.get("input_usd_per_mtok", 0.0)), float(pricing.get("output_usd_per_mtok", 0.0))
-    if "prompt_tokens" in u or "completion_tokens" in u:
-        return (float(u.get("prompt_tokens", 0) or 0) * rate_in + float(u.get("completion_tokens", 0) or 0) * rate_out) / 1e6
-    # providers that report only a total: price it at the conservative (higher) rate
-    total = float(u.get("total_tokens", 0) or 0)
-    return total * max(rate_in, rate_out) / 1e6
-
-
-def _accrue(state, usages, pricing):
-    for u in usages:
-        key = u["model"] or u["evaluator"]
-        prev = state.get("token_usage", {}).get(key, {})
-        state["token_usage"] = {**state.get("token_usage", {}), key: {k: prev.get(k, 0) + v for k, v in u["usage"].items() if isinstance(v, (int, float))}}
-        state["cost_usd"] = round(state.get("cost_usd", 0.0) + _cost_of(u["usage"], pricing.get(key, pricing.get("default", {}))), 6)
 
 
 def _write_escalation(job_dir, state, cfg):
@@ -659,15 +640,8 @@ def _run_job_held(job_dir):
             state["seed_round"] = r
         else:
             try:
-                mk = adapters.run_maker(cfg["maker"], r_dir / "packet.json", art_dir, cfg["subjectFiles"], job_dir, timeout=rem_s, meter=meter, round_no=r)
-                if isinstance(mk, dict) and mk.get("usage"):
-                    mk_id = cfg["maker"].get("model", {}).get("identifier") if isinstance(cfg["maker"].get("model"), dict) else None
-                    if "agent_calls" in mk["usage"]:
-                        rows = [{"evaluator": "maker", "model": c.get("model") or mk_id, "case": "agent", "usage": c.get("usage") or {}} for c in mk["usage"]["agent_calls"] if not c.get("refused")]
-                    else:
-                        rows = [{"evaluator": "maker", "model": mk_id, "case": "maker", "usage": mk["usage"]}]
-                    _accrue(state, rows, pricing)
-                    state["cost_usd"] = round(meter.accrued(), 6)
+                adapters.run_maker(cfg["maker"], r_dir / "packet.json", art_dir, cfg["subjectFiles"], job_dir, timeout=rem_s, meter=meter, round_no=r)
+                state["cost_usd"] = round(meter.accrued(), 6)
             except (TimeoutError, subprocess.TimeoutExpired):
                 state.update(terminal_state="needs_owner", reason="maker_failed",
                              maker_error="maker wall-clock deadline exceeded (max_wall_seconds=%s)" % (cfg.get("bounds") or {}).get("max_wall_seconds"))
@@ -676,12 +650,12 @@ def _run_job_held(job_dir):
                 if isinstance(e, UnboundedOutput):
                     state.update(terminal_state="needs_owner", reason="integrity_error",
                                  integrity_error=str(e)[-300:])
-                    raise gates.GateError(str(e))  # unbounded output is an integrity refusal, not a cap trip
-                state.update(terminal_state="needs_owner", reason="cap_reached")  # a mid-round cap trip is the same terminal as a boundary trip
+                    raise gates.GateError(str(e))
+                state.update(terminal_state="needs_owner", reason="cap_reached")
                 break
             except gates.GateError:
-                raise  # integrity/security violations fail loud, never become dispositions
-            except Exception as e:  # Maker runtime crash is a halted run, not a traceback
+                raise
+            except Exception as e:
                 state.update(terminal_state="needs_owner", reason="maker_failed", maker_error=str(e)[-300:])
                 break
         cand_digest = _subject_digest(art_dir, cfg["subjectFiles"], held_hashes)
@@ -692,16 +666,15 @@ def _run_job_held(job_dir):
         if maker_ran:
             ev_prod = _append(job_dir, "artifact-produced", cfg["maker"]["name"], [art_dir / f for f in cfg["subjectFiles"]], {})
         try:
-            checks, ctls, s_rows, exts, d_scores, defects, solutions, usages = _eval_batch(cfg, job_dir, r, art_dir, t0 + max_wall - wall_base, meter=meter)
+            checks, ctls, s_rows, exts, d_scores, defects, solutions, _usages = _eval_batch(cfg, job_dir, r, art_dir, t0 + max_wall - wall_base, meter=meter)
         except CapExceeded as e:
             if isinstance(e, UnboundedOutput):
                 state.update(terminal_state="needs_owner", reason="integrity_error", integrity_error=str(e)[-300:])
                 raise gates.GateError(str(e))
-            state.update(terminal_state="needs_owner", reason="cap_reached")  # emitted checks stay; the round never becomes incumbent
+            state.update(terminal_state="needs_owner", reason="cap_reached")
             break
         state["rounds"][str(r)] = {"dir": r_dir.relative_to(job_dir).as_posix(), "producedAt": ev_prod["at"], "digest": cand_digest, "checks": checks, "controls": ctls, "scores": s_rows, "external": exts, "dim_scores": d_scores}
-        _accrue(state, usages, pricing)
-        state["cost_usd"] = round(meter.accrued(), 6)  # the meter is authoritative; _accrue's figure is display-only
+        state["cost_usd"] = round(meter.accrued(), 6)
         if any(c["outcome"] == "unobserved" for c in checks):
             if state["incumbent_round"] is None:
                 state.update(incumbent_round=r, incumbent_digest=cand_digest, incumbent_scores=d_scores)

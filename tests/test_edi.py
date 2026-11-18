@@ -542,9 +542,9 @@ class TestEDIRuntime(unittest.TestCase):
         # the cap fires BEFORE the call that would breach it (C4): accrued spend
         # alone above the cap trips the check with no call in flight (on the
         # still-clean log — a tampered log now refuses at CONSTRUCTION)
-        m3 = metering.Meter(job, pricing={"default": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}}, bounds={"max_cost_usd": 0.00005})
+        m3 = metering.Meter(job, pricing={"default": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0, "max_output_tokens": 100}}, bounds={"max_cost_usd": 0.00005})
         with self.assertRaises(metering.CapExceeded):
-            m3.check_cap("{}")
+            m3.reserve("{}")
         # tamper is refused at verify: a hand-edited log cannot re-accrue
         rows = [json.loads(ln) for ln in (job / "usage.jsonl").read_text().splitlines()]
         rows[0]["cost"] = 99.0
@@ -655,8 +655,9 @@ class TestEDIRuntime(unittest.TestCase):
 
     def test_cost_pricing_and_https_and_env_hygiene(self):
         # pricing math
-        self.assertAlmostEqual(loop._cost_of({"prompt_tokens": 1000, "completion_tokens": 2000}, {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 2.0}), 0.005)
-        self.assertEqual(loop._cost_of(None, {}), 0.0)
+        import metering
+        self.assertAlmostEqual(metering.cost_of({"prompt_tokens": 1000, "completion_tokens": 2000}, {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 2.0}), 0.005)
+        self.assertEqual(metering.cost_of(None, {}), 0.0)
         # credentials never go over plain http
         with self.assertRaises(ValueError):
             adapters._chat_json("http://api.example.com/v1", "m", "s", "u", timeout=1)
