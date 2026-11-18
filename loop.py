@@ -413,7 +413,7 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
         ev_prod = _append(job_dir, "artifact-produced", seed_author or cfg["maker"]["name"], [art_dst / f for f in cfg["subjectFiles"]], {"seed": True} if seed_author else {})
         checks = [dict(c, at=_append(job_dir, "check", c["evaluator"], [], c)["at"]) for c in win["checks"]]
         for k in win["controls"]:
-            _append(job_dir, "control", k["evaluator"], [], {ki: vi for ki, vi in k.items() if ki not in ("expected", "outcome")})
+            _append(job_dir, "control", k["evaluator"], [], dict(k))  # full payload: the re-logged batch is self-describing
         for ex in win["external"]:
             _append(job_dir, "external", ex["readBy"], [], ex)
         prod_at = ev_prod["at"]
