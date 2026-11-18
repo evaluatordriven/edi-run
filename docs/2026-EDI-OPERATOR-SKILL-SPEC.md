@@ -96,7 +96,7 @@ never prompt; never print secrets.
 | Script | Inputs | Outputs | Notes |
 |---|---|---|---|
 | `new_job.py` | `--name`, `EDI_HOME`, optional `--seed-dir`, `--author` | Scaffolded job dir; skeleton `job.json` with field comments | Calls `edi.py init`; creates `AUTHORSHIP.md` skeleton. Never writes bar/controls content. |
-| `preflight.py` | job dir, `EDI_AGENT_ID` | JSON: `{pass, violations[], warnings[]}` | Mirrors freeze gates read-only: pricing per model seat, seed files == subjectFiles, seat-name collisions (evaluators vs bar author vs seed author vs agent), bounds sanity, `$0`-placeholder pricing → warning. |
+| `preflight.py` | job dir, `EDI_AGENT_ID` | JSON: `{pass, violations[], warnings[]}` | Mirrors freeze gates read-only: pricing per model seat, seed files == subjectFiles, seat-name collisions (evaluators vs bar author vs seed author vs agent), bounds sanity. `$0`-placeholder pricing is refused outright by the runtime (G2) and surfaces as a violation. |
 | `escalation_report.py` | job dir | JSON evidence pack: escalation reason+options, terminal state, rounds, last 10 log events, error fields, artifact digests | The single input to the §6 review rubric. |
 | `cost_report.py` | job dir | JSON: `{spent_usd, cap_usd, per_model_tokens[], wall_seconds}` | From `state.json` only. |
 | `record_summary.py` | job dir | JSON: `{verified, verdict, disposition, scores{dim: score}, maker_of_record, gaps[]}` | Runs `verify_job` internally; reports its exit code verbatim. |
