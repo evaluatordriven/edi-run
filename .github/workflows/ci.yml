@@ -35,6 +35,8 @@ jobs:
       # backlog (see probes/run_probes.py KNOWN_FAILS) and are allowed until fixed.
       - name: Probe gate
         run: python3 probes/run_probes.py
+      - name: Core LOC budget gate
+        run: python3 probes/loc.py --check
   macos:
     # Self-hosted macOS runner (Steve-Moitozo, ARM64): the hosted macOS runner queue
     # repeatedly killed queued jobs at ~15m with zero steps (2026-11-17). A local
@@ -57,3 +59,5 @@ jobs:
       # backlog (see probes/run_probes.py KNOWN_FAILS) and are allowed until fixed.
       - name: Probe gate
         run: /opt/homebrew/bin/python3 probes/run_probes.py
+      - name: Core LOC budget gate
+        run: /opt/homebrew/bin/python3 probes/loc.py --check

@@ -1,5 +1,25 @@
 # edi-run DECISIONS.log — newest at TOP
 
+## 2026-11-18 — Minimalism QAR Refactoring & Trim (Opus 5.5 + Grok Bot Review Bundle)
+
+**Ruling (Owner: S2, "Proceed" on Decisions 1–7, Option A across all 7).**
+Core LOC across the 5 runtime modules (`edi.py`, `gates.py`, `loop.py`, `adapters.py`, `metering.py`) had grown to **3,016 physical lines (2,191 code lines)** at `d3a3721`. Following the Opus 5.5 + Grok Bot review bundle (`~/Desktop/Edi-run/20261118-244-review/`), all 7 verified runtime defects were fixed and the structural cuts were executed to bring the core down to **1,737 physical lines (1,496 code lines, 43 `# G:<id>` comment/doc lines, 198 blank lines)** — enforced in CI by `probes/loc.py --check` (`<= 1,500` code / `<= 2,000` physical).
+
+**Defects Fixed:**
+- **R1 / N13 (`loop.py:freeze_job`)**: Deleted the pre-gate `job.json` write so a refused freeze leaves `job.json` byte-identical on disk while keeping the post-gate atomic `job.json.tmp-freeze` write before `job-start`.
+- **Q1 / N12 (`metering.py:output_bound`, `loop.py:freeze_job`)**: Required a positive finite `max_output_tokens` at `freeze` (`bounds.max_output_tokens` or `pricing[<model>].max_output_tokens`) for every model/agent seat so unbounded output is refused at `freeze`, never mid-run.
+- **N8 (`loop.py:run_job`, `resume_job`)**: Wrapped `run_job` and `resume_job` in `with job_lock(job_dir):` (`_run_job_held` / `_resume_job_held`) so concurrent `run`/`resume`/`finalize` invocations serialize cleanly on the job lifecycle lock (verified 5/5 by `N8x5`).
+- **R3 & Q2 (`gates.py:tree_manifest`)**: Replaced the 3 separate seat-file walks and 65-line AST Python import walker with a single `tree_manifest(job_dir)` that pins `{rel_path: sha256}` of every file under `job_dir` except `RUNTIME_WRITTEN` and `NEVER_AUTHORED` (`__pycache__`, `.DS_Store`, `*.pyc`). Fixes `finalize` failing when Python writes `__pycache__/*.pyc` during `run` (**R3**) and pins `held_out/` inside `pins["tree"]` (**Q2**).
+- **R4 / N2b (`loop.py:run_job`, `resume_job`)**: Resumed rounds never move or overwrite `rounds/round-NN`; new attempts write to `rounds/round-NN-a2` (recording `"dir"` in `state["rounds"][r]`), so every path in `job.jsonl` stays immutable on disk and unmodified `vendor/record.py verify --files` passes on resumed jobs.
+- **N11 (`metering.py:Meter.hold`, `adapters.py:_chat_json`)**: Wired direct model Maker and model Evaluator calls through `with meter.hold(...)` so every paid seat call gets a durable pre-call reservation and provider-side `max_tokens`/`max_completion_tokens` injection.
+
+**Structural Cuts Executed:**
+- **Cut A1 (`adapters.py`)**: Deduplicated 12 HTTP response blocks in `_Proxy.do_POST` into `_Proxy._reply()` and `_Proxy._refuse()`.
+- **Cuts C + B′ (`metering.py`, `loop.py`, `adapters.py`)**: Merged `usage.resv.jsonl` into `usage.jsonl` as a single hash-chained spend ledger carrying `reserve`, `call`, `release`, and `amendment` rows (3-element `anchor()`), dropped `anomaly` rows from `usage.jsonl` (Decision 6A), called `meter.recover()` on `Meter` construction inside `run`/`resume`/`finalize`, and removed `adapters._admission_closed`. Retired 15 dual-ledger mechanism tests and added `tests/test_trim_requirements.py` (11 requirement-level tests).
+- **Decision 4A (`adapters.py:sandbox_prefix`)**: Dropped `/opt` and `/var/lib` from the `bwrap` read allowlist, binding only `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/etc` plus the resolved `sys.executable` prefix.
+- **Cut F & Grok Cuts 2–9, 14**: Unified seat subprocess execution onto `adapters._run_seat()`, extracted `_fence_prompt()`, removed `loop._accrue`/`_cost_of` (deriving `token_usage` from `meter.token_usage()`), and replaced multi-line review-history comments in the 5 core modules with single-line `# G:<id>` invariant tags.
+- **Cut G (`examples/`)**: Replaced the 9 declined scaffold directories (`examples/live-aider-job`..`job10`) with a 10-job defect-ladder summary table in `examples/live-aider-job11/README.md`, scrubbed host paths and `*.lock` files, and added `*.lock` to `.gitignore`.
+
 ## 2026-11-18 — Round-3 deep-review defects: disposition and implementation notes
 
 **Disposition.** All nine deep-review defects (P1–P9), the operator-skill items,

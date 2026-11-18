@@ -1,9 +1,9 @@
 # 2026 E-DI Runtime Solution Architecture (`edi-run`)
 
 **Scope:** Reference runtime engine implementing `evaluatordriven/doctrine` (v0.2.1, ratified 2026-11-02) and emitting conforming `evaluatordriven/custody` records (`custody/v1`, SPEC v0.9.8, predicate `https://evaluatordriven.com/custody/v1`).
-**Baseline reuse (Wrap vs. Build):** `evaluatordriven/custody` already ships three zero-dependency Python 3.10+ stdlib tools (`tools/record.py`, `tools/make_record.py`, `checker/check.py`). The runtime **wraps** those three files verbatim for hash-chained event logging, in-toto statement assembly, and post-run verification—building only the loop state machine, seat-boundary gates, and adapter dispatch (four core modules, ~1,600 production LOC Python stdlib; ~4,150 tracked lines including tests and the probe gate).
+**Baseline reuse (Wrap vs. Build):** `evaluatordriven/custody` already ships three zero-dependency Python 3.10+ stdlib tools (`tools/record.py`, `tools/make_record.py`, `checker/check.py`). The runtime **wraps** those three files verbatim for hash-chained event logging, in-toto statement assembly, and post-run verification—building only the loop state machine, seat-boundary gates, spend metering, and adapter dispatch (five core modules: `edi.py`, `gates.py`, `loop.py`, `adapters.py`, `metering.py` — **1,496 code lines / 1,737 physical lines** of Python stdlib, enforced by `probes/loc.py --check` at `<= 1,500` code / `<= 2,000` physical).
 
-**Currency stamp:** this document tracks `main` at `9ae8598` (2026-11-18) — suite 231+ OK (1 macOS skip), probe gate 14 PASS / 0 FAIL / 1 KNOWN-FAIL (S1 macOS read posture) / 5 SKIP (bwrap/Linux), CI green on all legs.
+**Currency stamp:** this document tracks `main` (2026-11-18, Minimalism QAR Trim) — suite 212+ tests OK (1 macOS skip), probe gate 14 PASS / 0 FAIL / 1 KNOWN-FAIL (S1 macOS read posture) / 5 SKIP (bwrap/Linux), core LOC gate green (`1,496` code / `1,737` physical), CI green on all legs.
 
 ---
 
@@ -147,7 +147,7 @@ Every rule in `DOCTRINE.md` and `SPEC.md` maps to a deterministic runtime gate e
   - *Trade-off:* Short-circuiting intermediate rounds saves 40–70% of Evaluator token spend (`DOCTRINE.md` §8 F2) at the cost of deferring prose/semantic feedback until structural checks pass.
 - **Minimalism**
   - *Stimulus:* Inspecting the repository dependency tree, process table, and module graph.
-  - *Response:* `0` third-party runtime packages (`pyproject.toml` / `requirements.txt` empty; Python 3.10+ stdlib only), four core files (`edi.py`, `gates.py`, `loop.py`, `adapters.py` — ~1,600 production LOC of ~4,150 tracked lines including tests and the 712-LOC probe gate), one sequential loop per run with short-lived seat subprocesses, and all record construction and verification delegated to the existing `custody` reference tools.
+  - *Response:* `0` third-party runtime packages (`pyproject.toml` / `requirements.txt` empty; Python 3.10+ stdlib only), five core files (`edi.py` 39, `gates.py` 412, `loop.py` 639, `adapters.py` 397, `metering.py` 250 — **1,737 physical lines / 1,496 code lines**, gated in CI by `probes/loc.py --check`), one sequential loop per run with short-lived seat subprocesses, and all record construction and verification delegated to the existing `custody` reference tools.
   - *Trade-off:* No concurrent distributed worker pool; rounds execute sequentially in a single process, which matches `DOCTRINE.md` §8 (*"What is claimed is repeatability, not scale"*).
 
 ### Sensitivity Points & Risks
@@ -230,18 +230,16 @@ python3 edi.py verify <job_dir>
 │   ├── controls/             # K_clean and K_planted files per dimension (REAL scoreable artifacts, not prose stubs)
 │   └── planted/              # CL3 pre-run planted failure cases
 ├── rounds/                   # Immutable per-round snapshots (runtime-produced; freeze refuses a job that already has one)
-│   └── round-01/
-│       ├── packet.json       # Filtered input packet delivered to Maker (verified by gate_packet)
-│       ├── artifact/         # Maker output files for Round 1 (the custody OUTPUT — excluded from the seat-code pin)
-│       └── package-r01.tar.gz
-├── partial/                  # (after `resume`) the moved-out partial round of a hard-killed attempt (rounds/ stays immutable)
-├── artifact/                 # Symlink or atomic copy of the current Pareto-best artifact (subject)
+│   ├── round-01/             # Initial attempt for Round 1 (never moved or overwritten on resume)
+│   │   ├── packet.json       # Filtered input packet delivered to Maker (verified by gate_packet)
+│   │   └── artifact/         # Maker output files for Round 1 (the custody OUTPUT — excluded from tree_manifest)
+│   └── round-01-a2/          # (after `resume`) second attempt for Round 1; path recorded in state.rounds["1"].dir
+├── artifact/                 # Atomic copy of the current Pareto-best artifact (subject)
 ├── evidence/                 # Cited evidence files for CL1-8 and CL1-15
 │   ├── reading-D1-E1-r1.json # Structured Evaluator verdict + quoted observation
 │   └── harness-E1-B1.json    # Raw transport log verified by non-Maker for CL1-15
 ├── scores.jsonl              # Raw control score rows consumed by make_record.py (G2.3)
-├── usage.jsonl               # Spend source of truth: append-only, hash-chained, fsynced meter rows (job root)
-├── usage.resv.jsonl          # Reservation ledger (worst-case reserve before each paid call) + usage.lock (flock)
+├── usage.jsonl               # Single append-only, hash-chained spend ledger (reserve, call, release, amendment rows)
 ├── escalation.json           # Deterministic needs_owner package: reason, canned options, recommendation, tried/why (D4.11)
 ├── job.jsonl                 # Hash-chained custody log managed via custody/tools/record.py (append-only, never rewritten)
 └── record.json               # Final emitted in-toto Statement (custody/v1) — or the gap-listed record (§6)
