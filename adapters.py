@@ -1,5 +1,5 @@
 """Seat execution adapters (script subprocess + stdlib OpenAI-compatible HTTP client). Standard library only."""
-import http.server, json, math, os, pathlib, re, shutil, socketserver, subprocess, sys, tempfile, threading, urllib.error, urllib.parse, urllib.request
+import http.server, json, math, os, pathlib, re, shutil, signal, socketserver, subprocess, sys, tempfile, threading, urllib.error, urllib.parse, urllib.request
 import secrets
 import gates
 from metering import CapExceeded
@@ -548,7 +548,31 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 # subtree is bound back read-only. The packet is read from the workspace copy.
                 relay = [sys.executable, "-I", "-c", _RELAY, str(sb_p / "proxy.sock"), str(inner_port)] if stype == "bwrap" else []
                 cmd = (sandbox_prefix(stype, jd, sb_p, reads=reads) or []) + relay + cmd
-                proc = subprocess.run(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env, capture_output=True, text=True, timeout=max(1.0, float(timeout)), stdin=subprocess.DEVNULL)  # no inherited tty: no TIOCSTI keystroke injection (recheck #5)
+                # K1 (exposed live 2026-11-18 when the /dev/null fix let the probe's
+                # maker actually run — its PASS had been vacuous): the agent seat can
+                # spawn children of its own, and NOTHING reaped them — a maker child
+                # outlived the job. Run the seat in its own process group and kill
+                # the WHOLE group when the seat exits (or times out): descendants
+                # never outlive the round.
+                proc = subprocess.Popen(cmd + [str(sb_p / "packet.json"), str(sb_art)], cwd=str(sb_p), env=env,
+                                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                        text=True, start_new_session=True)  # no inherited tty: no TIOCSTI keystroke injection (recheck #5)
+                seat_pid = proc.pid  # the process-group leader id survives the communicate() rebind
+                try:
+                    _out, _err = proc.communicate(timeout=max(1.0, float(timeout)))
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(seat_pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+                    proc.communicate()
+                    raise
+                finally:
+                    try:
+                        os.killpg(seat_pid, signal.SIGKILL)  # reap descendants: K1 — pgid == seat pid (start_new_session); the leader is already reaped here, so getpgid would fail and silently skip the kill
+                    except (ProcessLookupError, PermissionError):
+                        pass
+                proc = subprocess.CompletedProcess(cmd, proc.returncode, _out, _err)
                 mk_usage = {"agent_calls": calls}  # metered per-call by the loop
                 round_dir = pathlib.Path(out_dir).resolve().parent.parent
                 if round_dir.is_dir():
