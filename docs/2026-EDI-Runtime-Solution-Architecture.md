@@ -1,9 +1,9 @@
-# 2026 E-DI Runtime Solution Architecture (`edi-run` `v0.1.2`)
+# 2026 E-DI Runtime Solution Architecture (`edi-run` `v0.1.3`)
 
-**Scope:** Reference runtime engine (`v0.1.2`, released 2026-11-19) implementing `evaluatordriven/doctrine` (v0.2.1, ratified 2026-11-02) and emitting conforming `evaluatordriven/custody` records (`custody/v1`, SPEC v0.9.8, predicate `https://evaluatordriven.com/custody/v1`).
+**Scope:** Reference runtime engine (`v0.1.3`, released 2026-11-19) implementing `evaluatordriven/doctrine` (v0.2.1, ratified 2026-11-02) and emitting conforming `evaluatordriven/custody` records (`custody/v1`, SPEC v0.9.8, predicate `https://evaluatordriven.com/custody/v1`).
 **Baseline reuse (Wrap vs. Build):** `evaluatordriven/custody` already ships three zero-dependency Python 3.10+ stdlib tools (`tools/record.py`, `tools/make_record.py`, `checker/check.py`). The runtime **wraps** those three files verbatim for hash-chained event logging, in-toto statement assembly, and post-run verification—building only the loop state machine, seat-boundary gates, spend metering, and adapter dispatch (five core modules: `edi.py`, `gates.py`, `loop.py`, `adapters.py`, `metering.py` — **1,718 code lines / 1,998 physical lines** of Python stdlib, enforced by `probes/loc.py --check` at `<= 1,777` code lines per Owner ruling 2026-11-18).
 
-**Currency stamp:** this document tracks `main` (`v0.1.2`, 2026-11-19, Operator-Skill Defect Fixes + Ruling A + 0.1.1 feedback batch) — suite 292 tests OK (1 macOS skip), external repro `repro_skill_0_1_0.py` 6/6, successor repro `probes/repro_successor_0_1_1.py` PASS, probe gate 14 PASS / 0 FAIL / 1 KNOWN-FAIL (S1 macOS read posture) / 5 SKIP (bwrap/Linux), core LOC gate green (`1,718 <= 1,777` code lines), CI green on all legs (macos, linux 3.10, linux 3.12) at `5d32a38`.
+**Currency stamp:** this document tracks `main` (`v0.1.3`, 2026-11-19, Operator-Skill Defect Fixes + Ruling A + 0.1.1 feedback batch) — suite 293 tests OK (1 macOS skip), external repro `repro_skill_0_1_0.py` 6/6, successor repro `probes/repro_successor_0_1_1.py` PASS, probe gate 14 PASS / 0 FAIL / 1 KNOWN-FAIL (S1 macOS read posture) / 5 SKIP (bwrap/Linux), core LOC gate green (`1,718 <= 1,777` code lines), CI green on all legs (macos, linux 3.10, linux 3.12) at `d027757`.
 
 ---
 

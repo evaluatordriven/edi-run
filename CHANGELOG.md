@@ -1,5 +1,11 @@
 # edi-run CHANGELOG
 
+## v0.1.3 (2026-11-19)
+
+- **Pre-finalize `record_summary.py` reports the full score spread**: the pre-disposition stage rebuilt its scores from `state.incumbent_scores`, which `loop.py` constructs as the **minimum** per dimension — a split between Evaluators reached the Owner as one number in the summary the Owner rules on. It now builds the same `{observations[], min, max, straddles_threshold}` shape from the incumbent round's checks (every evaluator/run observation) and names the round it read (`scores_round`).
+- **`freeze --dry-run` (preflight) runs keyless by design**: a real `freeze` refuses a direct model seat whose key env resolves empty (spend must never be reachable without a key), but the dry run makes no paid calls and adoption launchers deliberately keep the key out of every process that doesn't need it. The dry run now prints a `WARNING:` naming the remedy and passes; `preflight.py` surfaces it in `warnings` and no longer folds it into refusal text.
+- DECISIONS.log: the LOC counting ruling recorded explicitly (`probes/loc.py` code-line count is the official measure for the 1,777 cap; the weighted count is informational) and the stale "pending ruling" item closed.
+
 ## v0.1.2 (2026-11-19)
 
 Fixes from the maintainer feedback on 0.1.1 (NOTE-TO-MAINTAINER-edi-run-0.1.1-2026-11-19) and the seed-author scope correction:
