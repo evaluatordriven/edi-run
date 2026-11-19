@@ -104,6 +104,21 @@ def gate_authorship(cfg, job_dir):
     for key in ("bar author", "rubric author", "method author", "seed author"):
         if (auth := a.get(key)) and auth == op:
             raise GateError(f"AUTHORSHIP.md declares Operator equal to the {key} ({auth}); the Operator seat cannot author an instrument it operates (CL1-6)")
+    # Spec §2: an instrument's author may never sit as Maker or Evaluator — an
+    # author judging with (or making against) their own rubric is self-endorsement.
+    seats = [(f"Maker {maker.get('name')}", maker.get("name"))] + [
+        (f"Evaluator {e.get('id') or e.get('name')}", e.get("name"))
+        for e in (cfg.get("evaluators") or [])]
+    for key in ("bar author", "rubric author", "method author"):
+        if not (auth := a.get(key)):
+            continue
+        for label, name in seats:
+            if name and _canon(name) == auth:
+                raise GateError(f"AUTHORSHIP.md declares {key} ({auth}) seated as {label}; an instrument's author may not act as Maker or Evaluator (CL1-6)")
+    if (seed_auth := a.get("seed author")):
+        for label, name in seats:
+            if name and _canon(name) == seed_auth:
+                raise GateError(f"AUTHORSHIP.md declares seed author ({seed_auth}) seated as {label}; the seed's author may not judge or remake their own draft (CL1-6)")
 
 
 def gate_freeze_pre(cfg, job_dir):

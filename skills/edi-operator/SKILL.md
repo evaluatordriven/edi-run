@@ -79,8 +79,10 @@ A job is a directory: `job.json`, `bar.md` (the bar — what the artifact must s
 (the Maker), `seed/` (the artifact the Maker starts from), and `held_out/`
 (controls the Maker must never see; `rounds/` is created by `run`, never pre-created at
 `init` or `freeze`). `edi.py init <job_dir>` scaffolds the structure;
-**you author all content** — the scaffold is empty by design, and filling it with
-starter text is a defect.
+**you never author bar, rubric, method or seed content** — those come from named
+authors who are not you (the Operator), you copy them in verbatim and record them in
+`AUTHORSHIP.md`; the scaffold is empty by design, and an Operator-authored instrument
+is refused at freeze (CL1-6).
 
 `job.json` essentials (the scaffold from `edi.py init` shows every key):
 `levelClaimed` (`CL1`/`CL2`/`CL3`), `subjectFiles` (must match the files present in
@@ -105,9 +107,11 @@ Each procedure ends in exactly one of: **report-to-Owner**, **execute-ruled-acti
 **halt-and-explain**.
 
 - **P1 New job** — `new_job.py --name <name> [--seed-dir <dir>]` scaffolds under
-  `$EDI_HOME`. You supply bar/rubric/method content; record authorship in
+  `$EDI_HOME`. You do NOT supply bar/rubric/method content: the named authors
+  (never you, the Operator) provide it, you copy it in verbatim and record it in
   `AUTHORSHIP.md` (`Operator:` = your `EDI_AGENT_ID`; add `Sponsor:` if the Owner
-  named one). → report-to-Owner (scaffold ready, awaiting bar content).
+  named one). Never edit an author's file; a defect goes back to its author.
+  → report-to-Owner (scaffold ready, awaiting bar content).
 - **P2 Preflight** — `preflight.py <job_dir>` (thin wrapper over `freeze --dry-run`).
   PASS → proceed to P3. FAIL → fix what you authored, re-run; a failure you cannot fix
   is → report-to-Owner. Never freezes on its own.

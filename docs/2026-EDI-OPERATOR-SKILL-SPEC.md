@@ -41,10 +41,14 @@ Seat separation extends to **agents**. The operating agent is a potential seat h
 
 - If `EDI_AGENT_ID` authored the `bar.md`/`rubric.md`/`method.md` of a job, that agent
   may not operate (or act as) the Maker or an Evaluator for that job (CL1-6 extended).
+- Symmetrically, the author of `bar.md`/`rubric.md`/`method.md` may never sit as the
+  Maker or an Evaluator — an author judging with (or making against) their own
+  instrument is self-endorsement — and the seed's author may not sit as an Evaluator.
 - Agent authorship is recorded in the job's `AUTHORSHIP.md` (skill-created,
   Owner-visible, outside the custody chain): who authored bar, rubric, method, seed,
   and which agent is operating.
-- `preflight.py` refuses a job whose declared author set collides with its seat set.
+- `preflight.py` refuses a job whose declared author set collides with its seat set;
+  `gate_authorship` enforces the same refusal at freeze.
 - Two agents operating concurrently must not both act as Maker/Evaluator in one job;
   the skill instructs the agent to check `AUTHORSHIP.md` and stop on ambiguity.
 

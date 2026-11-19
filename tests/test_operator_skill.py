@@ -456,7 +456,7 @@ class TestReviewBriefing2026_11_19(OperatorScriptTest):
     author-seated-as-Evaluator); RULING_A_PENDING=False activates them red-first.
     """
 
-    RULING_A_PENDING = True
+    RULING_A_PENDING = False  # Owner ruled 2026-11-19: keep the runtime rule (CL1-6)
 
     def _job_frozen_run(self, name, max_rounds=None):
         job = self._make_base_job(name)
@@ -480,16 +480,9 @@ class TestReviewBriefing2026_11_19(OperatorScriptTest):
     def test_r2_author_seated_as_evaluator_is_refused(self):
         # Spec §2: a rubric/method author may not sit as an Evaluator (gate check).
         job = self._make_base_job("r2")
-        auth = (job / "AUTHORSHIP.md").read_text(encoding="utf-8").splitlines()
-        out = []
-        for ln in auth:
-            if ln.startswith("Rubric author:"):
-                out.append("Rubric author: Taylor Grant")
-            elif ln.startswith("Method author:"):
-                out.append("Method author: Taylor Grant")
-            else:
-                out.append(ln)
-        (job / "AUTHORSHIP.md").write_text("\n".join(out) + "\n", encoding="utf-8")
+        (job / "AUTHORSHIP.md").write_text(
+            "Operator: someone-else\nBar author: Jordan Blake\nRubric author: Taylor Grant\n"
+            "Method author: Taylor Grant\nSeed author:\nSponsor:\n", encoding="utf-8")
         r = run_script("preflight.py", job, env_extra=self.env)
         self.assertEqual(r.returncode, 1, "preflight must refuse an instrument author seated as Evaluator")
 
