@@ -1,6 +1,6 @@
-# edi-run
+# edi-run (`v0.1.0`)
 
-Minimal Python 3.10+ standard-library reference runtime for [Evaluator-Driven Iteration (E-DI)](https://github.com/evaluatordriven/doctrine) emitting conforming [`custody/v1` records](https://github.com/evaluatordriven/custody).
+Minimal Python 3.10+ standard-library reference runtime (`v0.1.0`, released 2026-11-18) for [Evaluator-Driven Iteration (E-DI)](https://github.com/evaluatordriven/doctrine) emitting conforming [`custody/v1` records](https://github.com/evaluatordriven/custody).
 
 ## Architecture
 
@@ -11,6 +11,8 @@ See [`docs/2026-EDI-Runtime-Solution-Architecture.md`](docs/2026-EDI-Runtime-Sol
 - `examples/two-round-job/` — Offline deterministic script Maker + script Evaluator (`CL1 · process`).
 - `examples/live-llm-job/` — Live LLM Maker (`qwen/qwen3-32b`) + dual Evaluators (`StructGate` script + `anthropic/claude-opus-5.5` model) converging in 2 rounds (`CL1 · process`).
 - `examples/live-cl2-job/` — Live multi-operator `CL2 · process` loop (`qwen/qwen3-32b` on `openrouter.ai` + `StructGate` script + `gemini-3-flash-preview` on `generativelanguage.googleapis.com`, `R=2` runs per dimension with `spread[]`).
+- `examples/live-aider-job11/` — Live sandboxed Agent Maker (`Aider 0.86.2` on `qwen/qwen3-32b`) through the loop-hosted metering proxy (`CL1 · process`, plus the 10-job hardening ladder in `examples/live-aider-job11/README.md`).
+- `examples/live-readings-plumbline/` — Live Entry B `mode: "readings"` (`census`, `C29`) job reading `plumbline` v0.1.0 (`README.md` + `docs/custody-emission.md`) with `StructPinGate` script + `anthropic/claude-opus-5.5` model Evaluators (`R=2` runs, grounded verbatim quotations).
 
 ## Usage
 

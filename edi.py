@@ -4,6 +4,7 @@ import argparse, pathlib, sys
 import gates, loop
 
 # G:exit-codes 1/2 reserved for gate refusal and usage; run/record outcomes use 3..6
+VERSION = "0.1.0"
 EXIT_CODES = {"ok": 0, "refused": 1, "usage": 2, "rejected": 3, "needs_owner": 4, "record_failed": 5, "record_undecided": 6}
 _RUN = {0: 0, 1: EXIT_CODES["rejected"], 2: EXIT_CODES["needs_owner"]}
 _RECORD = {0: 0, 1: EXIT_CODES["record_failed"], 2: EXIT_CODES["record_undecided"]}
@@ -11,6 +12,7 @@ _RECORD = {0: 0, 1: EXIT_CODES["record_failed"], 2: EXIT_CODES["record_undecided
 
 def main():
     ap = argparse.ArgumentParser(description="E-DI minimal reference runtime")
+    ap.add_argument("--version", action="version", version=f"edi-run {VERSION}")
     sub = ap.add_subparsers(dest="cmd", required=True)
     frz = sub.add_parser("freeze")
     frz.add_argument("job_dir", type=pathlib.Path)

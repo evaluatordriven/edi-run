@@ -1,9 +1,9 @@
-# 2026 E-DI Runtime Solution Architecture (`edi-run`)
+# 2026 E-DI Runtime Solution Architecture (`edi-run` `v0.1.0`)
 
-**Scope:** Reference runtime engine implementing `evaluatordriven/doctrine` (v0.2.1, ratified 2026-11-02) and emitting conforming `evaluatordriven/custody` records (`custody/v1`, SPEC v0.9.8, predicate `https://evaluatordriven.com/custody/v1`).
-**Baseline reuse (Wrap vs. Build):** `evaluatordriven/custody` already ships three zero-dependency Python 3.10+ stdlib tools (`tools/record.py`, `tools/make_record.py`, `checker/check.py`). The runtime **wraps** those three files verbatim for hash-chained event logging, in-toto statement assembly, and post-run verification—building only the loop state machine, seat-boundary gates, spend metering, and adapter dispatch (five core modules: `edi.py`, `gates.py`, `loop.py`, `adapters.py`, `metering.py` — **1,646 code lines / 1,899 physical lines** of Python stdlib, enforced by `probes/loc.py --check` at `<= 1,777` code lines per Owner ruling 2026-11-18).
+**Scope:** Reference runtime engine (`v0.1.0`, released 2026-11-18) implementing `evaluatordriven/doctrine` (v0.2.1, ratified 2026-11-02) and emitting conforming `evaluatordriven/custody` records (`custody/v1`, SPEC v0.9.8, predicate `https://evaluatordriven.com/custody/v1`).
+**Baseline reuse (Wrap vs. Build):** `evaluatordriven/custody` already ships three zero-dependency Python 3.10+ stdlib tools (`tools/record.py`, `tools/make_record.py`, `checker/check.py`). The runtime **wraps** those three files verbatim for hash-chained event logging, in-toto statement assembly, and post-run verification—building only the loop state machine, seat-boundary gates, spend metering, and adapter dispatch (five core modules: `edi.py`, `gates.py`, `loop.py`, `adapters.py`, `metering.py` — **1,648 code lines / 1,901 physical lines** of Python stdlib, enforced by `probes/loc.py --check` at `<= 1,777` code lines per Owner ruling 2026-11-18).
 
-**Currency stamp:** this document tracks `main` (2026-11-18, Post-18e Readings Fixes & Live Plumbline Census) — suite 267 tests OK (1 macOS skip), probe gate 14 PASS / 0 FAIL / 1 KNOWN-FAIL (S1 macOS read posture) / 5 SKIP (bwrap/Linux), reviewer additions-4 (`N14`–`N16`) 3/3 PASS, core LOC gate green (`1,646 <= 1,777` code lines), CI green on all legs.
+**Currency stamp:** this document tracks `main` (`v0.1.0`, 2026-11-18, Post-18e Readings Fixes & Live Plumbline Census) — suite 267 tests OK (1 macOS skip), probe gate 14 PASS / 0 FAIL / 1 KNOWN-FAIL (S1 macOS read posture) / 5 SKIP (bwrap/Linux), reviewer additions-4 (`N14`–`N16`) 3/3 PASS, core LOC gate green (`1,648 <= 1,777` code lines), CI green on all legs.
 
 ---
 
@@ -148,7 +148,7 @@ Every rule in `DOCTRINE.md` and `SPEC.md` maps to a deterministic runtime gate e
   - *Trade-off:* Short-circuiting intermediate rounds saves 40–70% of Evaluator token spend (`DOCTRINE.md` §8 F2) at the cost of deferring prose/semantic feedback until structural checks pass.
 - **Minimalism**
   - *Stimulus:* Inspecting the repository dependency tree, process table, and module graph.
-  - *Response:* `0` third-party runtime packages (`pyproject.toml` / `requirements.txt` empty; Python 3.10+ stdlib only), five core files (`edi.py` 31, `gates.py` 359, `loop.py` 678, `adapters.py` 366, `metering.py` 212 — **1,646 code lines / 1,899 physical lines**, gated in CI by `probes/loc.py --check` at `<= 1,777` code lines), one sequential loop per run with short-lived seat subprocesses, and all record construction and verification delegated to the existing `custody` reference tools.
+  - *Response:* `0` third-party runtime packages (`pyproject.toml` / `requirements.txt` empty; Python 3.10+ stdlib only), five core files (`edi.py` 33, `gates.py` 359, `loop.py` 678, `adapters.py` 366, `metering.py` 212 — **1,648 code lines / 1,901 physical lines**, gated in CI by `probes/loc.py --check` at `<= 1,777` code lines), one sequential loop per run with short-lived seat subprocesses, and all record construction and verification delegated to the existing `custody` reference tools.
   - *Trade-off:* No concurrent distributed worker pool; rounds execute sequentially in a single process, which matches `DOCTRINE.md` §8 (*"What is claimed is repeatability, not scale"*).
 
 ### Sensitivity Points & Risks
