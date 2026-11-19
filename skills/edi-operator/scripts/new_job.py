@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """P1 new_job: scaffold an edi-run job under $EDI_HOME via `edi.py init`.
 
-Never writes bar/rubric/method/seed content; only fills the AUTHORSHIP.md
+Never writes bar/rubric/method/seed CONTENT; only fills the AUTHORSHIP.md
 Operator line with EDI_AGENT_ID (plus an optional extra author). A --seed-dir
-path is RECORDED in the output JSON only — control content is never copied.
+path is copied VERBATIM into the job's seed/ directory (transcription of an
+existing seed, not authorship) and the copy is recorded in the output JSON.
 """
 import argparse
+import json
 import pathlib
+import shutil
 import sys
 
 from common import (EXIT_OK, EXIT_REFUSE, EXIT_USAGE, edi_home, emit, refuse,
@@ -16,8 +19,8 @@ from common import (EXIT_OK, EXIT_REFUSE, EXIT_USAGE, edi_home, emit, refuse,
 def main():
     ap = argparse.ArgumentParser(description="Scaffold a new edi-run job (P1)")
     ap.add_argument("--name", required=True, help="job name (created at $EDI_HOME/<name>)")
-    ap.add_argument("--seed-dir", default=None,
-                    help="existing seed directory; its PATH is recorded, never copied")
+    ap.add_argument("--seed-dir", default=None, type=pathlib.Path,
+                    help="existing seed directory; copied verbatim into the job's seed/")
     ap.add_argument("--author", default=None,
                     help="optional extra author recorded alongside the Operator identity")
     ap.add_argument("--mode", default=None, choices=("scored", "readings"),
@@ -39,6 +42,14 @@ def main():
         print((proc.stderr or proc.stdout).strip(), file=sys.stderr)
         sys.exit(EXIT_REFUSE)
 
+    seed_copied = None
+    if a.seed_dir is not None:
+        if not a.seed_dir.is_dir():
+            refuse(f"--seed-dir is not a directory: {a.seed_dir}")
+        dest = job_dir / "seed"
+        shutil.copytree(a.seed_dir, dest, dirs_exist_ok=True)
+        seed_copied = sorted(str(p.relative_to(dest)) for p in dest.rglob("*") if p.is_file())
+
     authorship = job_dir / "AUTHORSHIP.md"
     lines = authorship.read_text(encoding="utf-8").splitlines()
     out = []
@@ -59,7 +70,9 @@ def main():
 
     emit({"job_dir": str(job_dir), "created": True,
           "authorship_path": str(authorship),
-          "seed_dir": a.seed_dir, "operator": agent, "mode": a.mode})
+          "seed_dir": str(a.seed_dir) if a.seed_dir else None,
+          "seed_files_copied": seed_copied,
+          "operator": agent, "mode": a.mode})
 
 
 if __name__ == "__main__":

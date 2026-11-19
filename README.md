@@ -81,7 +81,7 @@ Custody events record file paths relative to the JOB directory, so `finalize` an
 
 ## CI
 
-GitHub Actions runs the suite on ubuntu (3.10, 3.12) and macOS (3.12). The macOS matrix is a single leg on purpose: the hosted macOS runner queue has repeatedly cancelled queued jobs at ~15 minutes with zero steps executed, and fewer macOS legs means fewer queue rolls. Every macOS failure to date has been a queue kill, not a test failure.
+GitHub Actions runs the suite on ubuntu (3.10, 3.12) and macOS on the Owner's SELF-HOSTED runner (`self-hosted, macOS, ARM64`), triggered on `pull_request`. Because a fork's pull request can execute on that machine, the runner must be used only with restricted-fork settings (maintainer approval required for first-time contributors) — before the repo goes public, the macOS leg moves off the Owner's machine or behind an explicit gate.
 
 Note: the `live-llm-job` example's committed record predates the two-scored-runs rule (D4.5); its `job.json` says `runs: 1` to stay consistent with that record. Regenerating the example with two runs requires paid model calls and is pending Owner approval.
 

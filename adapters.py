@@ -340,7 +340,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                     raise RuntimeError("Agent Maker returned no subject files")
             finally:
                 srv.shutdown(); srv.server_close(); srv_thread.join(timeout=5.0)
-        elif "command" in maker_cfg:
+        elif maker_cfg.get("command"):
             cmd, env = _resolve_cmd(list(maker_cfg["command"]), job_dir), {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": tempfile.gettempdir()}
             proc = _run_seat(cmd + [str(sb_p / "packet.json"), str(sb_art)], sb_p, env, timeout)
             if proc.returncode != 0:

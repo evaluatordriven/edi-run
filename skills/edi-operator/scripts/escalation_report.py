@@ -29,7 +29,8 @@ def parse_authorship(job_dir):
 
 
 def artifact_digests(job_dir, log_events):
-    """Artifact digests from record.json, falling back to the log."""
+    """Artifact digests: record.json, else state.json (incumbent + tried rounds),
+    else artifact-produced/supplied events' top-level `files` in the log."""
     digests = {}
     rec = load_json(job_dir / "record.json")
     if isinstance(rec, dict):
@@ -41,12 +42,19 @@ def artifact_digests(job_dir, log_events):
             if isinstance(pred, dict) else None
         if bar:
             digests["bar.md"] = bar
-    if not digests:  # fallback: artifact-produced / bar-frozen events in the log
+    if not digests:  # no record yet (escalated/unfinalized): state.json is authoritative
+        state = load_json(job_dir / "state.json") or {}
+        if state.get("incumbent_digest"):
+            digests["incumbent"] = state["incumbent_digest"]
+        for rnd, data in sorted((state.get("rounds") or {}).items()):
+            if isinstance(data, dict) and data.get("digest"):
+                digests[f"round-{rnd}"] = data["digest"]
+    if not digests:  # last resort: artifact-produced / artifact-supplied events in the log
         for ev in log_events:
             data = ev.get("data") or {}
-            for name, d in (data.get("files") or {}).items():
-                if isinstance(d, dict) and d.get("sha256"):
-                    digests[name] = d["sha256"]
+            if ev.get("type") in ("artifact-produced", "artifact-supplied"):
+                for name, d in (ev.get("files") or {}).items():
+                    digests[name] = d.get("sha256") if isinstance(d, dict) else d
             if ev.get("type") == "bar-frozen" and isinstance(data.get("sha256"), str):
                 digests["bar.md"] = data["sha256"]
     return digests
@@ -78,6 +86,10 @@ def main():
     if log_path.is_file():
         with open(log_path, encoding="utf-8") as fh:
             lines = fh.read().splitlines()
+        all_events = []
+        for line in lines:
+            try: all_events.append(json.loads(line))
+            except json.JSONDecodeError: pass
         for line in lines[-10:]:
             try:
                 log_events.append(json.loads(line))
@@ -94,7 +106,7 @@ def main():
         "rounds_completed": len(state.get("rounds") or {}),
         "last_10_log_events": log_events,
         "error_fields": error_fields,
-        "artifact_digests": artifact_digests(job_dir, log_events),
+        "artifact_digests": artifact_digests(job_dir, all_events if log_path.is_file() else []),
         "authorship": parse_authorship(job_dir),
     })
 

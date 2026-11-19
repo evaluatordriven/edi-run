@@ -30,7 +30,7 @@ def per_model_tokens(state):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Cost report from state.json only (P5)")
+    ap = argparse.ArgumentParser(description="Cost report from state.json + usage.jsonl (P5)")
     ap.add_argument("job_dir", help="path to the job directory")
     try:
         a = ap.parse_args()

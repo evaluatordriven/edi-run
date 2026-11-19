@@ -109,6 +109,8 @@ def gate_authorship(cfg, job_dir):
 def gate_freeze_pre(cfg, job_dir):
     # G:I-01/CL1-1/CL1-3/CL1-14/C29 pre-write bar and approval validation
     bar, mode = cfg.get("bar") or {}, cfg.get("mode") or "scored"
+    if not ("publishedAt" in bar and isinstance(bar.get("groundTruth"), list) and isinstance(bar.get("dissent"), list)):
+        raise GateError("bar must carry publishedAt (null allowed), groundTruth [] and dissent [] (custody CR-2)")
     actual = sha256_file(safe_rel(bar.get("file", "bar.md"), job_dir))
     if actual != (bar.get("digest") or {}).get("sha256"):
         raise GateError("bar.md sha256 mismatch against bar.digest (CL1-14)")

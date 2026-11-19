@@ -23,7 +23,7 @@ ordinary tasks; it exists where the Owner wants evidence, not output.
 
 | Variable | Meaning |
 |---|---|
-| `EDI_REPO` | Path to the edi-run repository (default: locate `edi.py`). |
+| `EDI_REPO` | Path to the edi-run repository. Required for an installed skill copy (the locate-`edi.py` fallback only works inside the repo tree); scripts refuse without it when nothing resolves. |
 | `EDI_HOME` | Jobs root; every job lives at `$EDI_HOME/<job-name>/`. Default: `~/edi-jobs/`. |
 | `EDI_AGENT_ID` | **Required.** Your declared identity (e.g. `hermes-vizh`, `grok-bot`). Scripts refuse to run without it. |
 
@@ -113,16 +113,23 @@ Each procedure ends in exactly one of: **report-to-Owner**, **execute-ruled-acti
   is → report-to-Owner. Never freezes on its own.
 - **P3 Freeze + run** — `edi.py freeze` then `edi.py run`. Exit 0 or 3 → P4.
   Exit 4 → P5. Exit 1 → P6. Exit 2 → correct your own usage.
-- **P4 Close-out (accepted/rejected)** — `record_summary.py <job_dir>` runs
-  verification and reports verdict, per-dimension scores, maker of record, and spend.
-  → report-to-Owner with the summary; finalization happens only on an explicit
-  Owner ruling naming the disposition.
+- **P4 Close-out (accepted/rejected)** — `record_summary.py <job_dir>` runs in
+  two stages. BEFORE finalize (no disposition yet) it chain-verifies the
+  custody log and reports the run outcome, per-dimension scores and spend as
+  `stage: pre-disposition` — never a REFUSED verdict, because nothing was
+  refused. → report-to-Owner with that summary; finalization happens only on
+  an explicit Owner ruling naming the disposition. AFTER the Owner rules and
+  `edi.py finalize` succeeds, run `record_summary.py` again: it now runs full
+  `edi.py verify` and reports the verified record. Never claim a result
+  without the post-finalize summary.
 - **P5 Escalation handling** — `escalation_report.py <job_dir>` + `cost_report.py`
   produce the evidence pack. Run the §6 rubric over it and present the four-line
   contract. After the Owner rules: execute exactly the ruled action
   (finalize disposition / fix-and-new-job / archive) or halt-and-explain if the
   ruling doesn't map to an action.
-- **P6 GateError / integrity failure** — `escalation_report.py`, then a loud report.
+- **P6 GateError / integrity failure** — a freeze-time gate refusal has no
+  state to escalate: report the refusal text itself, loudly. For failures after
+  freeze, run `escalation_report.py`, then a loud report.
   Nothing else. No retry, no workaround, no "harmless" second freeze attempt. The
   Owner decides.
 - **P7 Watch** — `watch_escalations.sh` scans `$EDI_HOME` for new `escalation.json`
