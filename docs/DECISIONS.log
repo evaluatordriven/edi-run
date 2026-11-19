@@ -10,7 +10,7 @@
 - `docs/2026-EDI-OPERATOR-SKILL-SPEC.md` §2 carries both rules and names `gate_authorship` as the freeze-time enforcement point.
 - Same PR also fixed briefing defects 3–6, all minor items, and the 2026-11-18f release review `A1`–`A8` (scaffold CR-2 fields, clean run-refusal, per-operator watch marker, `--seed-dir` copies, secret-scrub span redaction, `repo_root` EDI_REPO refusal, README CI section + the fork-PR-on-self-hosted-runner risk flag).
 
-**Gates at merge:** external repro `repro_skill_0_1_0.py` **6/6** (0/6 red before); ADDITIONS-6 **8/8** (1/8 red before); suite **281 OK**; LOC **1,652 ≤ 1,777**; probe gate 14 PASS / 0 FAIL / 1 KNOWN-FAIL / 5 SKIP (baseline); CI all green on both PR heads.
+**Gates at merge:** external repro `repro_skill_0_1_0.py` **6/6** (0/6 red before); ADDITIONS-6 **8/8** (1/8 red before); suite **281 OK**; LOC **1,652 ≤ 1,777** at merge (1,665 after the Ruling A gate additions — `probes/loc.py` is the authoritative count); probe gate 14 PASS / 0 FAIL / 1 KNOWN-FAIL / 5 SKIP (baseline); CI all green on both PR heads.
 
 **Scope correction (Owner, 2026-11-19, same day).** The first implementation of the seed-author clause refused a seed author seated as **Maker** too — that overreached the ruling (which bars the seed's author only from Evaluator seats) and blocked the raise-bounds successor path `loop.py` offers (re-freeze a successor carrying the incumbent forward: the incumbent's author IS the producing Maker). Fixed in `f052a37`: the seed-author refusal now checks Evaluator seats only; successor case added to `tests/test_operator_skill.py` (positive freeze + negative seed-author-as-Evaluator). Repro `repro_successor_0_1_1.py` passes.
 

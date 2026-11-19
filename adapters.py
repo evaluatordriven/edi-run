@@ -11,6 +11,10 @@ def _resolve_cmd(cmd, job_dir):
 def _load_key(env_name="OPENROUTER_API_KEY"):
     if os.environ.get(env_name):
         return os.environ[env_name]
+    # The ~/.hermes/.env fallback is OPT-IN (EDI_KEY_FALLBACK=1): on a shared host
+    # it would otherwise silently pick up a key the operator never meant to use.
+    if os.environ.get("EDI_KEY_FALLBACK") != "1":
+        return ""
     env_p = pathlib.Path.home() / ".hermes" / ".env"
     return next((ln.split("=", 1)[1].strip().strip("\"'") for ln in (env_p.read_text(encoding="utf-8").splitlines() if env_p.is_file() else []) if ln.startswith(f"{env_name}=")), "")
 

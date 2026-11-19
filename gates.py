@@ -130,6 +130,26 @@ def gate_freeze_pre(cfg, job_dir):
     bar, mode = cfg.get("bar") or {}, cfg.get("mode") or "scored"
     if not ("publishedAt" in bar and isinstance(bar.get("groundTruth"), list) and isinstance(bar.get("dissent"), list)):
         raise GateError("bar must carry publishedAt (null allowed), groundTruth [] and dissent [] (custody CR-2)")
+    # CL1-2 scale shape, checked at freeze so a bad scale can never fail verify AFTER spend
+    # (same post-spend class as the CR-2 scaffold defect). Mirrors check.py exactly:
+    # anchors are keyed BY score; floor <= min(anchor scores) <= threshold <= max.
+    if mode != "readings":
+        for d in (bar.get("dimensions") or []):
+            sc = d.get("scale") if isinstance(d, dict) else None
+            if not isinstance(sc, dict):
+                continue
+            try:
+                scores = [float(k) for k in (sc.get("anchors") or {})]
+            except (TypeError, ValueError):
+                scores = None
+            if not (isinstance(sc.get("threshold"), (int, float)) and not isinstance(sc.get("threshold"), bool)
+                    and isinstance(sc.get("floor"), (int, float)) and not isinstance(sc.get("floor"), bool)):
+                raise GateError(f"{d.get('id')}: scale must carry numeric anchors, threshold and floor (CL1-2)")
+            if scores is None:
+                raise GateError(f"{d.get('id')}: every anchor must be keyed by a score (CL1-2)")
+            if not (scores and sc["floor"] <= min(scores) and sc["floor"] <= sc["threshold"] <= max(scores)):
+                raise GateError(f"{d.get('id')}: the floor must be the lowest score, and the threshold must lie "
+                                "between the floor and the highest anchor (CL1-2)")
     actual = sha256_file(safe_rel(bar.get("file", "bar.md"), job_dir))
     if actual != (bar.get("digest") or {}).get("sha256"):
         raise GateError("bar.md sha256 mismatch against bar.digest (CL1-14)")

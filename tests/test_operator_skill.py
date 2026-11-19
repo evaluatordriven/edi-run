@@ -602,5 +602,67 @@ class TestWatchPerOperatorMarker(TestWatchEscalations):
         self.assertTrue(any("job-x" in ln for ln in r2.stdout.strip().splitlines()), r2.stdout)
 
 
+class TestMaintainerFeedback0_1_1(OperatorScriptTest):
+    """NOTE-TO-MAINTAINER-edi-run-0.1.1 (2026-11-19): defects 1-4, item 6."""
+
+    def test_finalize_with_missing_disposition_block_does_not_crash(self):
+        job = self._make_base_job("no-disp")
+        self.assertEqual(run_edi("freeze", job).returncode, 0)
+        self.assertEqual(run_edi("run", job).returncode, 0)
+        cfg = json.loads((job / "job.json").read_text())
+        del cfg["disposition"]  # the pin exempts the disposition block
+        (job / "job.json").write_text(json.dumps(cfg, indent=2))
+        f = run_edi("finalize", job, "--disposition", "given", "--by", "Casey Park")
+        self.assertEqual(f.returncode, 0, f.stderr)
+        self.assertEqual(run_edi("verify", job).returncode, 0)
+
+    def test_freeze_on_non_job_folder_refuses_cleanly(self):
+        (self.tmp / "empty").mkdir()
+        r = run_edi("freeze", self.tmp / "empty")
+        self.assertEqual(r.returncode, 1)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertIn("no job.json", r.stderr)
+
+    def test_bad_scale_floor_refused_at_freeze(self):
+        job = self._make_base_job("bad-scale")
+        cfg = json.loads((job / "job.json").read_text())
+        cfg["bar"]["dimensions"][0]["scale"]["floor"] = 3.0  # above the lowest anchor (1)
+        (job / "job.json").write_text(json.dumps(cfg, indent=2))
+        r = run_script("preflight.py", job, env_extra=self.env)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("CL1-2", r.stdout)
+
+    def test_helper_scripts_accept_relative_job_paths(self):
+        job = self._make_base_job("rel")
+        self._run_job(job)
+        env = {**os.environ, "EDI_AGENT_ID": AGENT, "EDI_HOME": str(self.home),
+               "EDI_REPO": str(ROOT)}
+        r = subprocess.run([sys.executable, str(SCRIPTS / "record_summary.py"), "rel"],
+                           capture_output=True, text=True, cwd=str(self.tmp), env=env, timeout=120)
+        out = json.loads(r.stdout)
+        self.assertTrue(out["verified"], out)
+        self.assertEqual(out["verdict"], "OK")
+
+    def test_hermes_env_key_fallback_is_opt_in(self):
+        import adapters
+        fake_home = self.tmp / "fakehome"
+        (fake_home / ".hermes").mkdir(parents=True)
+        (fake_home / ".hermes" / ".env").write_text('OPENROUTER_API_KEY="sk-fake-fallback"\n')
+        orig_home = adapters.pathlib.Path.home
+        adapters.pathlib.Path.home = staticmethod(lambda: fake_home)
+        env_key = os.environ.pop("OPENROUTER_API_KEY", None)
+        fb = os.environ.pop("EDI_KEY_FALLBACK", None)
+        try:
+            self.assertEqual(adapters._load_key(), "")  # opt-in: silent fallback is gone
+            os.environ["EDI_KEY_FALLBACK"] = "1"
+            self.assertEqual(adapters._load_key(), "sk-fake-fallback")
+        finally:
+            adapters.pathlib.Path.home = orig_home
+            if env_key is not None:
+                os.environ["OPENROUTER_API_KEY"] = env_key
+            if fb is not None:
+                os.environ["EDI_KEY_FALLBACK"] = fb
+
+
 if __name__ == "__main__":
     unittest.main()

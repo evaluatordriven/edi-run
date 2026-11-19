@@ -69,7 +69,7 @@ def main():
         sys.exit(EXIT_USAGE)
 
     require_agent_id()
-    job_dir = pathlib.Path(a.job_dir)
+    job_dir = pathlib.Path(a.job_dir).resolve()  # run_edi switches cwd to the repo: relative paths must resolve HERE
     if not job_dir.is_dir():
         refuse(f"not a directory: {job_dir}")
 

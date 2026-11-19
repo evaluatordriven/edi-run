@@ -34,9 +34,6 @@ def repo_root():
     rel = pathlib.Path(__file__).resolve().parents[3]
     if (rel / "edi.py").is_file():
         return rel
-    home_repo = pathlib.Path.home() / "Code" / "edi-run"
-    if (home_repo / "edi.py").is_file():
-        return home_repo
     print("refusing: cannot locate edi.py; set EDI_REPO to the edi-run checkout",
           file=sys.stderr)
     sys.exit(EXIT_REFUSE)

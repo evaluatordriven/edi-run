@@ -188,6 +188,8 @@ def freeze_job(job_dir, started_at=None, dry_run=False):
 
 def _freeze_job_inner(job_dir, started_at=None, dry_run=False):
     job_dir = pathlib.Path(job_dir).resolve()
+    if not (job_dir / "job.json").is_file():
+        raise gates.GateError(f"no job.json in {job_dir}; this is not a job directory (edi.py init scaffolds one)")
     cfg = _load_job_json(job_dir)
     _preflight_freeze_cfg(cfg)
     pre_snap = _job_snapshot(job_dir) if dry_run else None
@@ -641,7 +643,7 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
             raise gates.GateError("job has no end state (a run was interrupted mid-round, ended without a terminal state, or never ran): resume it to an end state, or finalize --disposition declined to abandon it (P6)")
         meter = _open_meter(job_dir, cfg, st)
         gates.gate_seats(cfg, job_dir, approver_by=by)
-        ack = ack_unobserved if ack_unobserved is not None else cfg["disposition"].get("acknowledgesUnobserved", [])
+        ack = ack_unobserved if ack_unobserved is not None else (cfg.get("disposition") or {}).get("acknowledgesUnobserved", [])
         if not st.get("incumbent_round"):
             disp_data = {"state": state, "acknowledgesUnobserved": ack}
             if mode == "readings":
