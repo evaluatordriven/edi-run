@@ -21,7 +21,7 @@ import subprocess
 import sys
 
 from common import (EXIT_OK, EXIT_REFUSE, EXIT_USAGE, emit, load_json, refuse,
-                    require_agent_id, repo_root, run_edi)
+                    require_agent_id, repo_root, resolve_job, run_edi)
 
 _VERDICT_BY_EXIT = {0: "OK", 5: "FAILED", 6: "UNKNOWN", 1: "REFUSED"}  # edi.py EXIT_CODES
 
@@ -125,7 +125,7 @@ def main():
         sys.exit(EXIT_USAGE)
 
     require_agent_id()
-    job_dir = pathlib.Path(a.job_dir).resolve()  # run_edi switches cwd to the repo: relative paths must resolve HERE
+    job_dir = resolve_job(a.job_dir)  # run_edi switches cwd to the repo: relative paths must resolve HERE
     if not job_dir.is_dir():
         refuse(f"not a directory: {job_dir}")
 

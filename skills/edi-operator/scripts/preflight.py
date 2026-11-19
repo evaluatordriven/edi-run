@@ -9,7 +9,7 @@ import pathlib
 import sys
 
 from common import (EXIT_OK, EXIT_REFUSE, EXIT_USAGE, emit, load_json, refuse,
-                    require_agent_id, run_edi)
+                    require_agent_id, resolve_job, run_edi)
 
 
 def zero_price_warnings(cfg):
@@ -40,7 +40,7 @@ def main():
         sys.exit(EXIT_USAGE)
 
     require_agent_id()
-    job_dir = pathlib.Path(a.job_dir).resolve()  # run_edi switches cwd to the repo: relative paths must resolve HERE
+    job_dir = resolve_job(a.job_dir)  # run_edi switches cwd to the repo: relative paths must resolve HERE
     if not job_dir.is_dir():
         refuse(f"not a directory: {job_dir}")
 

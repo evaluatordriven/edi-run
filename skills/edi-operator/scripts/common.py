@@ -93,6 +93,15 @@ def emit(payload, code=EXIT_OK):
     sys.exit(code)
 
 
+def resolve_job(path):
+    """Resolve a job path to absolute; a broken/self-referential symlink refuses
+    cleanly instead of raising RuntimeError (Python < 3.13)."""
+    try:
+        return pathlib.Path(path).resolve()
+    except (OSError, RuntimeError) as e:
+        refuse(f"cannot resolve job path {path}: {e}")
+
+
 def run_edi(args, timeout=120):
     """Run `python3 EDI_REPO/edi.py <args...>` from the repo root."""
     return subprocess.run([sys.executable, edi_py(), *[str(a) for a in args]],

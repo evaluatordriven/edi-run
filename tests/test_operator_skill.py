@@ -573,13 +573,20 @@ class TestReviewBriefing2026_11_19(OperatorScriptTest):
         self.assertEqual(pf.returncode, 0, pf.stdout)
         out = json.loads(pf.stdout)
         self.assertTrue(out["pass"], out["violations"])
-        # and the symmetric negative: seed author seated as an Evaluator is refused
-        cfg["evaluators"][0]["name"] = maker
-        cfg["evaluators"][0]["script"]["author"] = maker
+        # and the symmetric negative: a seed author (distinct from the Maker, so
+        # gate_seats stays quiet) seated as an Evaluator is refused by gate_authorship
+        cfg["evaluators"][0]["name"] = "Dana Seed"
+        cfg["evaluators"][0]["script"]["author"] = "Dana Seed"
         cfg["evaluators"][0]["script"]["digest"]["sha256"] = sha256_bytes(b"x")
+        cfg["seed"]["author"] = "Dana Seed"
         (succ / "job.json").write_text(json.dumps(cfg, indent=2))
+        (succ / "AUTHORSHIP.md").write_text(
+            "Operator: someone-else\nBar author: Jordan Blake\nRubric author: Morgan Lee\n"
+            "Method author: Morgan Lee\nSeed author: Dana Seed\nSponsor:\n", encoding="utf-8")
         pf2 = run_script("preflight.py", succ, env_extra=self.env)
         self.assertEqual(pf2.returncode, 1, "seed author seated as Evaluator must be refused")
+        self.assertIn("seed author", pf2.stdout)
+        self.assertIn("Evaluator", pf2.stdout)
 
     def test_secret_inside_longer_string_is_scrubbed(self):
         sys.path.insert(0, str(SCRIPTS))
@@ -632,6 +639,18 @@ class TestMaintainerFeedback0_1_1(OperatorScriptTest):
         self.assertEqual(r.returncode, 1)
         self.assertIn("CL1-2", r.stdout)
 
+    def test_scale_anchors_must_be_score_keyed_object(self):
+        # CL1-2 P1 (adversarial review): list/string anchors must refuse at freeze,
+        # not pass freeze and fail check.py after spend.
+        for name, anchors in (("list-anchors", [1, 5]), ("str-anchors", "15")):
+            job = self._make_base_job(name)
+            cfg = json.loads((job / "job.json").read_text())
+            cfg["bar"]["dimensions"][0]["scale"]["anchors"] = anchors
+            (job / "job.json").write_text(json.dumps(cfg, indent=2))
+            r = run_script("preflight.py", job, env_extra=self.env)
+            self.assertEqual(r.returncode, 1, f"{anchors!r} must be refused at freeze")
+            self.assertIn("CL1-2", r.stdout)
+
     def test_helper_scripts_accept_relative_job_paths(self):
         job = self._make_base_job("rel")
         self._run_job(job)
@@ -662,6 +681,8 @@ class TestMaintainerFeedback0_1_1(OperatorScriptTest):
                 os.environ["OPENROUTER_API_KEY"] = env_key
             if fb is not None:
                 os.environ["EDI_KEY_FALLBACK"] = fb
+            else:
+                os.environ.pop("EDI_KEY_FALLBACK", None)  # never leak the opt-in to later tests
 
 
 if __name__ == "__main__":

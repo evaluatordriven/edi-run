@@ -132,15 +132,19 @@ def gate_freeze_pre(cfg, job_dir):
         raise GateError("bar must carry publishedAt (null allowed), groundTruth [] and dissent [] (custody CR-2)")
     # CL1-2 scale shape, checked at freeze so a bad scale can never fail verify AFTER spend
     # (same post-spend class as the CR-2 scaffold defect). Mirrors check.py exactly:
-    # anchors are keyed BY score; floor <= min(anchor scores) <= threshold <= max.
+    # anchors are keyed BY score; floor <= min(anchor scores), and floor <= threshold <= max.
+    # Note the threshold need NOT sit above the lowest anchor.
     if mode != "readings":
         for d in (bar.get("dimensions") or []):
             sc = d.get("scale") if isinstance(d, dict) else None
             if not isinstance(sc, dict):
                 continue
+            # anchors must be an object keyed BY score (check.py KIND rejects lists/strings)
+            if not isinstance(sc.get("anchors"), dict) or not sc["anchors"]:
+                raise GateError(f"{d.get('id')}: anchors must be a non-empty object keyed by score (CL1-2)")
             try:
-                scores = [float(k) for k in (sc.get("anchors") or {})]
-            except (TypeError, ValueError):
+                scores = [float(k) for k in sc["anchors"]]
+            except (ValueError, TypeError, OverflowError):
                 scores = None
             if not (isinstance(sc.get("threshold"), (int, float)) and not isinstance(sc.get("threshold"), bool)
                     and isinstance(sc.get("floor"), (int, float)) and not isinstance(sc.get("floor"), bool)):
