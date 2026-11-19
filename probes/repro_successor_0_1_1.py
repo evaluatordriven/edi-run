@@ -2,7 +2,9 @@
 import json, os, pathlib, shutil, subprocess, sys, tempfile
 repo = pathlib.Path(sys.argv[1]).resolve()
 tmp = pathlib.Path(tempfile.mkdtemp(prefix="succ-")); home = tmp / "home"; home.mkdir()
-env = {**os.environ, "EDI_HOME": str(home), "EDI_AGENT_ID": "probe-operator", "EDI_REPO": str(repo)}
+env = {k: v for k, v in os.environ.items()
+       if not k.endswith("_API_KEY") and k != "EDI_KEY_FALLBACK"}  # N3: never spend
+env.update({"EDI_HOME": str(home), "EDI_AGENT_ID": "probe-operator", "EDI_REPO": str(repo)})
 S = repo / "skills/edi-operator/scripts"; ex = repo / "examples/two-round-job"
 def run(*a): return subprocess.run([sys.executable, *map(str, a)], env=env, capture_output=True, text=True, timeout=600)
 def job(name, seed_author=None, seed_from=None):
@@ -29,4 +31,8 @@ art = next((d for d in [inc / "artifact", inc] if d.is_dir() and any(d.iterdir()
 maker = cfg["maker"]["name"]; print("maker name:", maker, "| incumbent dir:", art.relative_to(tmp))
 # 2. successor: same Maker, incumbent as seed, seed author = the Maker that produced it
 s, _ = job("succ", seed_author=maker, seed_from=art)
-pf = run(S / "preflight.py", s); print("successor preflight:", pf.stdout.strip()[:400])
+pf = run(S / "preflight.py", s)
+print("successor preflight:", pf.stdout.strip()[:400])
+assert pf.returncode == 0 and json.loads(pf.stdout).get("pass") is True, "successor must freeze"
+shutil.rmtree(tmp, ignore_errors=True)
+print("REPRO OK: raise-bounds successor freezes with a Maker-authored seed")

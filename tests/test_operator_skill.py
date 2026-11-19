@@ -576,8 +576,9 @@ class TestReviewBriefing2026_11_19(OperatorScriptTest):
         # a REAL freeze (pins + digests the seed dir), not just the preflight oracle
         fr = run_edi("freeze", succ)
         self.assertEqual(fr.returncode, 0, fr.stderr)
-        # the pred job ended needs_owner/cap_reached with NO incumbent branch exercised:
-        # finalize --disposition declined covers the no-incumbent finalize branch too
+        # the pred job DID reach an incumbent (it seeds the successor); finalize
+        # --disposition declined covers the needs_owner + with-incumbent decline path.
+        # The no-incumbent finalize path is covered separately below (rejected run).
         fd = run_edi("finalize", pred, "--disposition", "declined", "--by", "Casey Park")
         self.assertEqual(fd.returncode, 0, fd.stderr)
 
@@ -592,15 +593,72 @@ class TestReviewBriefing2026_11_19(OperatorScriptTest):
         cfg = json.loads((job / "job.json").read_text())
         cfg["seed"] = {"dir": "seed", "author": "Dana Seed", "origin": "prior incumbent"}
         cfg["evaluators"][0]["name"] = "Dana Seed"  # the seat collision under test
-        cfg["evaluators"][0]["script"]["author"] = "Dana Seed"
-        cfg["evaluators"][0]["script"]["digest"]["sha256"] = sha256_bytes(b"x")
+        # script author and digest stay VALID: the only violated rule must be the
+        # seed-author clause, so the assertion below discriminates
         (job / "seed").mkdir(exist_ok=True)
         (job / "seed" / "memo.md").write_text("# Header\nFigure: 42% (Source: Q3)\n", encoding="utf-8")
         (job / "job.json").write_text(json.dumps(cfg, indent=2))
         pf = run_script("preflight.py", job, env_extra=self.env)
         self.assertEqual(pf.returncode, 1, "seed author seated as Evaluator must be refused")
         self.assertIn("seed author", pf.stdout)
-        self.assertIn("Evaluator", pf.stdout)
+        self.assertIn("may not judge their own draft", pf.stdout)
+
+    def test_freeze_fails_fast_on_empty_model_seat_key(self):
+        # P1-4: a model seat whose key env resolves empty must refuse at freeze
+        # (a 401 at dispatch happens AFTER Maker spend), naming the opt-in remedy.
+        job = self._make_base_job("no-key")
+        cfg = json.loads((job / "job.json").read_text())
+        cfg["evaluators"][0].update({
+            "kind": "model", "script": None, "runs": 2,
+            "url": "https://openrouter.ai/api/v1/chat/completions",
+            "apiKeyEnv": "OPENROUTER_API_KEY",
+            "model": {"family": "claude", "identifier": "test/model",
+                      "endpoint": "openrouter.ai", "readOnly": True},
+        })
+        (job / "job.json").write_text(json.dumps(cfg, indent=2))
+        env = {**os.environ, "EDI_AGENT_ID": AGENT, "EDI_HOME": str(self.home)}
+        env.pop("OPENROUTER_API_KEY", None)
+        env.pop("EDI_KEY_FALLBACK", None)
+        r = subprocess.run([sys.executable, str(SCRIPTS / "preflight.py"), str(job)],
+                           capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("EDI_KEY_FALLBACK=1", r.stdout)
+
+    def test_scored_mode_requires_a_usable_scale(self):
+        # P2-3/N2: a scored dimension without a scale (or with a null/string scale)
+        # would fail check.py after spend — refuse at freeze.
+        for name, mutate in (("no-scale", lambda s: s.pop("scale")),
+                             ("null-scale", lambda s: s.update(scale=None))):
+            job = self._make_base_job(name)
+            cfg = json.loads((job / "job.json").read_text())
+            mutate(cfg["bar"]["dimensions"][0])
+            (job / "job.json").write_text(json.dumps(cfg, indent=2))
+            r = run_script("preflight.py", job, env_extra=self.env)
+            self.assertEqual(r.returncode, 1, f"{name}: must refuse at freeze")
+            self.assertIn("CL1-2", r.stdout)
+
+    def test_finalize_after_rejected_run_without_disposition_block(self):
+        # P2-5: the no-incumbent finalize branch (rejected run, incumbent null) with
+        # the disposition block absent — treated as empty, no KeyError.
+        job = self._make_base_job("rejected")
+        script = job / "scripts" / "maker.py"
+        script.write_text(
+            "import pathlib, sys\n"
+            "out = pathlib.Path(sys.argv[2]) / 'memo.md'\n"
+            "out.write_text('no header here and no source\\n')\n", encoding="utf-8")
+        cfg = json.loads((job / "job.json").read_text())
+        cfg["maker"]["command"] = [sys.executable, str(script)]
+        cfg["maker"]["method"] = {"file": "method.md"}
+        cfg["bounds"]["max_rounds"] = 1
+        (job / "job.json").write_text(json.dumps(cfg, indent=2))
+        self.assertEqual(run_edi("freeze", job).returncode, 0)
+        self.assertIn(run_edi("run", job).returncode, (3, 4))  # rejected, or needs_owner (no incumbent to carry)
+        cfg = json.loads((job / "job.json").read_text())
+        del cfg["disposition"]
+        (job / "job.json").write_text(json.dumps(cfg, indent=2))
+        f = run_edi("finalize", job, "--disposition", "given", "--by", "Casey Park")
+        self.assertEqual(f.returncode, 0, f.stderr)
+        self.assertEqual(run_edi("verify", job).returncode, 0)
 
     def test_secret_inside_longer_string_is_scrubbed(self):
         sys.path.insert(0, str(SCRIPTS))

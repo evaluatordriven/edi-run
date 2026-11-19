@@ -6,7 +6,7 @@ Fixes from the maintainer feedback on 0.1.1 (NOTE-TO-MAINTAINER-edi-run-0.1.1-20
 
 - `gate_authorship`: the seed's author is barred only from **Evaluator** seats (Ruling A scope). The raise-bounds successor path — re-freeze a successor job carrying the prior incumbent forward as seed, authored by the producing Maker — freezes again with an honest AUTHORSHIP.md.
 - `finalize` no longer crashes (KeyError → treated as empty) when `job.json` has no `disposition` block; `verify` follows.
-- `gate_freeze_pre` now validates the CL1-2 scale shape at freeze (anchors must be a non-empty object keyed by score; floor ≤ the lowest anchor score, and threshold between floor and the highest anchor) — a bad scale can no longer fail `verify` after spend.
+- `gate_freeze_pre` now validates the CL1-2 scale shape at freeze and **requires every scored-mode dimension to declare a usable scale** (anchors must be a non-empty object keyed by score; floor ≤ the lowest anchor score, and threshold between floor and the highest anchor) — a bad or missing scale can no longer fail `verify` after spend.
 - `freeze` on an empty or non-job folder refuses with a GateError instead of a traceback.
 - **Breaking:** `adapters._load_key`: the `~/.hermes/.env` key fallback is now **opt-in** (`EDI_KEY_FALLBACK=1`). By default only the process environment supplies keys — a host that relied on the fallback must set the variable or export the key. Freeze refuses a model/agent seat whose key resolves empty, naming the remedy.
 - Helper scripts (`preflight.py`, `record_summary.py`, `escalation_report.py`, `cost_report.py`) resolve the job path before invoking `edi.py`, so relative job paths work from any working directory.

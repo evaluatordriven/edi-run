@@ -19,6 +19,13 @@ def _load_key(env_name="OPENROUTER_API_KEY"):
     return next((ln.split("=", 1)[1].strip().strip("\"'") for ln in (env_p.read_text(encoding="utf-8").splitlines() if env_p.is_file() else []) if ln.startswith(f"{env_name}=")), "")
 
 
+def key_env(seat):
+    """Single source of truth for a seat's key env var: seat['apiKeyEnv'], or the
+    default. Non-string/empty values fall back instead of reaching os.environ."""
+    v = seat.get("apiKeyEnv") if isinstance(seat, dict) else None
+    return v if isinstance(v, str) and v.strip() else "OPENROUTER_API_KEY"
+
+
 def _require_https(url):
     # G:H1 credentials never travel over plain http; loopback is exempt
     u = urllib.parse.urlparse(url)
@@ -284,7 +291,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
             cap_flag = [] if meter is None else [None]
             upstream = maker_cfg["url"]
             _require_https(upstream)
-            key = _load_key(maker_cfg.get("apiKeyEnv", "OPENROUTER_API_KEY"))
+            key = _load_key(key_env(maker_cfg))
             calls = []
             inner_port = _INNER_PROXY_PORT_BASE + (os.getpid() % 2000)
             if (maker_cfg.get("sandbox") or {}).get("type") == "bwrap":
@@ -358,7 +365,7 @@ def run_maker(maker_cfg, packet_path, out_dir, subject_files, job_dir, timeout: 
                 "incumbent artifact files appear",
                 json.dumps(cur_files, sort_keys=True, indent=2))
             usr_p = f"METHOD:\n{method_txt}\n\nROUND PACKET:\n{json.dumps(pkt, sort_keys=True, indent=2)}\n\nINCUMBENT FILES:\n{fenced}\n\nTARGET FILES: {subject_files}"
-            res, _, raw = _chat_json(maker_cfg["url"], maker_cfg["model"]["identifier"], sys_p, usr_p, maker_cfg.get("apiKeyEnv", "OPENROUTER_API_KEY"), timeout, meter=meter, who="maker")
+            res, _, raw = _chat_json(maker_cfg["url"], maker_cfg["model"]["identifier"], sys_p, usr_p, key_env(maker_cfg), timeout, meter=meter, who="maker")
             for sf, content in (res.get("files") or {}).items():
                 dst = gates.safe_rel(sf, sb_art)
                 dst.parent.mkdir(parents=True, exist_ok=True)
@@ -400,7 +407,7 @@ def run_evaluator(eval_cfg, target_path, dimension_id, job_dir=None, harness_out
     sys_p, fenced = _fence_prompt(base_prompt, "artifact appears", txt)
     usr_p = f"RUBRIC:\n{rubric_txt}\n\nDIMENSION: {json.dumps(dim_cfg or {'id': dimension_id}, sort_keys=True, separators=(',', ':'))}\n\nARTIFACT:\n{fenced}"
     try:
-        payload, ans_host, raw = _chat_json(eval_cfg["url"], eval_cfg["model"]["identifier"], sys_p, usr_p, eval_cfg.get("apiKeyEnv", "OPENROUTER_API_KEY"), timeout, meter=meter, who="evaluator:" + str(eval_cfg.get("id")))
+        payload, ans_host, raw = _chat_json(eval_cfg["url"], eval_cfg["model"]["identifier"], sys_p, usr_p, key_env(eval_cfg), timeout, meter=meter, who="evaluator:" + str(eval_cfg.get("id")))
         if harness_out:
             harness_out.write_text(json.dumps({"evaluator": eval_cfg["id"], "endpoint": ans_host, "model": raw.get("model"), "usage": raw.get("usage"), "verdict": payload}, indent=2) + "\n", encoding="utf-8")
         return dict(payload, _endpoint=ans_host, _usage=raw.get("usage"))

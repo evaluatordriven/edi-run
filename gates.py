@@ -141,13 +141,11 @@ def gate_freeze_pre(cfg, job_dir):
         for d in (bar.get("dimensions") or []):
             if not isinstance(d, dict):
                 continue
-            if "scale" not in d:
+            if "scale" not in d or not isinstance(d.get("scale"), dict):
                 # scored mode: every dimension will be scored, and check.py refuses a
-                # scored dimension without a scale — after spend. Refuse here instead.
-                raise GateError(f"{d.get('id')}: scored-mode dimension declares no scale (CL1-2; it would fail verify after spend)")
-            sc = d.get("scale")
-            if not isinstance(sc, dict):
-                continue
+                # scored dimension without a usable scale — after spend. Refuse here.
+                raise GateError(f"{d.get('id')}: scored-mode dimension declares no usable scale (CL1-2; it would fail verify after spend)")
+            sc = d["scale"]
             # anchors must be an object keyed BY score (check.py KIND rejects lists/strings)
             if not isinstance(sc.get("anchors"), dict) or not sc["anchors"]:
                 raise GateError(f"{d.get('id')}: anchors must be a non-empty object keyed by score (CL1-2)")
@@ -155,6 +153,8 @@ def gate_freeze_pre(cfg, job_dir):
                 scores = [float(k) for k in sc["anchors"]]
             except (ValueError, TypeError, OverflowError):
                 scores = None
+            else:
+                scores = scores if all(math.isfinite(s) for s in scores) else None
             if not (isinstance(sc.get("threshold"), (int, float)) and not isinstance(sc.get("threshold"), bool)
                     and isinstance(sc.get("floor"), (int, float)) and not isinstance(sc.get("floor"), bool)):
                 raise GateError(f"{d.get('id')}: scale must carry numeric anchors, threshold and floor (CL1-2)")

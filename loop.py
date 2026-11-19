@@ -180,7 +180,10 @@ def _ok_rate(v):
 
 def freeze_job(job_dir, started_at=None, dry_run=False):
     # G:I-01/I-02/G2/F5 validate all freeze gates before any disk write; hold job_lock on real freeze
-    job_dir = pathlib.Path(job_dir).resolve()
+    try:
+        job_dir = pathlib.Path(job_dir).resolve()
+    except (OSError, RuntimeError) as e:  # self-referential symlink (Python < 3.13)
+        raise gates.GateError(f"cannot resolve job path {job_dir}: {e}")
     if not (job_dir / "job.json").is_file():
         # refuse BEFORE the lock: job_lock creates job.lock inside the folder, and a
         # refused freeze must not litter an arbitrary directory
@@ -211,8 +214,8 @@ def _freeze_job_inner(job_dir, started_at=None, dry_run=False):
     if cfg["maker"].get("kind") == "model" and not _loopback(cfg["maker"].get("url")):
         # agent seats are OUT of scope here: their key flows through the runtime's own
         # relay (read at run time; the proxy 402/403 path already fails fast on empty)
-        key_needs.append(("maker", cfg["maker"].get("apiKeyEnv", "OPENROUTER_API_KEY")))
-    key_needs += [(f"evaluator {e.get('id')}", e.get("apiKeyEnv", "OPENROUTER_API_KEY"))
+        key_needs.append(("maker", adapters.key_env(cfg["maker"])))
+    key_needs += [(f"evaluator {e.get('id')}", adapters.key_env(e))
                   for e in cfg["evaluators"]
                   if e.get("kind") == "model" and not _loopback(e.get("url"))]
     for seat_label, env_name in key_needs:
