@@ -38,10 +38,18 @@ Ambiguity is a halt condition, not a judgment call.
 ```
 python3 $EDI_REPO/edi.py freeze <job_dir> [--dry-run]
 python3 $EDI_REPO/edi.py run <job_dir>
+python3 $EDI_REPO/edi.py read <job_dir> [--by <name>]
 python3 $EDI_REPO/edi.py finalize <job_dir> --disposition given|not_yet_given|declined --by <name>
 python3 $EDI_REPO/edi.py verify <job_dir>
 python3 $EDI_REPO/edi.py resume <job_dir>
 ```
+
+`mode: "readings"` (`census` mode, C29) reads an existing `seed` or one Maker turn
+against a Buyer-approved bar (`bounds.max_rounds == 1`, no Specialist approval, no
+dimension `scale`/`threshold`/`floor`, and outcome words `conforms` | `does_not_conform`
+| `unobserved` with a non-empty `quotation`). `edi.py read <job_dir> [--by <sponsor>]`
+runs `freeze -> run -> finalize` when every dimension conforms (`accepted / census`),
+or halts at `needs_owner` with `escalation.json` when any defect or flap is found.
 
 Exit codes (one meaning each; the mapping lives only in `edi.py`):
 
@@ -68,8 +76,9 @@ note on stderr.
 
 A job is a directory: `job.json`, `bar.md` (the bar — what the artifact must satisfy),
 `rubric.md` (how dimensions are scored), `method.md` (how the Maker works), `scripts/`
-(the Maker), `seed/` (the artifact the Maker starts from), `rounds/`, and `held_out/`
-(controls the Maker must never see). `edi.py init <job_dir>` scaffolds the structure;
+(the Maker), `seed/` (the artifact the Maker starts from), and `held_out/`
+(controls the Maker must never see; `rounds/` is created by `run`, never pre-created at
+`init` or `freeze`). `edi.py init <job_dir>` scaffolds the structure;
 **you author all content** — the scaffold is empty by design, and filling it with
 starter text is a defect.
 

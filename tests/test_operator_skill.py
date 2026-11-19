@@ -96,7 +96,7 @@ class OperatorScriptTest(unittest.TestCase):
         job_cfg = {
             "job": f"test-memo-job-{name}", "levelClaimed": level, "specVersion": "0.9.8",
             "bounds": {"max_rounds": 2, "max_cost_usd": 1.0, "max_wall_seconds": 60},
-            "mode": "pass_r2", "subjectFiles": ["memo.md"],
+            "packetMode": "pass_r2", "subjectFiles": ["memo.md"],
             "bar": {
                 "file": "bar.md", "digest": {"sha256": bar_digest},
                 "frozenAt": "2026-10-05T09:00:00Z", "author": "Jordan Blake",
@@ -151,8 +151,9 @@ class TestNewJob(OperatorScriptTest):
         self.assertTrue(out["created"])
         self.assertEqual(pathlib.Path(out["authorship_path"]), job_dir / "AUTHORSHIP.md")
         self.assertIsNone(out["seed_dir"])
-        for d in ("scripts", "seed", "rounds"):
+        for d in ("scripts", "seed"):
             self.assertTrue((job_dir / d).is_dir(), d)
+        self.assertFalse((job_dir / "rounds").exists(), "init must not create rounds/ (N14)")
         auth = (job_dir / "AUTHORSHIP.md").read_text(encoding="utf-8")
         self.assertIn(f"Operator: {AGENT}", auth)
         for line in auth.splitlines():  # bar/rubric/method/seed authors stay blank

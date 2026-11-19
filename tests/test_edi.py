@@ -104,7 +104,7 @@ class TestEDIRuntime(unittest.TestCase):
             "pkt = json.loads(pathlib.Path(sys.argv[1]).read_text())\n"
             "out = pathlib.Path(sys.argv[2]) / 'memo.md'\n"
             "r = pkt['round']\n"
-            "mode = pkt.get('mode', 'pass_r2')\n"
+            "mode = pkt.get('packetMode', pkt.get('mode', 'pass_r2'))\n"
             "if pathlib.Path('held_out').exists() or pathlib.Path('../held_out').exists():\n"
             "    sys.exit('Maker sandbox leak: held_out visible')\n"
             "if mode == 'pass_r2':\n"
@@ -156,7 +156,7 @@ class TestEDIRuntime(unittest.TestCase):
             "levelClaimed": level,
             "specVersion": "0.9.8",
             "bounds": {"max_rounds": 2, "max_cost_usd": 1.0, "max_wall_seconds": 60, "max_output_tokens": 200000},
-            "mode": rounds_behavior,
+            "packetMode": rounds_behavior,
             "subjectFiles": ["memo.md"],
             "bar": {
                 "file": "bar.md",

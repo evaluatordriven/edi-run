@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI entrypoint for edi-run (freeze, run, finalize, verify). Standard library only."""
+"""CLI entrypoint for edi-run (freeze, run, read, finalize, verify). Standard library only."""
 import argparse, pathlib, sys
 import gates, loop
 
@@ -17,6 +17,9 @@ def main():
     frz.add_argument("--dry-run", action="store_true", help="run all freeze gates read-only; write nothing")
     for name in ("run", "verify", "resume", "init"):
         sub.add_parser(name).add_argument("job_dir", type=pathlib.Path)
+    rd = sub.add_parser("read")
+    rd.add_argument("job_dir", type=pathlib.Path)
+    rd.add_argument("--by", default=None)
     fin = sub.add_parser("finalize")
     fin.add_argument("job_dir", type=pathlib.Path)
     fin.add_argument("--disposition", required=True, choices=("given", "not_yet_given", "declined"))
@@ -25,6 +28,7 @@ def main():
     a = ap.parse_args()
     try:
         if a.cmd == "init": return loop.init_job(a.job_dir)
+        if a.cmd == "read": return _RUN.get(loop.read_job(a.job_dir, by=a.by), EXIT_CODES["needs_owner"])
         if a.cmd == "finalize":
             ack = [x.strip() for x in a.ack_unobserved.split(",") if x.strip()] if a.ack_unobserved else None
             return _RECORD.get(loop.finalize_job(a.job_dir, state=a.disposition, by=a.by, ack_unobserved=ack), EXIT_CODES["record_undecided"])

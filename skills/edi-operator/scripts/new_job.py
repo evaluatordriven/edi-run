@@ -20,6 +20,8 @@ def main():
                     help="existing seed directory; its PATH is recorded, never copied")
     ap.add_argument("--author", default=None,
                     help="optional extra author recorded alongside the Operator identity")
+    ap.add_argument("--mode", default=None, choices=("scored", "readings"),
+                    help="optional runtime mode ('scored' or 'readings')")
     try:
         a = ap.parse_args()
     except SystemExit:
@@ -46,10 +48,18 @@ def main():
     if a.author and not any(l.startswith("Operator:") for l in lines):
         out.append(operator)
     authorship.write_text("\n".join(out) + "\n", encoding="utf-8")
+    if a.mode:
+        import json
+        jpath = job_dir / "job.json"
+        jcfg = json.loads(jpath.read_text(encoding="utf-8"))
+        jcfg["mode"] = a.mode
+        if a.mode == "readings":
+            jcfg["bounds"]["max_rounds"] = 1
+        jpath.write_text(json.dumps(jcfg, indent=2) + "\n", encoding="utf-8")
 
     emit({"job_dir": str(job_dir), "created": True,
           "authorship_path": str(authorship),
-          "seed_dir": a.seed_dir, "operator": agent})
+          "seed_dir": a.seed_dir, "operator": agent, "mode": a.mode})
 
 
 if __name__ == "__main__":

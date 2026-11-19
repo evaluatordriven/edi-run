@@ -86,7 +86,7 @@
       "type": "sandbox-exec"
     },
     "command": [
-      "aider-python3",
+      "/Users/smoitozo/Library/Aider/venv/bin/python3",
       "scripts/aider_maker.py"
     ]
   },

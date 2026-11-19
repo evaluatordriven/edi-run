@@ -47,8 +47,17 @@ def when(ts):
 
 
 def gate_bounds(cfg):
+    mode = cfg.get("mode") or "scored"
+    if mode not in ("scored", "readings"):
+        raise GateError(f"unknown job.json mode {mode!r}; supported: 'scored' or 'readings' (C29)")
     b = cfg.get("bounds")
-    if not isinstance(b, dict) or isinstance(b.get("max_rounds"), bool) or not isinstance(b.get("max_rounds"), int) or b["max_rounds"] < 1:
+    if not isinstance(b, dict):
+        raise GateError("bounds must be a dict (I-07)")
+    mr = b.get("max_rounds")
+    if mode == "readings":
+        if mr is not None and (isinstance(mr, bool) or not isinstance(mr, int) or mr != 1):
+            raise GateError("readings mode requires bounds.max_rounds to be 1 or absent (C29)")
+    elif isinstance(mr, bool) or not isinstance(mr, int) or mr < 1:
         raise GateError("bounds.max_rounds must be an int >= 1 (I-07)")
     for k in ("max_cost_usd", "max_wall_seconds"):
         v = b.get(k)
@@ -98,8 +107,8 @@ def gate_authorship(cfg, job_dir):
 
 
 def gate_freeze_pre(cfg, job_dir):
-    # G:I-01/CL1-1/CL1-3/CL1-14 pre-write bar and approval validation
-    bar = cfg.get("bar") or {}
+    # G:I-01/CL1-1/CL1-3/CL1-14/C29 pre-write bar and approval validation
+    bar, mode = cfg.get("bar") or {}, cfg.get("mode") or "scored"
     actual = sha256_file(safe_rel(bar.get("file", "bar.md"), job_dir))
     if actual != (bar.get("digest") or {}).get("sha256"):
         raise GateError("bar.md sha256 mismatch against bar.digest (CL1-14)")
@@ -112,10 +121,20 @@ def gate_freeze_pre(cfg, job_dir):
         if sha.casefold() != actual:
             raise GateError(f"computed bar.md digest {actual} does not match the externally pinned barDigest {sha}; refusing to freeze against a different bar (fail-closed)")
     gate_authorship(cfg, job_dir)
-    for role in ("buyer", "specialist"):
-        apps = [a for a in (bar.get("approvals") or []) if a.get("role") == role]
-        if not apps or any((a.get("barDigest") or {}).get("sha256") != actual for a in apps):
-            raise GateError(f"missing or mismatched {role} approval on bar.digest (CL1-3)")
+    if mode == "readings":
+        buyers = [a for a in (bar.get("approvals") or []) if a.get("role") == "buyer"]
+        if not buyers or any((a.get("barDigest") or {}).get("sha256") != actual for a in buyers):
+            raise GateError("missing or mismatched buyer approval on bar.digest (CL1-3)")
+        if any(a.get("role") == "specialist" for a in (bar.get("approvals") or [])):
+            raise GateError("readings mode forbids specialist approval on bar (C29)")
+        for d in bar.get("dimensions") or []:
+            if any(d.get(k) is not None for k in ("scale", "threshold", "floor")):
+                raise GateError(f"readings mode dimension {d.get('id')} cannot carry scale, threshold, or floor (C29)")
+    else:
+        for role in ("buyer", "specialist"):
+            apps = [a for a in (bar.get("approvals") or []) if a.get("role") == role]
+            if not apps or any((a.get("barDigest") or {}).get("sha256") != actual for a in apps):
+                raise GateError(f"missing or mismatched {role} approval on bar.digest (CL1-3)")
     if cfg.get("levelClaimed") == "baseline" and not isinstance(cfg.get("readsBeforeFreeze"), list):
         raise GateError("baseline jobs must record readsBeforeFreeze (BL-1)")
     if cfg.get("levelClaimed") != "baseline":
@@ -166,7 +185,7 @@ def tree_manifest(job_dir):
         skip = RUNTIME_WRITTEN if here == job_dir else set()
         dirs[:] = sorted(d for d in dirs if d not in skip and d not in NEVER_AUTHORED)
         for name in dirs + sorted(files):
-            if name in skip or name in NEVER_AUTHORED or name.endswith(".pyc"):
+            if name in skip or name in NEVER_AUTHORED:
                 continue
             f, rel = here / name, (here / name).relative_to(job_dir).as_posix()
             if f.is_symlink():
@@ -216,8 +235,8 @@ def _tree_drift(cur, frozen):
 
 
 def gate_commands(cfg, job_dir):
-    # G:G1 seat command operands resolving to existing files must reside inside job_dir
-    m = cfg.get("maker") or {}
+    # G:G1 seat command operands resolving to existing files must reside inside job_dir and outside excluded paths
+    m, jd = cfg.get("maker") or {}, job_dir.resolve()
     cmds = ([("maker", m["command"])] if m.get("command") else []) + \
            [(e.get("id", "evaluator"), e["command"]) for e in (cfg.get("evaluators") or []) if e.get("command")]
     for who, cmd in cmds:
@@ -232,8 +251,11 @@ def gate_commands(cfg, job_dir):
             if exists:
                 try: rp = cand.resolve()
                 except OSError as e: raise GateError(f"{who} command token {tok!r} cannot be resolved ({e})")
-                if not rp.is_relative_to(job_dir.resolve()):
+                if not rp.is_relative_to(jd):
                     raise GateError(f"{who} command references {tok} outside the job dir; seat code must live in the job (G1)")
+                parts = rp.relative_to(jd).parts
+                if parts and (parts[0] in RUNTIME_WRITTEN or any(p in NEVER_AUTHORED for p in parts)):
+                    raise GateError(f"{who} command references unpinned runtime/cache path {tok} (G1)")
 
 
 def gate_seats(cfg, job_dir, approver_by=None):

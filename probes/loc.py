@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Core LOC gate for edi-run (enforces <= 1,500 code lines and <= 2,000 physical lines)."""
+"""Core LOC gate for edi-run (enforces <= 1,777 code lines; physical cap retired per Owner ruling 2026-11-18)."""
 import io, pathlib, sys, tokenize
 
-MAX_CODE = 1500
-MAX_PHYSICAL = 2000
+MAX_CODE = 1777
 DEFAULT_FILES = ("edi.py", "gates.py", "loop.py", "adapters.py", "metering.py")
 
 
@@ -26,7 +25,7 @@ def count(p):
             nxt = j + 1
             while nxt < len(toks) and toks[nxt].type in (tokenize.NL, tokenize.COMMENT):
                 nxt += 1
-            if (k < 0 or toks[k].type in (tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT)) and toks[nxt].type in (tokenize.NEWLINE, tokenize.ENDMARKER):
+            if (k < 0 or toks[k].type in (tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT)) and nxt < len(toks) and toks[nxt].type in (tokenize.NEWLINE, tokenize.ENDMARKER):
                 for r in range(t.start[0], t.end[0] + 1):
                     doc.add(r)
             else:
@@ -61,8 +60,8 @@ def main():
         tot = [a + b for a, b in zip(tot, r)]
         print(f"{p:<34}{r[0]:>7}{r[1]:>7}{r[2]:>13}{r[3]:>7}")
     print(f"{'TOTAL':<34}{tot[0]:>7}{tot[1]:>7}{tot[2]:>13}{tot[3]:>7}")
-    if check and (tot[1] > MAX_CODE or tot[0] > MAX_PHYSICAL):
-        print(f"LOC GATE FAILED: {tot[1]} code (max {MAX_CODE}) / {tot[0]} physical (max {MAX_PHYSICAL})", file=sys.stderr)
+    if check and tot[1] > MAX_CODE:
+        print(f"LOC GATE FAILED: {tot[1]} code (max {MAX_CODE})", file=sys.stderr)
         return 1
     return 0
 

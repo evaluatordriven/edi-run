@@ -1,9 +1,9 @@
 """Deterministic E-DI state machine (I-05 through I-07) wrapping evaluatordriven/custody tools."""
 from collections import Counter
 from contextlib import contextmanager
-import fcntl, json, math, os, pathlib, shutil, signal, subprocess, sys, threading, time
+import fcntl, hashlib, json, math, os, pathlib, shutil, signal, subprocess, sys, threading, time
 import adapters, gates, metering
-from metering import Meter, CapExceeded, UnboundedOutput
+from metering import Meter, CapExceeded
 
 VENDOR = pathlib.Path(__file__).resolve().parent / "vendor"
 sys.path.insert(0, str(VENDOR))
@@ -142,6 +142,7 @@ def _preflight_freeze_cfg(cfg):
 
 
 def init_job(job_dir):
+    # G:N14 scaffold structure only; never pre-create rounds/ (freeze refuses existing rounds/)
     job_dir = pathlib.Path(job_dir)
     for bad, msg in ((job_dir.is_symlink(), f"{job_dir} is a symlink; init never writes through a link"),
                      (job_dir.exists() and not job_dir.is_dir(), f"{job_dir} exists and is not a directory"),
@@ -149,7 +150,7 @@ def init_job(job_dir):
         if bad:
             print(f"refusing to init: {msg}", file=sys.stderr); return 1
     job_dir.mkdir(parents=True, exist_ok=True)
-    for d in ("scripts", "seed", "rounds"):
+    for d in ("scripts", "seed"):
         (job_dir / d).mkdir(exist_ok=True)
     for name in ("bar.md", "rubric.md", "method.md"):
         (job_dir / name).write_text("", encoding="utf-8")
@@ -178,7 +179,14 @@ def _ok_rate(v):
 
 
 def freeze_job(job_dir, started_at=None, dry_run=False):
-    # G:I-01/I-02/G2 validate all freeze gates before any disk write; stamp bar.digest atomically after gates pass
+    # G:I-01/I-02/G2/F5 validate all freeze gates before any disk write; hold job_lock on real freeze
+    if dry_run:
+        return _freeze_job_inner(job_dir, started_at=started_at, dry_run=True)
+    with job_lock(job_dir):
+        return _freeze_job_inner(job_dir, started_at=started_at, dry_run=False)
+
+
+def _freeze_job_inner(job_dir, started_at=None, dry_run=False):
     job_dir = pathlib.Path(job_dir).resolve()
     cfg = _load_job_json(job_dir)
     _preflight_freeze_cfg(cfg)
@@ -221,7 +229,8 @@ def freeze_job(job_dir, started_at=None, dry_run=False):
         if any(str(a["by"]).casefold() == str(seed["author"]).casefold() for a in cfg["bar"]["approvals"]):
             raise gates.GateError("seed author cannot hold the Buyer or Specialist seat (the approver of the bar would be the maker of record)")
         seed_pins = {f: gates.sha256_file(sdir / f) for f in cfg["subjectFiles"]}
-    demos, rub_txt = [], gates.safe_rel(cfg["instrument"]["rubric"]["file"], job_dir).read_text(encoding="utf-8")
+    demos, demo_meter = [], None
+    rub_txt = gates.safe_rel(cfg["instrument"]["rubric"]["file"], job_dir).read_text(encoding="utf-8")
     if cfg["levelClaimed"] == "CL3":
         p_case = gates.safe_rel(cfg["controls"]["planted"], job_dir)
         demo_meter = None if dry_run else Meter(job_dir, pricing=pricing_map, bounds=cfg.get("bounds"))
@@ -233,9 +242,9 @@ def freeze_job(job_dir, started_at=None, dry_run=False):
                 continue
             for d in cfg["bar"]["dimensions"]:
                 try:
-                    res = adapters.run_evaluator(ev, p_case, d["id"], job_dir=job_dir, dim_cfg=d, rubric_txt=rub_txt, meter=demo_meter)
+                    res = adapters.run_evaluator(ev, p_case, d["id"], job_dir=job_dir, dim_cfg=d, rubric_txt=rub_txt, meter=demo_meter, mode=cfg.get("mode") or "scored")
                 except CapExceeded as e:
-                    raise gates.GateError(str(e) if isinstance(e, UnboundedOutput) else f"cost cap reached during the CL3 planted-case demonstration: {e}")
+                    raise gates.GateError(f"cost cap reached during the CL3 planted-case demonstration: {e}")
                 if res.get("score") is None or float(res["score"]) >= float((d.get("scale") or {}).get("threshold", 4.0)):
                     raise gates.GateError(f"CL3 planted case did not fail on {ev['id']}/{d['id']} (CL3-1)")
                 demos.append({"dimension": d["id"], "evaluator": ev["id"], "planted": {"sha256": gates.sha256_file(p_case)}, "outcome": "does_not_conform", "at": custody_record.now()})
@@ -277,18 +286,36 @@ def freeze_job(job_dir, started_at=None, dry_run=False):
         os.chmod(ho, 0o700)
     state = {"status": "frozen", "pins": pins, "startedAt": s_at, "frozenAt": ev_frz["at"], "demonstrations": demos,
              "incumbent_round": None, "incumbent_digest": None, "incumbent_scores": None, "last_candidate_digest": None,
-             "defects": [], "solutions": [], "rounds": {}, "terminal_state": None, "reason": None, "cost_usd": 0.0,
+             "defects": [], "solutions": [], "rounds": {}, "terminal_state": None, "reason": None,
+             "cost_usd": round(demo_meter.accrued(), 6) if demo_meter else 0.0,
              "seed": ({"dir": seed["dir"], "author": seed["author"], "digests": seed_pins} if seed else None)}
-    (job_dir / "state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    _write_state(job_dir, state, demo_meter)
     return 0
 
 
-def _eval_batch(cfg, job_dir, round_n, art_dir, deadline, meter=None):
-    # G:I-05/CL1-9/CL1-15 run controls first (script before model), then candidate checks
+def _parse_reading(res):
+    # G:C29/D4.6 validate readings-mode payload: outcome in {conforms, does_not_conform, unobserved} + quotation
+    if not isinstance(res, dict) or "unobserved" in res:
+        return "unobserved", "", (res.get("unobserved") if isinstance(res, dict) else None)
+    if "score" in res and res["score"] is not None:
+        return None, "", {"reason": "readings mode forbids numeric score in reading slot (C29)"}
+    out = res.get("outcome", res.get("verdict"))
+    if not isinstance(out, str) or out not in ("conforms", "does_not_conform", "unobserved"):
+        return None, "", {"reason": f"invalid reading outcome {out!r} (C29)"}
+    q = str(res.get("quotation", res.get("observation", "")) or "").strip()
+    if out == "unobserved":
+        return "unobserved", q, {"reason": str(res.get("reason") or q or "unobserved"), "failed": False}
+    if not q:
+        return "unobserved", "", {"reason": "reading has blank quotation (C29)", "failed": True}
+    return out, q, None
+
+
+def _eval_batch(cfg, job_dir, round_n, art_dir, deadline, meter=None, att_tag=""):
+    # G:I-05/CL1-9/CL1-15/C29 run controls first (script before model), then candidate checks
     if meter is not None:
         meter._round = round_n
     (job_dir / "evidence").mkdir(parents=True, exist_ok=True)
-    bid, dims = f"B{round_n}", cfg["bar"]["dimensions"]
+    mode, bid, dims = cfg.get("mode") or "scored", f"B{round_n}{att_tag}", cfg["bar"]["dimensions"]
     scales, ordered = {d["id"]: d.get("scale") for d in dims}, sorted(cfg["evaluators"], key=lambda e: 0 if e["kind"] == "script" else 1)
     checks, controls, scores_rows, externals, per_dim, defects, solutions, usages = [], [], [], [], {d["id"]: [] for d in dims}, [], [], []
     clean_p, planted_p = gates.safe_rel(cfg["controls"]["clean"], job_dir), gates.safe_rel(cfg["controls"]["planted"], job_dir)
@@ -298,14 +325,21 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, deadline, meter=None):
         for d in dims:
             did, thr = d["id"], float((scales[d["id"]] or {}).get("threshold", 4.0))
             for tag, path, exp in (("clean", clean_p, "conforms"), ("planted", planted_p, "does_not_conform")):
-                cid, res = f"K-{bid}-{ev_id}-{did}-{tag}", adapters.run_evaluator(ev, path, did, job_dir=job_dir, timeout=max(1.0, deadline - time.time()), dim_cfg=d, rubric_txt=rub_txt, meter=meter)
-                sc = res.get("score")
-                if sc is None or not math.isfinite(float(sc)):
-                    bad_dims.add(did)
-                    out, sc_val = ("conforms" if exp == "does_not_conform" else "does_not_conform"), (thr if exp == "does_not_conform" else thr - 1.0)
+                cid = f"K-{bid}-{ev_id}-{did}-{tag}"
+                res = adapters.run_evaluator(ev, path, did, job_dir=job_dir, timeout=max(1.0, deadline - time.time()), dim_cfg=d, rubric_txt=rub_txt, meter=meter, mode=mode)
+                if mode == "readings":
+                    r_out, _, _ = _parse_reading(res)
+                    out = r_out if r_out in ("conforms", "does_not_conform") else ("conforms" if exp == "does_not_conform" else "does_not_conform")
+                    sc_val = 1.0 if out == "conforms" else 0.0
+                    if out != exp: bad_dims.add(did)
                 else:
-                    sc_val, out = float(sc), ("conforms" if float(sc) >= thr else "does_not_conform")
-                    bad_dims.update([did] if out != exp else [])
+                    sc = res.get("score")
+                    if sc is None or not math.isfinite(float(sc)):
+                        bad_dims.add(did)
+                        out, sc_val = ("conforms" if exp == "does_not_conform" else "does_not_conform"), (thr if exp == "does_not_conform" else thr - 1.0)
+                    else:
+                        sc_val, out = float(sc), ("conforms" if float(sc) >= thr else "does_not_conform")
+                        bad_dims.update([did] if out != exp else [])
                 ctl = {"id": cid, "batch": bid, "evaluator": ev_id, "dimension": did, "case": {"sha256": gates.sha256_file(path)}, "expected": exp, "outcome": out}
                 controls.append(ctl)
                 scores_rows.append({"id": cid, "batch": bid, "evaluator": ev_id, "expected": exp, "score": sc_val, "threshold": thr})
@@ -314,13 +348,27 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, deadline, meter=None):
             did, sc_cfg = d["id"], scales[d["id"]]
             for run_i in range(1, int(ev.get("runs", 2)) + 1):
                 har = job_dir / "evidence" / f"harness-{ev_id}-{bid}.json" if ev["kind"] == "model" and run_i == 1 else None
-                res = adapters.run_evaluator(ev, art_dir, did, job_dir=job_dir, harness_out=har, timeout=max(1.0, deadline - time.time()), dim_cfg=d, rubric_txt=rub_txt, meter=meter)
-                if did in bad_dims or "unobserved" in res or res.get("score") is None:
+                res = adapters.run_evaluator(ev, art_dir, did, job_dir=job_dir, harness_out=har, timeout=max(1.0, deadline - time.time()), dim_cfg=d, rubric_txt=rub_txt, meter=meter, mode=mode)
+                if mode == "readings":
+                    r_out, quote, u_info = _parse_reading(res)
+                    if did in bad_dims or r_out is None or r_out == "unobserved":
+                        u = ({"channel": ev_id, "reason": "evaluator failed batch control (CL1-9)", "failed": True} if did in bad_dims else
+                             {"channel": ev_id, "reason": (u_info or {}).get("reason", "unobserved"), "failed": bool(r_out is None or (u_info or {}).get("failed", True))})
+                        chk = {"dimension": did, "evaluator": ev_id, "run": run_i, "batch": bid, "at": custody_record.now(), "outcome": "unobserved", "score": None, "quotation": None, "failureCondition": d["criterion"], "evidence": None, "unobserved": u}
+                    else:
+                        ev_name = f"reading-{did}-{ev_id}-r{round_n}{att_tag}-run{run_i}.json"
+                        (job_dir / "evidence" / ev_name).write_text(json.dumps({"dimension": did, "evaluator": ev_id, "round": round_n, "run": run_i, "outcome": r_out, "quotation": quote}, indent=2) + "\n", encoding="utf-8")
+                        chk = {"dimension": did, "evaluator": ev_id, "run": run_i, "batch": bid, "at": custody_record.now(), "outcome": r_out, "score": None, "quotation": quote, "failureCondition": d["criterion"], "evidence": {"name": ev_name, "sha256": gates.sha256_file(job_dir / "evidence" / ev_name)}, "unobserved": None, **({"endpoint": res["_endpoint"]} if res.get("_endpoint") else {})}
+                        if r_out == "does_not_conform":
+                            defects.append({"round": round_n, "dimension": did, "evaluator": ev_id, "quotation": quote, "observation": quote})
+                        else:
+                            solutions.append({"dimension": did, "evaluator": ev_id, "quotation": quote, "round": round_n})
+                elif did in bad_dims or "unobserved" in res or res.get("score") is None:
                     u = res.get("unobserved") or {"channel": ev_id, "reason": "evaluator failed batch control (CL1-9)"}
                     chk = {"dimension": did, "evaluator": ev_id, "run": run_i, "batch": bid, "at": custody_record.now(), "outcome": "unobserved", "score": None, "failureCondition": f"score < {sc_cfg['threshold']}" if sc_cfg else d["criterion"], "evidence": None, "unobserved": u}
                 else:
                     score, out = float(res["score"]), ("conforms" if float(res["score"]) >= float(sc_cfg["threshold"]) else "does_not_conform")
-                    ev_name = f"reading-{did}-{ev_id}-r{round_n}-run{run_i}.json"
+                    ev_name = f"reading-{did}-{ev_id}-r{round_n}{att_tag}-run{run_i}.json"
                     (job_dir / "evidence" / ev_name).write_text(json.dumps({"dimension": did, "evaluator": ev_id, "round": round_n, "run": run_i, "score": score, "observation": res.get("observation", ""), "remedy": res.get("remedy", "")}, indent=2) + "\n", encoding="utf-8")
                     chk = {"dimension": did, "evaluator": ev_id, "run": run_i, "batch": bid, "at": custody_record.now(), "outcome": out, "score": score, "failureCondition": f"score < {sc_cfg['threshold']}", "evidence": {"name": ev_name, "sha256": gates.sha256_file(job_dir / "evidence" / ev_name)}, "unobserved": None, **({"endpoint": res["_endpoint"]} if res.get("_endpoint") else {})}
                     per_dim[did].append(score)
@@ -354,11 +402,13 @@ def _write_escalation(job_dir, state, cfg):
     reason, abandon = state.get("reason"), ("abandon", "Finalize with --disposition declined")
     opts = {"cap_reached": [("raise-bounds", "Edit max_rounds/max_cost_usd/max_wall_seconds in job.json, then re-freeze a successor job carrying the incumbent forward"), ("accept-incumbent", "Finalize with --disposition given to accept the current best artifact"), abandon],
             "no_observation": [("inspect-evidence", "Read evidence/ and scores.jsonl; the evaluator channel failed its controls or errored"), ("accept-incumbent", "Finalize with --disposition given --ack-unobserved <DIMS> to accept with acknowledged gaps"), abandon],
+            "needs_owner": [("owner-ruling", "Inspect the readings and quotations in job.jsonl and evidence/, then finalize with --disposition given or declined"), abandon],
             "no_artifact": [("fix-maker", "The Maker produced nothing; check the Maker command and method.md"), abandon],
             "dormant_channel": [("vary-method", "Two consecutive identical artifacts; revise method.md so the Maker can actually change the artifact"), ("accept-incumbent", "Finalize with --disposition given"), abandon],
             "dimension_tradeoff": [("owner-ruling", "The revision is better on one dimension and worse on another; pick which artifact ships and finalize accordingly"), abandon],
             "maker_failed": [("fix-maker", "The Maker command failed; state.json maker_error has the stderr tail"), abandon],
-            "all_conform": [("finalize", "Finalize with --disposition given to bind the Owner disposition")]}
+            "all_conform": [("finalize", "Finalize with --disposition given to bind the Owner disposition")],
+            "census": [("finalize", "Finalize with --disposition given to bind the Owner disposition")]}
     for k, msg in (("interrupted", "The run was interrupted (Ctrl-C or SIGTERM); the log holds every completed event"),
                    ("runtime_error", "A runtime defect halted the job; state.json runtime_error has the detail"),
                    ("integrity_error", "A gate refused to continue; state.json integrity_error names the check and why")):
@@ -369,11 +419,12 @@ def _write_escalation(job_dir, state, cfg):
     if reason == "dimension_tradeoff" and len(tried) >= 2 and state.get("incumbent_scores"):
         inc_s, last = state["incumbent_scores"], tried[-1]["dimScores"]
         why.update(improved=[d for d in last if last[d] > inc_s[d]], regressed=[d for d in last if last[d] < inc_s[d]])
-    if reason == "no_observation":
+    if reason in ("no_observation", "needs_owner"):
         why["unobserved"] = sorted({(c["evaluator"], c["dimension"]) for v in rounds.values() for c in v["checks"] if c["outcome"] == "unobserved"})
     rec_map = {"cap_reached": "accept-incumbent if the incumbent meets the bar on inspection, else raise-bounds",
                "no_observation": "inspect-evidence first; accept-incumbent only with explicit --ack-unobserved",
-               "no_artifact": "fix-maker", "dormant_channel": "vary-method", "dimension_tradeoff": "owner-ruling", "maker_failed": "fix-maker", "all_conform": "finalize"}
+               "needs_owner": "owner-ruling", "no_artifact": "fix-maker", "dormant_channel": "vary-method",
+               "dimension_tradeoff": "owner-ruling", "maker_failed": "fix-maker", "all_conform": "finalize", "census": "finalize"}
     rec = {"terminalState": state.get("terminal_state"), "reason": reason, "incumbentRound": state.get("incumbent_round"), "tried": tried, "why": why,
            "options": [{"id": o[0], "action": o[1]} for o in opts.get(reason, [("inspect-state", "Read state.json and evidence/ before deciding")])],
            "recommendation": rec_map.get(reason, "inspect-state")}
@@ -386,12 +437,15 @@ def _refuse_after_disposition(job_dir):
 
 
 def _open_meter(job_dir, cfg, state, require_anchor=False):
-    # G:P9/I-07 construct Meter, recover dead-run reservations, and verify chain against state anchor
+    # G:P9/I-07/F1 verify chain against state anchor before recovery; re-anchor state if recovery adds rows
     try:
-        meter = Meter(job_dir, pricing=cfg.get("pricing", {}), bounds=cfg.get("bounds")); meter.recover()
+        meter = Meter(job_dir, pricing=cfg.get("pricing", {}), bounds=cfg.get("bounds"))
         if require_anchor or (job_dir / "usage.jsonl").is_file() or state.get("usage_anchor"):
             meter.verify(anchor=state.get("usage_anchor"))
             if (job_dir / "usage.jsonl").is_file() and not state.get("usage_anchor"): state["usage_unanchored"] = True
+        if meter.recover():
+            state["cost_usd"] = round(meter.accrued(), 6)
+            _write_state(job_dir, state, meter)
         return meter
     except ValueError as e: raise gates.GateError(f"usage.jsonl failed integrity verification: {e} (spend integrity)")
 
@@ -419,7 +473,9 @@ def _run_job_held(job_dir):
             _write_escalation(job_dir, state, cfg)
             _write_state(job_dir, state)
         raise
-    max_rounds, max_wall, max_cost, t0 = int(cfg["bounds"]["max_rounds"]), float(cfg["bounds"]["max_wall_seconds"]), float(cfg["bounds"]["max_cost_usd"]), time.time()
+    mode = cfg.get("mode") or "scored"
+    max_rounds = 1 if mode == "readings" else int(cfg["bounds"]["max_rounds"])
+    max_wall, max_cost, t0 = float(cfg["bounds"]["max_wall_seconds"]), float(cfg["bounds"]["max_cost_usd"]), time.time()
     dims, floors = [d["id"] for d in cfg["bar"]["dimensions"]], {d["id"]: float(cfg.get("rejectFloor", (d.get("scale") or {}).get("floor", 0.0))) for d in cfg["bar"]["dimensions"]}
     held_hashes = {gates.sha256_file(p) for p in (job_dir / "held_out").rglob("*") if p.is_file()} if (job_dir / "held_out").is_dir() else set()
     prev_term = None
@@ -438,11 +494,13 @@ def _run_job_held(job_dir):
         r_dir, att = job_dir / "rounds" / f"round-{r:02d}", 1
         while (r_dir / "artifact").exists():
             att += 1; r_dir = job_dir / "rounds" / f"round-{r:02d}-a{att}"
-        art_dir = r_dir / "artifact"; r_dir.mkdir(parents=True, exist_ok=True)
+        att_tag, art_dir = (f"-a{att}" if att > 1 else ""), r_dir / "artifact"
+        r_dir.mkdir(parents=True, exist_ok=True)
         needles = gates.held_out_needles(job_dir)
         pk_def, w1 = gates.scrub_held_out(list(state["defects"]) + list(state.get("rejected_defects", [])), needles)
         pk_sol, w2 = gates.scrub_held_out(state["solutions"], needles)
-        pkt = {"round": r, "mode": cfg.get("mode", "pass_r2"), "best_artifact_digest": state["incumbent_digest"], "defects": pk_def, "workable_solutions": pk_sol, "withheld": w1 + w2}
+        pkt_mode = cfg.get("packetMode") or (cfg.get("mode") if cfg.get("mode") not in (None, "scored", "readings") else "pass_r2")
+        pkt = {"round": r, "mode": pkt_mode, "packetMode": pkt_mode, "best_artifact_digest": state["incumbent_digest"], "defects": pk_def, "workable_solutions": pk_sol, "withheld": w1 + w2}
         art_text = ""
         if state.get("incumbent_round"):
             inc_w = (state.get("rounds") or {}).get(str(state["incumbent_round"])) or {}
@@ -467,9 +525,7 @@ def _run_job_held(job_dir):
                 state["cost_usd"] = round(meter.accrued(), 6)
             except (TimeoutError, subprocess.TimeoutExpired):
                 state.update(terminal_state="needs_owner", reason="maker_failed", maker_error="maker wall-clock deadline exceeded (max_wall_seconds=%s)" % (cfg.get("bounds") or {}).get("max_wall_seconds")); break
-            except CapExceeded as e:
-                if isinstance(e, UnboundedOutput):
-                    state.update(terminal_state="needs_owner", reason="integrity_error", integrity_error=str(e)[-300:]); raise gates.GateError(str(e))
+            except CapExceeded:
                 state.update(terminal_state="needs_owner", reason="cap_reached"); break
             except gates.GateError: raise
             except Exception as e:
@@ -481,13 +537,22 @@ def _run_job_held(job_dir):
         if maker_ran:
             ev_prod = _append(job_dir, "artifact-produced", cfg["maker"]["name"], [art_dir / f for f in cfg["subjectFiles"]], {})
         try:
-            checks, ctls, s_rows, exts, d_scores, defects, solutions, _usages = _eval_batch(cfg, job_dir, r, art_dir, t0 + max_wall - wall_base, meter=meter)
-        except CapExceeded as e:
-            if isinstance(e, UnboundedOutput):
-                state.update(terminal_state="needs_owner", reason="integrity_error", integrity_error=str(e)[-300:]); raise gates.GateError(str(e))
+            checks, ctls, s_rows, exts, d_scores, defects, solutions, _usages = _eval_batch(cfg, job_dir, r, art_dir, t0 + max_wall - wall_base, meter=meter, att_tag=att_tag)
+        except CapExceeded:
             state.update(terminal_state="needs_owner", reason="cap_reached"); break
         state["rounds"][str(r)] = {"dir": r_dir.relative_to(job_dir).as_posix(), "producedAt": ev_prod["at"], "digest": cand_digest, "checks": checks, "controls": ctls, "scores": s_rows, "external": exts, "dim_scores": d_scores}
         state["cost_usd"] = round(meter.accrued(), 6)
+        if mode == "readings":
+            state.update(incumbent_round=r, incumbent_digest=cand_digest, incumbent_scores=d_scores, defects=defects, solutions=solutions)
+            by_dim = {d: [c["outcome"] for c in checks if c["dimension"] == d] for d in dims}
+            ctl_fail = any(k["outcome"] != k["expected"] for k in ctls)
+            eval_fail = any((c.get("unobserved") or {}).get("failed") for c in checks)
+            flap = any(len(set(w)) > 1 for w in by_dim.values())
+            if ctl_fail or eval_fail or flap or any(not w for w in by_dim.values()):
+                state.update(terminal_state="needs_owner", reason="no_observation"); break
+            if any(all(x == "unobserved" for x in w) for w in by_dim.values()) or any( "does_not_conform" in w for w in by_dim.values()):
+                state.update(terminal_state="needs_owner", reason="needs_owner"); break
+            state.update(terminal_state="accepted", reason="census"); break
         if any(c["outcome"] == "unobserved" for c in checks):
             if state["incumbent_round"] is None: state.update(incumbent_round=r, incumbent_digest=cand_digest, incumbent_scores=d_scores)
             state.update(terminal_state="needs_owner", reason="no_observation"); break
@@ -537,7 +602,8 @@ def _resume_job_held(job_dir):
     r = int(state["open_round"])
     gates.check_pins(cfg, job_dir, state["pins"])
     meter = _open_meter(job_dir, cfg, state, require_anchor=True)
-    round_rows = [row["digest"] for row in meter._rows if row.get("kind") == "call" and row.get("round") == r and "discarded_round" not in row]
+    amended = {d for row in meter._rows if row.get("kind") == "amendment" for d in row.get("amends", [])}
+    round_rows = [row["digest"] for row in meter._rows if row.get("kind") == "call" and row.get("round") == r and row["digest"] not in amended]
     if round_rows:
         meter.amend(round_rows, note=f"round {r} discarded by resume")
     _append(job_dir, "round-discarded", "edi-run", [],
@@ -550,7 +616,8 @@ def _resume_job_held(job_dir):
 def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
     # G:P6/P9 finalize is one lifecycle transaction under job_lock
     job_dir = pathlib.Path(job_dir).resolve()
-    cfg = _load_job_json(job_dir)
+    cfg, mode = _load_job_json(job_dir), None
+    mode = cfg.get("mode") or "scored"
     if not (job_dir / "state.json").is_file():
         raise gates.GateError("no state.json; the job has not been frozen (finalize follows freeze)")
     with job_lock(job_dir):
@@ -592,7 +659,7 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
         else:
             checks, prod_at = win["checks"], win["producedAt"]
         if (job_dir / "usage.jsonl").is_file():
-            if not st.get("usage_anchor"):
+            if st.get("usage_unanchored") or not st.get("usage_anchor"):
                 raise gates.GateError("usage.jsonl is present but state.json has no spend anchor (unanchored log); refusing to attest spend that no state write vouched for (P9)")
             try:
                 with meter.file_lock():
@@ -603,16 +670,24 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
                             {"usd": round(meter.accrued(), 6), "discardedUsd": round(meter.discarded(), 6), "rows": rows_n, "head": head_d})
             except ValueError as e:
                 raise gates.GateError(f"usage.jsonl failed integrity verification: {e} (spend integrity)")
-        ev_disp = _append(job_dir, "disposition", by, [], {"state": state, "acknowledgesUnobserved": ack})
+        disagreements = [{"dimension": d["id"], "checks": [i for i, c in enumerate(checks) if c["dimension"] == d["id"]],
+                          "words": [c["outcome"] for c in checks if c["dimension"] == d["id"]], "note": "evaluators disagreed"}
+                         for d in cfg["bar"]["dimensions"] if len({c["outcome"] for c in checks if c["dimension"] == d["id"]}) > 1]
+        disp_data = {"state": state, "acknowledgesUnobserved": ack}
+        if mode == "readings":
+            disp_data.update(mode="readings", terminalState=st.get("terminal_state"), outcome=st.get("reason"), disagreements=disagreements)
+        ev_disp = _append(job_dir, "disposition", by, [], disp_data)
+        if mode == "readings":
+            return verify_job(job_dir)
     violations = [{"dimension": d["id"], "description": f"{d['id']} failed conform threshold"} for d in cfg["bar"]["dimensions"] if any(c["dimension"] == d["id"] and c["outcome"] == "does_not_conform" for c in checks)]
-    disagreements = [{"dimension": d["id"], "checks": [i for i, c in enumerate(checks) if c["dimension"] == d["id"]], "note": "evaluators disagreed"} for d in cfg["bar"]["dimensions"] if len({c["outcome"] for c in checks if c["dimension"] == d["id"]}) > 1]
     evals_clean = [{k: v for k, v in e.items() if k in ("id", "name", "kind", "model", "script", "sameModelAsMaker")} for e in cfg["evaluators"]]
     def _assemble():
         inputs = {"subject": {"dir": "artifact"}, "specVersion": cfg.get("specVersion", "0.9.8"), "levelClaimed": cfg["levelClaimed"],
                   "bar": dict({k: v for k, v in cfg["bar"].items() if k != "file"}, frozenAt=st["frozenAt"]),
                   "maker": ({"name": seed_author, "kind": "person", "version": cfg["seed"].get("origin", "owner-supplied"), "method": cfg["maker"]["method"], "model": None} if seed_author else {**{k: v for k, v in cfg["maker"].items() if k in ("name", "kind", "version", "method", "model")}, **({"kind": "model"} if cfg["maker"].get("kind") == "agent" else {})}),
                   "startedAt": st["startedAt"], "producedAt": prod_at, "instrument": cfg["instrument"], "evaluators": evals_clean, "checks": checks, "controls": win["controls"],
-                  "disagreements": disagreements, "violations": violations, "separationGaps": cfg.get("separationGaps", []), "retention": cfg["retention"], "external": win["external"],
+                  "disagreements": [{k: v for k, v in dg.items() if k != "words"} for dg in disagreements],
+                  "violations": violations, "separationGaps": cfg.get("separationGaps", []), "retention": cfg["retention"], "external": win["external"],
                   "disposition": {"state": state, "by": by, "at": ev_disp["at"], "acknowledgesUnobserved": ack}}
         for k in ("spread", "demonstrations", "readsBeforeFreeze"):
             if k == "spread" and cfg["levelClaimed"] in ("CL2", "CL3"):
@@ -630,8 +705,39 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
     return verify_job(job_dir)
 
 
+def read_job(job_dir, by=None):
+    # G:C29/Decision-7 one-command convenience verb for mode == "readings"
+    job_dir = pathlib.Path(job_dir).resolve()
+    cfg = _load_job_json(job_dir)
+    if (cfg.get("mode") or "scored") != "readings":
+        raise gates.GateError("'edi.py read' requires job.json mode == 'readings'")
+    if not (job_dir / "state.json").is_file():
+        freeze_job(job_dir)
+    rc = run_job(job_dir)
+    st = json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
+    who = by or (cfg.get("disposition") or {}).get("by") or (cfg.get("bar") or {}).get("author") or "Owner"
+    if st.get("terminal_state") == "accepted":
+        finalize_job(job_dir, state="given", by=who)
+    return rc
+
+
 def verify_job(job_dir):
+    # G:G-CUS3/C29 verify job.json pin against chain when present, plus custody chain and record
     job_dir, cfg = pathlib.Path(job_dir).resolve(), _load_job_json(job_dir)
+    log_p = job_dir / "job.jsonl"
+    if log_p.is_file():
+        pins_ev = [e for e in custody_record.read(str(log_p)) if e.get("type") == "job-pin"]
+        if pins_ev:
+            cur_j = hashlib.sha256(json.dumps({k: v for k, v in cfg.items() if k != "disposition"}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            if cur_j != ((pins_ev[-1].get("data") or {}).get("pins") or {}).get("job"):
+                return 1
+    if (cfg.get("mode") or "scored") == "readings" and not (job_dir / "record.json").is_file():
+        if not _has_disposition(job_dir):
+            raise gates.GateError("no disposition in job.jsonl; the readings job has not been finalized yet (verify follows finalize)")
+        if custody_verify(job_dir):
+            return 1
+        disp = [e for e in custody_record.read(str(log_p)) if e.get("type") == "disposition"][-1].get("data") or {}
+        return 0 if disp.get("state") == "given" and disp.get("outcome") == "census" else 1
     try: record_bytes = (job_dir / "record.json").read_bytes()
     except FileNotFoundError: raise gates.GateError("no record.json; the job has not been finalized yet (verify follows finalize)")
     if custody_verify(job_dir): return 1

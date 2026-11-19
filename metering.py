@@ -56,22 +56,26 @@ class Meter:
         self._rows = self._load()
 
     def recover(self):
-        # G:I-07/C2 open reservations at operation start belong to a dead run; recover once at worst case
+        # G:I-07/C2/F1 open reservations at operation start belong to a dead run; recover once and return count
         with self._lock:
-            for rid, r in list(self._open().items()):
+            open_r = list(self._open().items())
+            for rid, r in open_r:
                 amount = float(r.get("amount", 0.0))
                 self._append_locked({"kind": "call", "who": "meter-recovery", "model": r.get("model", ""),
                                      "endpoint": "", "usage": {}, "cost": round(amount, 10), "round": r.get("round"),
                                      "reservation_id": rid, "recovered_reservation": rid,
                                      **({} if amount else {"usage_missing": True})})
+            return len(open_r)
 
     def _load(self):
         rows = []
         if self.path.is_file():
             for i, ln in enumerate(self.path.read_text(encoding="utf-8").splitlines()):
                 if ln.strip():
-                    try: rows.append(json.loads(ln))
-                    except ValueError as e: raise ValueError(f"usage.jsonl line {i+1} is torn or not valid JSON — refusing to accrue onto a damaged log") from e
+                    try:
+                        rows.append(json.loads(ln))
+                    except ValueError as e:
+                        raise ValueError(f"usage.jsonl line {i+1} is torn or not valid JSON — refusing to accrue onto a damaged log") from e
         self._check(rows); return rows
 
     @staticmethod
@@ -169,7 +173,7 @@ class Meter:
 
     @contextmanager
     def hold(self, who, model, endpoint, req_dict, round_no=None):
-        # G:C3/C4/N11 enforce output-token limit on req_dict, reserve worst-case, settle or release
+        # G:C3/C4/N11/F4 enforce output-token limit on req_dict, reserve worst-case, settle or release
         emit_key = self.max_tokens_param(model)
         other_key = "max_completion_tokens" if emit_key == "max_tokens" else "max_tokens"
         mt = req_dict.get("max_tokens", req_dict.get("max_completion_tokens"))
@@ -179,15 +183,21 @@ class Meter:
             req_dict[emit_key] = int(mt) if mt is not None and float(mt) <= bound else int(bound)
         body = json.dumps(req_dict, sort_keys=True).encode("utf-8")
         rid = self.reserve(body, model=model)
-        settled = [False]
-        def settle(usage):
-            self.meter_call(who, model, endpoint, body, usage=usage, round_no=round_no if round_no is not None else getattr(self, "_round", None), settle_reservation=rid)
-            settled[0] = True
+        rno = round_no if round_no is not None else getattr(self, "_round", None)
+        state = {"settled": False, "dispatched": False}
+        def settle(usage, dispatched=False):
+            if dispatched and usage is None:
+                state["dispatched"] = True; return
+            self.meter_call(who, model, endpoint, body, usage=usage, round_no=rno, settle_reservation=rid)
+            state["settled"] = True
         try:
             yield body, settle
         finally:
-            if not settled[0]:
-                self.release(rid)
+            if not state["settled"]:
+                if state["dispatched"]:
+                    self.meter_call(who, model, endpoint, body, usage={}, round_no=rno, settle_reservation=rid)
+                else:
+                    self.release(rid)
 
     def output_bound(self, model=None):
         return output_bound(self.bounds, self.pricing, model)

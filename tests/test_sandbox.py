@@ -160,6 +160,14 @@ class FindingG_LinuxCredentialParity(_R2Base):
             self.assertIn(("--ro-bind", "/dev/null", str(fake_home / ("." + n))),
                           [(cmd[i], cmd[i + 1], cmd[i + 2]) for i in range(len(cmd) - 2)])
 
+    def test_g_sbx2_bwrap_allowlist_excludes_opt_and_var_lib(self):
+        """G-SBX2: bwrap allowlist binds system library roots + sys.executable prefix, never /opt or /var/lib."""
+        jd, sb = self.tmp / "job_sbx2", self.tmp / "sb_sbx2"
+        jd.mkdir(); sb.mkdir()
+        cmd = adapters.sandbox_prefix("bwrap", jd, sb, reads="allowlist")
+        self.assertNotIn("/opt", cmd)
+        self.assertNotIn("/var/lib", cmd)
+
 
 class FindingH_UnresolvedHome(_R2Base):
     def test_h_profile_built_from_unresolved_home_still_denies(self):

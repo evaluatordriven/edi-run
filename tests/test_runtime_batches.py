@@ -68,7 +68,7 @@ class RuntimeBatchTest(unittest.TestCase):
         job_cfg = {
             "job": "test-memo-job", "levelClaimed": level, "specVersion": "0.9.8",
             "bounds": {"max_rounds": 2, "max_cost_usd": 1.0, "max_wall_seconds": 60},
-            "mode": "pass_r2", "subjectFiles": ["memo.md"],
+            "packetMode": "pass_r2", "subjectFiles": ["memo.md"],
             "bar": {
                 "file": "bar.md", "digest": {"sha256": bar_digest},
                 "frozenAt": "2026-10-05T09:00:00Z", "author": "Jordan Blake",
@@ -107,8 +107,9 @@ class TestInitScaffold(RuntimeBatchTest):
         job = self.tmp / "fresh"
         r = run_cli("init", job)
         self.assertEqual(r.returncode, 0, r.stderr)
-        for d in ("scripts", "seed", "rounds"):
+        for d in ("scripts", "seed"):
             self.assertTrue((job / d).is_dir(), d)
+        self.assertFalse((job / "rounds").exists(), "init must not create rounds/ (N14)")
         for f in ("bar.md", "rubric.md", "method.md"):
             self.assertTrue((job / f).is_file(), f)
             self.assertEqual((job / f).read_text(encoding="utf-8"), "", f)

@@ -1,5 +1,29 @@
 # edi-run DECISIONS.log — newest at TOP
 
+## 2026-11-18 — Owner Ruling: 1,777 Code-Line Cap, Readings Mode (`census`), & Post-18d Hardening
+
+**Ruling (Owner: S2, 2026-11-18).**
+> *"Owner ruling: the 1,500 line cap was arbitrary target. Let’s raise it to 1,777 lines so we can make corrections and add back the 'readings' mode."*
+Followed by **"Proceed"** approving Option A across Decisions 2 and 4–8 (synthesizing Grok Bot `18d`, OpenRouter Claude Opus 5.5, OpenRouter GPT 6.2 Sol, and `edi-run-memo-line-cap-readings-2026-11-18.pdf`).
+
+**Decisions & Changes Executed (`1,637` code lines across the 5 core files, `<= 1,777` enforced by `probes/loc.py --check`):**
+- **Decision 2 (Option A — Code-Line Cap `1,777`, `MAX_PHYSICAL` Retired)**: `probes/loc.py` enforces `MAX_CODE = 1777` and drops `MAX_PHYSICAL` so blank lines, `# G:<id>` comments, and readable line wrapping are never penalized.
+- **Readings Mode (`mode: "readings"` / `census`, `C29`, `D4.6`, `D5.outcome.census`)**:
+  - `gates.py`: Validates `mode in ("scored", "readings")`; in `readings` mode requires `bounds.max_rounds == 1` (or absent), requires Buyer approval on `bar.digest`, refuses Specialist approval (`C29`), and refuses `scale`, `threshold`, or `floor` on dimensions.
+  - `loop.py` & `adapters.py`: Supports both Entry B (`seed` draft) and Entry A (one Maker turn); prompts model Evaluators for `{"outcome": "conforms"|"does_not_conform"|"unobserved", "quotation": "<non-empty quote>"}`; validates reading slots (`_parse_reading`: numeric score, unknown word, or blank quotation marks the evaluator failed -> `needs_owner/no_observation`). All dimensions `conforms` across all runs (`R >= 2`) -> `accepted/census`; any run-to-run disagreement records all outcome words in `disagreements[]` (`D4.6`) -> `needs_owner/no_observation`; any `does_not_conform` reading or all-`unobserved` dimension -> `needs_owner/needs_owner` with `escalation.json` (never `rejected`).
+  - **Decision 4 (Option A — `custody/v1` Boundary for Readings Mode)**: Because vendored `vendor/check.py` (`CL1-3`) hard-requires a Specialist approval and has no `census` field, `finalize_job` in `readings` mode appends the `disposition` event to `job.jsonl` (carrying `mode`, `terminalState`, `outcome`, `disagreements`, `acknowledgesUnobserved`) without calling `make_record.py` to emit a falsely-failing `record.json`, and `verify_job` verifies `job.jsonl` (`custody_verify` including all file digests), `job-pin`, and the `disposition` event.
+  - **Decision 7 (Option A — `edi.py read <job_dir> [--by <sponsor>]`)**: Convenience verb that runs `freeze -> run -> finalize` when `accepted/census` and stops at `needs_owner` (exit code `4`) with `escalation.json` when defects or disagreements are found.
+- **Post-18d & Verification Audit Fixes (`F1`–`F7`, `N14`, `G-CUS3`, Cuts 0c & 2)**:
+  - **`N14`**: `loop.init_job` creates only `("scripts", "seed")`, never `rounds/`.
+  - **`F1`**: `Meter.recover()` returns the count of recovered reservations and `loop._open_meter` re-anchors `state.json` when recovery adds rows, so `finalize --disposition declined` after a `SIGKILL` mid-call succeeds cleanly.
+  - **`F2`**: `adapters._run_seat` sets `PYTHONDONTWRITEBYTECODE=1` and `PYTHONPYCACHEPREFIX`, `gates.tree_manifest` pins any `.pyc` outside `__pycache__`, and `gates.gate_commands` refuses seat commands referencing `RUNTIME_WRITTEN` or `NEVER_AUTHORED`.
+  - **`F3`**: `adapters.run_maker` sets `meter._round = round_no`, and `loop._resume_job_held` filters already-amended call digests so double-resume on the same round never double-amends prior calls.
+  - **`F4`**: `Meter.hold()` settles at worst-case reservation cost if an exception occurs after upstream dispatch, and `_UnixProxy` joins its request threads on shutdown.
+  - **`F5` & `F6`**: `loop.freeze_job` holds `job_lock(job_dir)` when `not dry_run` and anchors `demo_meter` in `state.json`.
+  - **`F7`**: Resumed rounds scope batch IDs and evidence filenames by attempt (`B1-a2`, `reading-*-r1-a2-run*.json`, `harness-*-B1-a2.json`).
+  - **`G-CUS3`**: Restored `examples/live-aider-job11/job.json` to match its `job-pin` sha256 and added a `job-pin` check to `loop.verify_job`.
+  - **`N9` (Documented Window)**: Confirmed `WINDOW = 32 / MIN_LINE = 16` is pinned by `test_briefing.py` (`FindingC_FilterPrecision`: a 21-char common phrase must not be scrubbed) and documented the exact threshold (`>= 32`-char sliding windows and `16..31`-char whole lines) in `docs/2026-EDI-Runtime-Solution-Architecture.md` and `README.md`.
+
 ## 2026-11-18 — Minimalism QAR Refactoring & Trim (Opus 5.5 + Grok Bot Review Bundle)
 
 **Ruling (Owner: S2, "Proceed" on Decisions 1–7, Option A across all 7).**

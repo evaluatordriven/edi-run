@@ -147,7 +147,7 @@ def make_job(root, subdir, maker_kind="script", url=None, pricing=None, bounds=N
     cfg = {
         "job": subdir, "levelClaimed": "CL1", "specVersion": "0.9.8",
         "bounds": bounds or {"max_rounds": 2, "max_cost_usd": 1.0, "max_wall_seconds": 60, "max_output_tokens": 200000},
-        "mode": "pass_r2", "subjectFiles": ["memo.md"],
+        "packetMode": "pass_r2", "subjectFiles": ["memo.md"],
         "bar": {"file": "bar.md", "digest": {"sha256": bar_digest}, "frozenAt": "2026-10-05T09:00:00Z",
                 "author": "Jordan Blake",
                 "dimensions": [{"id": "D1", "criterion": "Starts with # Header", "scale": scale},

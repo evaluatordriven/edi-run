@@ -409,8 +409,14 @@ class _Capture(test_edi._MockLLMHandler):
 
     def do_POST(self):
         raw = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-        type(self).seen.append(json.loads(raw))
-        return super().do_POST()
+        body = json.loads(raw)
+        type(self).seen.append(body)
+        usr = body["messages"][-1]["content"]
+        score = 1.0 if "No header and no figure" in usr else (5.0 if ("# Header" in usr and "Source:" in usr) or ("# Header" in usr and '"id":"D1"' in usr) else 1.0)
+        reply = json.dumps({"score": score, "observation": "quoted text", "remedy": "fix it" if score < 4.0 else ""})
+        resp = json.dumps({"model": body.get("model", "mock-model"), "usage": {"total_tokens": 10}, "choices": [{"message": {"content": reply}}]}).encode("utf-8")
+        self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(resp))); self.end_headers()
+        self.wfile.write(resp)
 
 
 class F8_CanonicalJudgeRequest(unittest.TestCase):
@@ -427,7 +433,7 @@ class F8_CanonicalJudgeRequest(unittest.TestCase):
                 cfg["evaluators"].append({"id": "E2", "name": "Model Judge", "kind": "model", "script": None, "runs": 2,
                                           "url": f"http://127.0.0.1:{srv.server_port}/v1/chat/completions",
                                           "model": {"family": "mock", "identifier": "mock-1", "endpoint": "127.0.0.1", "readOnly": True}})
-                cfg["pricing"] = {"mock-1": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}}
+                cfg["pricing"] = {"mock-1": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0, "max_output_tokens": 512}}
                 if order == "id_last":  # same content, reordered keys
                     cfg["bar"]["dimensions"] = [
                         {"scale": d.get("scale"), "criterion": d["criterion"], "id": d["id"]} for d in cfg["bar"]["dimensions"]]
