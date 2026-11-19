@@ -1,8 +1,11 @@
 # edi-run CHANGELOG
 
-## Unreleased
+## v0.1.4 (2026-11-19)
 
-- Operator skill (Grok Bot 0.1.3 qualification feedback): `check_held_out.py <job_dir> <file>` ships as the one-command held-out filter for anything leaving a job with a `held_out/` folder (P5/§6 instruction added; disclosed limit unchanged — paraphrases/short fragments aren't caught). P6 now says what to do when `escalation_report.py` refuses (a run that died before recording a terminal failure): include the refusal verbatim in the loud report, never write your own stop record. §7.7 now forbids passing the key file to ANY command (`grep -f`, `diff`, `cmp`, `wc`, a hash) and ships `scan_keys.py <dir>` — scan by published key formats, report paths and counts only.
+- Operator skill — Grok Bot's 0.1.3 qualification feedback (no core changes; core LOC unchanged at 1,718):
+  - `check_held_out.py <job_dir> <file>...` ships: one-command held-out filter for anything leaving a job with a `held_out/` folder (same needles the Maker packet gate uses; exits non-zero on any match). SKILL.md P5/§6 mandates it before delivery — on a match, return the file to its author, never edit it yourself. Disclosed limit unchanged: paraphrases and fragments under the needle length aren't caught.
+  - SKILL.md P6: when `escalation_report.py` refuses (a run that died before recording a terminal failure state), include the refusal verbatim in the loud report — never write your own stop record.
+  - SKILL.md §7.7: never pass the key file to any command (`grep -f`, `diff`, `cmp`, `wc`, a hash); `scan_keys.py <dir>` ships — scan by published provider key formats, report paths and counts only, never matching lines. Disclosed limit: split, encoded or truncated keys aren't caught.
 
 ## v0.1.3 (2026-11-19)
 
