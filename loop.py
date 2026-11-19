@@ -220,9 +220,16 @@ def _freeze_job_inner(job_dir, started_at=None, dry_run=False):
                   if e.get("kind") == "model" and not _loopback(e.get("url"))]
     for seat_label, env_name in key_needs:
         if not adapters._load_key(env_name):
-            raise gates.GateError(
-                f"{seat_label} needs {env_name} but it resolves empty in the environment; "
-                f"export it, or set EDI_KEY_FALLBACK=1 to opt into the ~/.hermes/.env fallback")
+            msg = (f"{seat_label} needs {env_name} but it resolves empty in the environment; "
+                   f"export it, or set EDI_KEY_FALLBACK=1 to opt into the ~/.hermes/.env fallback")
+            if dry_run:
+                # preflight intentionally runs keyless (the launcher keeps the key
+                # out of every process that doesn't need it): warn, don't refuse.
+                # The REAL freeze still refuses — spend must never be reachable
+                # without a key.
+                print(f"WARNING: {msg}", file=sys.stderr)
+                continue
+            raise gates.GateError(msg)
     model_ids = []
     if cfg["maker"].get("kind") in ("model", "agent"):
         model_ids.append((cfg["maker"].get("model") or {}).get("identifier") if isinstance(cfg["maker"].get("model"), dict) else cfg["maker"].get("model"))

@@ -51,11 +51,16 @@ def main():
 
     violations = []
     if proc.returncode != 0:
-        msg = (proc.stderr or proc.stdout).strip() or "freeze --dry-run refused"
+        err = "\n".join(ln for ln in (proc.stderr or "").splitlines() if not ln.startswith("WARNING:"))
+        msg = (err or (proc.stdout or "").strip() or "freeze --dry-run refused").strip()
         violations.append(msg)
 
     cfg = load_json(job_dir / "job.json") or {}
     warnings = zero_price_warnings(cfg)
+    # loop.py dry-run surfaces empty-key posture as WARNING lines on stderr
+    # (real freeze refuses; preflight runs keyless by design)
+    warnings += [ln.split("WARNING:", 1)[1].strip()
+                 for ln in (proc.stderr or "").splitlines() if ln.startswith("WARNING:")]
 
     emit({"pass": proc.returncode == 0, "violations": violations,
           "warnings": warnings},

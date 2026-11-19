@@ -642,14 +642,23 @@ class TestReviewBriefing2026_11_19(OperatorScriptTest):
             "model": {"family": "claude", "identifier": "test/model",
                       "endpoint": "openrouter.ai", "readOnly": True},
         })
+        cfg["pricing"] = {"test/model": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 2.0,
+                                          "max_output_tokens": 4096}}
         (job / "job.json").write_text(json.dumps(cfg, indent=2))
         env = {**os.environ, "EDI_AGENT_ID": AGENT, "EDI_HOME": str(self.home)}
         env.pop("OPENROUTER_API_KEY", None)
         env.pop("EDI_KEY_FALLBACK", None)
         r = subprocess.run([sys.executable, str(SCRIPTS / "preflight.py"), str(job)],
                            capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120)
-        self.assertEqual(r.returncode, 1, r.stdout)
-        self.assertIn("EDI_KEY_FALLBACK=1", r.stdout)
+        # preflight runs keyless BY DESIGN (Grok Bot feedback): dry-run warns,
+        # passes, and names the remedy in warnings; the REAL freeze refuses.
+        self.assertEqual(r.returncode, 0, r.stdout)
+        out = json.loads(r.stdout)
+        self.assertTrue(out["pass"], out["violations"])
+        self.assertTrue(any("EDI_KEY_FALLBACK=1" in w for w in out["warnings"]), out["warnings"])
+        fr = run_edi("freeze", job)
+        self.assertEqual(fr.returncode, 1, fr.stderr)
+        self.assertIn("EDI_KEY_FALLBACK=1", fr.stderr)
 
     def test_scored_mode_requires_a_usable_scale(self):
         # P2-3/N2: a scored dimension without a scale (or with a null/string scale)
