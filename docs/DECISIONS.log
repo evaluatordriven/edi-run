@@ -1,5 +1,11 @@
 # edi-run DECISIONS.log — newest at TOP
 
+## 2026-11-19 — LOC counting ruling: `probes/loc.py` code-line count is the official measure (Owner: S2)
+
+**Ruling (Owner: S2, 2026-11-19, "I agree. Proceed").** The official line count for the 1,777 cap is the **code-line count produced by `probes/loc.py`** (non-blank, non-comment lines across the five core files: `edi.py`, `gates.py`, `loop.py`, `adapters.py`, `metering.py`), enforced in CI by `probes/loc.py --check`. The **weighted** count (e.g. 120-character weighting, used by external reviewers) is **informational only** — it is reported in reviews but never gates a release. This matches Decision 2 of the 2026-11-18 round (Option A — Code-Line Cap `1,777`, `MAX_PHYSICAL` retired): blank lines, `# G:<id>` markers and readable wrapping are not penalized.
+
+**At v0.1.2 (tag, 2026-11-19):** 1,718 code lines / 1,998 physical lines (1,718 ≤ 1,777).
+
 ## 2026-11-19 — Ruling A: Authorship and Seats (`Briefing_for_the_edi_run_maintainer_0_1_0_operator_skill_defects.md`, PR #17)
 
 **Ruling (Owner: S2, 2026-11-19).** Confirmed the recommended path: **keep the runtime rule** — the Operator never authors the bar, rubric, method or seed; and the author of bar/rubric/method never sits as Maker or Evaluator (the seed's author never sits as an Evaluator). Defects 1–2 of the 2026-11-19 briefing fixed as written; the alternative (operator authors its own instruments) was rejected — it would drop a separation `gate_authorship` already enforces.
@@ -16,7 +22,7 @@
 
 **Posture decisions carried in `cb6c1de` (0.1.1 feedback batch):** the `~/.hermes/.env` key fallback is OPT-IN (`EDI_KEY_FALLBACK=1`) — Owner posture, shared-host leak class; freeze now fails fast when a direct model seat's key resolves empty (non-loopback endpoints; agent seats exempt — their relay fails fast at run time), naming the remedy. `common.repo_root()`'s `~/Code/edi-run` fallback REMOVED (hard refusal: `EDI_REPO` or in-repo only) — installed skill copies must declare `EDI_REPO`. Both marked **Breaking** in `CHANGELOG.md` (new file; also documents the v0.1.1 `record_summary` score-shape change). The successor repro is committed as `probes/repro_successor_0_1_1.py`.
 
-**Still open (tracked):** key→host binding in `adapters.py`; CL1-15 self-vouching `readBy` in `loop.py`; the weighted line count (1,898) vs the 1,777 cap — the two reviews count differently and `probes/loc.py` code-line count is the authoritative measure pending an explicit Owner ruling; the undelivered guarantee map; Maker/Evaluator seat-bot disposition (adoption plan D3).
+**Still open (tracked):** key→host binding in `adapters.py`; CL1-15 self-vouching `readBy` in `loop.py`; the undelivered guarantee map; Maker/Evaluator seat-bot disposition (adoption plan D3). (The LOC counting ruling is CLOSED — see the 2026-11-19 LOC ruling at the top of this log: `probes/loc.py` code-line count is authoritative; the weighted count is informational.)
 
 
 ## 2026-11-18 — Five Readings-Mode Fixes (`edi-run-memo-readings-fixes-2026-11-18.pdf` & `NOTE-TO-MAINTAINER-2026-11-18e.md`)
