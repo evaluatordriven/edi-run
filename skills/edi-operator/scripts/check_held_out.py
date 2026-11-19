@@ -12,8 +12,12 @@ Disclosed limit: paraphrases and fragments shorter than the needle length are
 not caught. This check is necessary, not sufficient.
 """
 import sys
+from pathlib import Path
 
-sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
+_p = Path(__file__).resolve()
+while _p != _p.parent and not (_p / "gates.py").is_file():
+    _p = _p.parent
+sys.path.insert(0, str(_p))
 import gates  # noqa: E402
 from common import refuse, require_agent_id, resolve_job  # noqa: E402
 
