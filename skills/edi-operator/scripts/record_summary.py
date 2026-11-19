@@ -136,6 +136,17 @@ def main():
     if not disp_evs:
         # Pre-disposition stage: the job ran; the Owner has not ruled yet.
         chain = _chain_verify(job_dir)
+        # Scores must carry EVERY evaluator/run observation, not the collapsed
+        # minimum: loop.py builds state.incumbent_scores as min per dimension, and
+        # the Owner rules on the spread. Rebuild the {observations, min, max,
+        # straddles_threshold} shape from the incumbent round's checks.
+        rounds = state.get("rounds") if isinstance(state.get("rounds"), dict) else {}
+        inc = state.get("incumbent_round")
+        round_keys = sorted(rounds.keys(), key=str) if rounds else []
+        rkey = str(inc) if inc is not None and str(inc) in rounds else (round_keys[-1] if round_keys else None)
+        round_checks = (rounds.get(rkey) or {}).get("checks") if rkey is not None else None
+        pre_scores = scores_from_record({"checks": round_checks or []})
+        _flag_thresholds(pre_scores, load_json(job_dir / "job.json"))
         emit({
             "job_dir": str(job_dir),
             "stage": "pre-disposition",
@@ -145,7 +156,8 @@ def main():
             "verified": None,
             "terminal_state": state.get("terminal_state"),
             "reason": state.get("reason"),
-            "scores": state.get("incumbent_scores") or {},
+            "scores_round": rkey,
+            "scores": pre_scores,
             "spent_usd": state.get("cost_usd"),
             "next": "awaiting the Owner's ruling; finalize names the disposition",
         }, EXIT_OK)

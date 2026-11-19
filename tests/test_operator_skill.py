@@ -501,6 +501,31 @@ class TestReviewBriefing2026_11_19(OperatorScriptTest):
         out = json.loads(run_script("record_summary.py", job, env_extra=self.env).stdout)
         self.assertTrue(out["chain_verified"], out.get("chain_message"))
 
+    def test_pre_finalize_summary_reports_split_not_collapsed_min(self):
+        # Opus 5.5 follow-up: loop.py builds state.incumbent_scores as the MINIMUM
+        # per dimension; the Owner must see every observation and the spread.
+        job = self._job_frozen_run("split-pre")
+        state = json.loads((job / "state.json").read_text())
+        rounds = state["rounds"]
+        rkey = str(state.get("incumbent_round")) if state.get("incumbent_round") is not None \
+            else sorted(rounds.keys(), key=str)[-1]
+        checks = rounds[rkey]["checks"]
+        scored = [c for c in checks if c.get("score") is not None]
+        first = scored[0]
+        dup = dict(first, evaluator="E2", run=2, score=2.0, outcome="does_not_conform")
+        dup["evidence"] = dict(first["evidence"], name="split-e2.json", sha256="0" * 64)
+        rounds[rkey]["checks"] = scored[:1] + [dup] + scored[1:]
+        (job / "state.json").write_text(json.dumps(state, indent=2))
+        out = json.loads(run_script("record_summary.py", job, env_extra=self.env).stdout)
+        self.assertEqual(out["stage"], "pre-disposition")
+        entry = out["scores"][first["dimension"]]
+        dim_first = [c for c in scored if c["dimension"] == first["dimension"]]
+        self.assertEqual(len(entry["observations"]), len(dim_first) + 1)
+        self.assertEqual(entry["min"], 2.0)
+        self.assertEqual(entry["max"], 5.0)
+        self.assertIsNotNone(entry["straddles_threshold"])
+        self.assertEqual(out["scores_round"], rkey)
+
     def test_readings_summary_reports_outcomes_and_quotations(self):
         src = ROOT / "examples" / "live-readings-plumbline"
         job = self.home / "readings"
