@@ -1,5 +1,18 @@
 # edi-run DECISIONS.log — newest at TOP
 
+## 2026-11-18 — Five Readings-Mode Fixes (`edi-run-memo-readings-fixes-2026-11-18.pdf` & `NOTE-TO-MAINTAINER-2026-11-18e.md`)
+
+**Source.** Owner memo `edi-run-memo-readings-fixes-2026-11-18.pdf` (Fixes 1–5) and Grok Bot `NOTE-TO-MAINTAINER-2026-11-18e.md` (`RD2`, `RD4`, `RD5`, `F1`/`N21`).
+
+**Fixes Implemented (`1,643` code lines across the 5 core files, `<= 1,777` enforced by `probes/loc.py --check`):**
+- **Fix 1 / `RD4` (`loop.py:verify_job`)**: In `mode: "readings"`, `verify_job` reports custody integrity rather than requiring `disposition == "given"` and `outcome == "census"`. A `needs_owner` or `no_observation` readings job closed by the Owner with `--disposition declined` or `--disposition given` now exits `0` from both `finalize` and `verify`.
+- **Fix 2 (`loop.py:read_job`, `edi.py`)**: `edi.py read <job_dir>` freezes (if needed) and runs the job, prints the terminal state and the exact `edi.py finalize` command for the Owner, and never writes a `disposition` event on its own (`--by` dropped from `read`, keeping disposition strictly a human Owner act).
+- **Fix 3 / `RD5` (`loop.py:verify_job`)**: In `mode: "readings"`, `verify_job` re-hashes every `check` event's `evidence/reading-*.json` file against its recorded `evidence.sha256` and every file in `artifact/` against the last `artifact-produced` event, failing if any file is edited or deleted after `finalize`.
+- **Grok `RD2` (`loop.py:_parse_reading`, `_eval_batch`)**: Requires a reading's whitespace-normalized `quotation` to appear in the judged text (the candidate artifact or control case); ungrounded quotations mark the evaluator failed (`needs_owner / no_observation`).
+- **Fix 4 & `N21` (`tests/test_trim_requirements.py`)**: Updated `test_n15` to treat Linux zombie processes (`state == 'Z'` in `/proc/<pid>/stat` when PID 1 does not reap orphans) as dead, and strengthened `test_f1` to test a kill in Round 2 with an existing Round 1 incumbent followed by `finalize --disposition declined`.
+- **Fix 5 / `Q3` (`README.md`, `docs/2026-EDI-Runtime-Solution-Architecture.md`)**: Documented that `vendor/record.py verify job.jsonl --files` runs from inside `<job_dir>` for modern job-relative logs (while the three pre-P5 examples run from repo root), and added `examples/live-aider-job11` verification from its folder to `README.md`.
+- **Traceability correction to the earlier 2026-11-18 entry below**: In `edi-run-memo-line-cap-readings-2026-11-18.pdf`, Decision 7 was where a readings job keeps its limits (`bounds`), whereas the `edi.py read` convenience verb originated from the earlier R1 ruling (`docs/DECISIONS.log`). Corrected below.
+
 ## 2026-11-18 — Owner Ruling: 1,777 Code-Line Cap, Readings Mode (`census`), & Post-18d Hardening
 
 **Ruling (Owner: S2, 2026-11-18).**
@@ -9,10 +22,10 @@ Followed by **"Proceed"** approving Option A across Decisions 2 and 4–8 (synth
 **Decisions & Changes Executed (`1,637` code lines across the 5 core files, `<= 1,777` enforced by `probes/loc.py --check`):**
 - **Decision 2 (Option A — Code-Line Cap `1,777`, `MAX_PHYSICAL` Retired)**: `probes/loc.py` enforces `MAX_CODE = 1777` and drops `MAX_PHYSICAL` so blank lines, `# G:<id>` comments, and readable line wrapping are never penalized.
 - **Readings Mode (`mode: "readings"` / `census`, `C29`, `D4.6`, `D5.outcome.census`)**:
-  - `gates.py`: Validates `mode in ("scored", "readings")`; in `readings` mode requires `bounds.max_rounds == 1` (or absent), requires Buyer approval on `bar.digest`, refuses Specialist approval (`C29`), and refuses `scale`, `threshold`, or `floor` on dimensions.
+  - `gates.py`: Validates `mode in ("scored", "readings")`; in `readings` mode requires `bounds.max_rounds == 1` (or absent; Decision 7 of `edi-run-memo-line-cap-readings-2026-11-18.pdf`: limits stay in `bounds`), requires Buyer approval on `bar.digest`, refuses Specialist approval (`C29`), and refuses `scale`, `threshold`, or `floor` on dimensions.
   - `loop.py` & `adapters.py`: Supports both Entry B (`seed` draft) and Entry A (one Maker turn); prompts model Evaluators for `{"outcome": "conforms"|"does_not_conform"|"unobserved", "quotation": "<non-empty quote>"}`; validates reading slots (`_parse_reading`: numeric score, unknown word, or blank quotation marks the evaluator failed -> `needs_owner/no_observation`). All dimensions `conforms` across all runs (`R >= 2`) -> `accepted/census`; any run-to-run disagreement records all outcome words in `disagreements[]` (`D4.6`) -> `needs_owner/no_observation`; any `does_not_conform` reading or all-`unobserved` dimension -> `needs_owner/needs_owner` with `escalation.json` (never `rejected`).
   - **Decision 4 (Option A — `custody/v1` Boundary for Readings Mode)**: Because vendored `vendor/check.py` (`CL1-3`) hard-requires a Specialist approval and has no `census` field, `finalize_job` in `readings` mode appends the `disposition` event to `job.jsonl` (carrying `mode`, `terminalState`, `outcome`, `disagreements`, `acknowledgesUnobserved`) without calling `make_record.py` to emit a falsely-failing `record.json`, and `verify_job` verifies `job.jsonl` (`custody_verify` including all file digests), `job-pin`, and the `disposition` event.
-  - **Decision 7 (Option A — `edi.py read <job_dir> [--by <sponsor>]`)**: Convenience verb that runs `freeze -> run -> finalize` when `accepted/census` and stops at `needs_owner` (exit code `4`) with `escalation.json` when defects or disagreements are found.
+  - **`edi.py read <job_dir>` (per R1 ruling; updated by Fix 2 above)**: Convenience verb for `mode: "readings"`.
 - **Post-18d & Verification Audit Fixes (`F1`–`F7`, `N14`, `G-CUS3`, Cuts 0c & 2)**:
   - **`N14`**: `loop.init_job` creates only `("scripts", "seed")`, never `rounds/`.
   - **`F1`**: `Meter.recover()` returns the count of recovered reservations and `loop._open_meter` re-anchors `state.json` when recovery adds rows, so `finalize --disposition declined` after a `SIGKILL` mid-call succeeds cleanly.

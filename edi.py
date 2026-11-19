@@ -15,11 +15,8 @@ def main():
     frz = sub.add_parser("freeze")
     frz.add_argument("job_dir", type=pathlib.Path)
     frz.add_argument("--dry-run", action="store_true", help="run all freeze gates read-only; write nothing")
-    for name in ("run", "verify", "resume", "init"):
+    for name in ("run", "read", "verify", "resume", "init"):
         sub.add_parser(name).add_argument("job_dir", type=pathlib.Path)
-    rd = sub.add_parser("read")
-    rd.add_argument("job_dir", type=pathlib.Path)
-    rd.add_argument("--by", default=None)
     fin = sub.add_parser("finalize")
     fin.add_argument("job_dir", type=pathlib.Path)
     fin.add_argument("--disposition", required=True, choices=("given", "not_yet_given", "declined"))
@@ -28,13 +25,12 @@ def main():
     a = ap.parse_args()
     try:
         if a.cmd == "init": return loop.init_job(a.job_dir)
-        if a.cmd == "read": return _RUN.get(loop.read_job(a.job_dir, by=a.by), EXIT_CODES["needs_owner"])
         if a.cmd == "finalize":
             ack = [x.strip() for x in a.ack_unobserved.split(",") if x.strip()] if a.ack_unobserved else None
             return _RECORD.get(loop.finalize_job(a.job_dir, state=a.disposition, by=a.by, ack_unobserved=ack), EXIT_CODES["record_undecided"])
         if a.cmd == "freeze": return loop.freeze_job(a.job_dir, dry_run=a.dry_run)
         rc = getattr(loop, f"{a.cmd}_job")(a.job_dir)
-        return _RUN.get(rc, EXIT_CODES["needs_owner"]) if a.cmd in ("run", "resume") else _RECORD.get(rc, EXIT_CODES["record_undecided"])
+        return _RUN.get(rc, EXIT_CODES["needs_owner"]) if a.cmd in ("run", "read", "resume") else _RECORD.get(rc, EXIT_CODES["record_undecided"])
     except gates.GateError as e:
         print(f"gate refusal: {e}", file=sys.stderr); return 1
 

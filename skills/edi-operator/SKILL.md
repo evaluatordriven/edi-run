@@ -38,7 +38,7 @@ Ambiguity is a halt condition, not a judgment call.
 ```
 python3 $EDI_REPO/edi.py freeze <job_dir> [--dry-run]
 python3 $EDI_REPO/edi.py run <job_dir>
-python3 $EDI_REPO/edi.py read <job_dir> [--by <name>]
+python3 $EDI_REPO/edi.py read <job_dir>
 python3 $EDI_REPO/edi.py finalize <job_dir> --disposition given|not_yet_given|declined --by <name>
 python3 $EDI_REPO/edi.py verify <job_dir>
 python3 $EDI_REPO/edi.py resume <job_dir>
@@ -47,9 +47,9 @@ python3 $EDI_REPO/edi.py resume <job_dir>
 `mode: "readings"` (`census` mode, C29) reads an existing `seed` or one Maker turn
 against a Buyer-approved bar (`bounds.max_rounds == 1`, no Specialist approval, no
 dimension `scale`/`threshold`/`floor`, and outcome words `conforms` | `does_not_conform`
-| `unobserved` with a non-empty `quotation`). `edi.py read <job_dir> [--by <sponsor>]`
-runs `freeze -> run -> finalize` when every dimension conforms (`accepted / census`),
-or halts at `needs_owner` with `escalation.json` when any defect or flap is found.
+| `unobserved` with a non-empty `quotation` grounded in the judged text). `edi.py read <job_dir>`
+freezes (if needed) and runs the job, then prints the terminal state and the exact `finalize`
+command for the Owner (it never writes a disposition on its own).
 
 Exit codes (one meaning each; the mapping lives only in `edi.py`):
 

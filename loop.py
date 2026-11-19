@@ -293,8 +293,8 @@ def _freeze_job_inner(job_dir, started_at=None, dry_run=False):
     return 0
 
 
-def _parse_reading(res):
-    # G:C29/D4.6 validate readings-mode payload: outcome in {conforms, does_not_conform, unobserved} + quotation
+def _parse_reading(res, target_txt=""):
+    # G:C29/D4.6/RD2 validate readings-mode payload: outcome + non-empty quotation grounded in judged text
     if not isinstance(res, dict) or "unobserved" in res:
         return "unobserved", "", (res.get("unobserved") if isinstance(res, dict) else None)
     if "score" in res and res["score"] is not None:
@@ -305,8 +305,8 @@ def _parse_reading(res):
     q = str(res.get("quotation", res.get("observation", "")) or "").strip()
     if out == "unobserved":
         return "unobserved", q, {"reason": str(res.get("reason") or q or "unobserved"), "failed": False}
-    if not q:
-        return "unobserved", "", {"reason": "reading has blank quotation (C29)", "failed": True}
+    if not q or (target_txt and " ".join(q.split()) not in " ".join(target_txt.split())):
+        return "unobserved", "", {"reason": "reading quotation is blank or not grounded in judged text (C29/RD2)", "failed": True}
     return out, q, None
 
 
@@ -320,6 +320,7 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, deadline, meter=None, att_tag=""
     checks, controls, scores_rows, externals, per_dim, defects, solutions, usages = [], [], [], [], {d["id"]: [] for d in dims}, [], [], []
     clean_p, planted_p = gates.safe_rel(cfg["controls"]["clean"], job_dir), gates.safe_rel(cfg["controls"]["planted"], job_dir)
     rub_txt = gates.safe_rel(cfg["instrument"]["rubric"]["file"], job_dir).read_text(encoding="utf-8")
+    art_txt = "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in sorted(art_dir.rglob("*")) if p.is_file()) if mode == "readings" else ""
     for ev in ordered:
         ev_id, bad_dims = ev["id"], set()
         for d in dims:
@@ -328,7 +329,7 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, deadline, meter=None, att_tag=""
                 cid = f"K-{bid}-{ev_id}-{did}-{tag}"
                 res = adapters.run_evaluator(ev, path, did, job_dir=job_dir, timeout=max(1.0, deadline - time.time()), dim_cfg=d, rubric_txt=rub_txt, meter=meter, mode=mode)
                 if mode == "readings":
-                    r_out, _, _ = _parse_reading(res)
+                    r_out, _, _ = _parse_reading(res, path.read_text(encoding="utf-8", errors="ignore"))
                     out = r_out if r_out in ("conforms", "does_not_conform") else ("conforms" if exp == "does_not_conform" else "does_not_conform")
                     sc_val = 1.0 if out == "conforms" else 0.0
                     if out != exp: bad_dims.add(did)
@@ -350,7 +351,7 @@ def _eval_batch(cfg, job_dir, round_n, art_dir, deadline, meter=None, att_tag=""
                 har = job_dir / "evidence" / f"harness-{ev_id}-{bid}.json" if ev["kind"] == "model" and run_i == 1 else None
                 res = adapters.run_evaluator(ev, art_dir, did, job_dir=job_dir, harness_out=har, timeout=max(1.0, deadline - time.time()), dim_cfg=d, rubric_txt=rub_txt, meter=meter, mode=mode)
                 if mode == "readings":
-                    r_out, quote, u_info = _parse_reading(res)
+                    r_out, quote, u_info = _parse_reading(res, art_txt)
                     if did in bad_dims or r_out is None or r_out == "unobserved":
                         u = ({"channel": ev_id, "reason": "evaluator failed batch control (CL1-9)", "failed": True} if did in bad_dims else
                              {"channel": ev_id, "reason": (u_info or {}).get("reason", "unobserved"), "failed": bool(r_out is None or (u_info or {}).get("failed", True))})
@@ -705,8 +706,8 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
     return verify_job(job_dir)
 
 
-def read_job(job_dir, by=None):
-    # G:C29/Decision-7 one-command convenience verb for mode == "readings"
+def read_job(job_dir):
+    # G:C29/Fix-2 freeze if needed and run; print terminal state and Owner finalize command; write no disposition
     job_dir = pathlib.Path(job_dir).resolve()
     cfg = _load_job_json(job_dir)
     if (cfg.get("mode") or "scored") != "readings":
@@ -715,14 +716,13 @@ def read_job(job_dir, by=None):
         freeze_job(job_dir)
     rc = run_job(job_dir)
     st = json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
-    who = by or (cfg.get("disposition") or {}).get("by") or (cfg.get("bar") or {}).get("author") or "Owner"
-    if st.get("terminal_state") == "accepted":
-        finalize_job(job_dir, state="given", by=who)
+    disp = "given" if st.get("terminal_state") == "accepted" else "given|declined"
+    print(f"readings outcome: {st.get('terminal_state')}/{st.get('reason')} — close with: python3 edi.py finalize {job_dir} --disposition {disp} --by <Owner>")
     return rc
 
 
 def verify_job(job_dir):
-    # G:G-CUS3/C29 verify job.json pin against chain when present, plus custody chain and record
+    # G:G-CUS3/C29/RD4/RD5 verify job.json pin, custody chain, and evidence/artifact digests
     job_dir, cfg = pathlib.Path(job_dir).resolve(), _load_job_json(job_dir)
     log_p = job_dir / "job.jsonl"
     if log_p.is_file():
@@ -736,8 +736,18 @@ def verify_job(job_dir):
             raise gates.GateError("no disposition in job.jsonl; the readings job has not been finalized yet (verify follows finalize)")
         if custody_verify(job_dir):
             return 1
-        disp = [e for e in custody_record.read(str(log_p)) if e.get("type") == "disposition"][-1].get("data") or {}
-        return 0 if disp.get("state") == "given" and disp.get("outcome") == "census" else 1
+        events = custody_record.read(str(log_p))
+        for e in events:
+            if e.get("type") == "check" and (ev := (e.get("data") or {}).get("evidence")):
+                ev_p = job_dir / "evidence" / ev.get("name", "")
+                if not ev_p.is_file() or custody_record.digest_file(ev_p) != ev.get("sha256"):
+                    return 1
+        if (prods := [e for e in events if e.get("type") == "artifact-produced"]):
+            for path, h in (prods[-1].get("files") or {}).items():
+                art_p = job_dir / "artifact" / pathlib.Path(path).name
+                if not art_p.is_file() or custody_record.digest_file(art_p) != h:
+                    return 1
+        return 0
     try: record_bytes = (job_dir / "record.json").read_bytes()
     except FileNotFoundError: raise gates.GateError("no record.json; the job has not been finalized yet (verify follows finalize)")
     if custody_verify(job_dir): return 1

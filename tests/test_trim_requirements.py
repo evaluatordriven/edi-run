@@ -239,18 +239,31 @@ class PinGuarantees(_Job):
         loop.freeze_job(job); loop.run_job(job)
         pid = int(pid_file.read_text())
         time.sleep(0.2)
-        with self.assertRaises(ProcessLookupError):
+        alive = False
+        try:
             os.kill(pid, 0)
+            stat_p = pathlib.Path(f"/proc/{pid}/stat")
+            alive = not (stat_p.is_file() and stat_p.read_text().rsplit(")", 1)[-1].split()[0] == "Z")
+        except ProcessLookupError:
+            alive = False
+        self.assertFalse(alive, "script Maker child process outlived the round")
 
     def test_f1_finalize_declined_after_hard_kill_reanchors_recovered_reservation(self):
         job = self._make_base_job(subdir="f1")
+        cfg = json.loads((job / "job.json").read_text())
+        cfg["bounds"]["max_rounds"] = 1
+        (job / "job.json").write_text(json.dumps(cfg, indent=2))
         loop.freeze_job(job)
+        loop.run_job(job)  # Round 1 creates an incumbent, halts cap_reached
         m = self.meter(job)
-        m.reserve({"prompt": "x"}, model="m")  # open reservation simulating SIGKILL mid-call
+        m.reserve({"prompt": "x"}, model="m")  # open reservation simulating SIGKILL mid-call in Round 2
         st = json.loads((job / "state.json").read_text())
-        st["open_round"] = 1
+        st.update(terminal_state=None, reason=None, open_round=2)
         loop._write_state(job, st, m)
         loop.finalize_job(job, state="declined", by="Casey Park")
+        events = [json.loads(l) for l in (job / "job.jsonl").read_text().splitlines() if l.strip()]
+        self.assertTrue(any(e["type"] == "spend" for e in events))
+        self.assertTrue(any(e["type"] == "disposition" and e["data"]["state"] == "declined" for e in events))
 
     def test_f2_f3_f6_f7_and_g_cus3_invariants(self):
         # F2: gate_commands refuses seat command referencing runtime/cache path

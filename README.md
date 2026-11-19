@@ -17,7 +17,7 @@ See [`docs/2026-EDI-Runtime-Solution-Architecture.md`](docs/2026-EDI-Runtime-Sol
 ```sh
 python3 edi.py freeze <job_dir>
 python3 edi.py run <job_dir>
-python3 edi.py read <job_dir> [--by "Casey Park"]
+python3 edi.py read <job_dir>
 python3 edi.py finalize <job_dir> --disposition given --by "Casey Park"
 python3 edi.py verify <job_dir>
 ```
@@ -26,9 +26,9 @@ python3 edi.py verify <job_dir>
 
 Set `"mode": "readings"` in `job.json` (with `"bounds": {"max_rounds": 1, ...}`) to run a single-pass census (`C29`, `D4.6`, `D5.outcome.census`) over an existing `seed` draft (Entry B) or one Maker turn (Entry A) without numeric scales:
 - **Bar & approvals:** Buyer approval on `bar.digest` is required; Specialist approval is forbidden, and dimensions carry no `scale`, `threshold`, or `floor`.
-- **Reading slot:** Each Evaluator returns `{"outcome": "conforms"|"does_not_conform"|"unobserved", "quotation": "<exact non-empty quote>"}` (numeric scores, unknown outcome words, or blank quotations mark the evaluator failed and exit `needs_owner/no_observation`).
+- **Reading slot:** Each Evaluator returns `{"outcome": "conforms"|"does_not_conform"|"unobserved", "quotation": "<exact non-empty quote>"}` (numeric scores, unknown outcome words, blank quotations, or quotations whose whitespace-normalized text does not appear in the judged text mark the evaluator failed and exit `needs_owner/no_observation`).
 - **Verdict:** Every dimension `conforms` across all runs (`R >= 2`) exits `accepted/census` (0); any run-to-run disagreement is recorded in `disagreements[]` with all outcome words (never collapsed by majority, `D4.6`) and exits `needs_owner/no_observation` (4); any `does_not_conform` reading or all-`unobserved` dimension exits `needs_owner/needs_owner` (4) with `escalation.json` and the quoted defects. A readings job never exits `rejected` (`D5.step.3`).
-- **Custody & verification (`Option (a)`):** Because vendored `custody/v1` (`vendor/check.py` `CL1-3`) hard-requires a Specialist approval and has no `census` field, `finalize` appends the `disposition` event to `job.jsonl` (carrying `mode: "readings"`, `terminalState`, `outcome`, `disagreements`, and `acknowledgesUnobserved`) without emitting a `custody/v1` `record.json`, and `edi.py verify` verifies the full hash-chained `job.jsonl`, `job-pin`, file digests (`vendor/record.py verify job.jsonl --files`), and disposition. `edi.py read <job_dir> [--by <sponsor>]` runs `freeze -> run -> finalize` in one command when `accepted/census`.
+- **Custody & verification (`Option (a)`):** Because vendored `custody/v1` (`vendor/check.py` `CL1-3`) hard-requires a Specialist approval and has no `census` field, `finalize` appends the `disposition` event to `job.jsonl` (carrying `mode: "readings"`, `terminalState`, `outcome`, `disagreements`, and `acknowledgesUnobserved`) without emitting a `custody/v1` `record.json`, and `edi.py verify` verifies the full hash-chained `job.jsonl`, `job-pin`, file digests (`vendor/record.py verify job.jsonl --files` from inside `<job_dir>`), check evidence digests (`evidence/reading-*.json`), and `artifact/` digests. `edi.py read <job_dir>` freezes (if needed) and runs the job, then prints the terminal state and the exact `edi.py finalize` command for the Owner — it never writes a disposition on its own.
 
 ## Doctrine conformance
 
@@ -91,4 +91,6 @@ for ex in two-round-job live-llm-job live-cl2-job; do
   python3 vendor/record.py verify examples/$ex/job.jsonl --files
   python3 vendor/check.py examples/$ex/record.json --files examples/$ex/artifact --bar examples/$ex/bar.md --evidence examples/$ex/evidence
 done
+(cd examples/live-aider-job11 && python3 ../../vendor/record.py verify job.jsonl --files)
+python3 vendor/check.py examples/live-aider-job11/record.json --files examples/live-aider-job11/artifact --bar examples/live-aider-job11/bar.md --evidence examples/live-aider-job11/evidence
 ```
