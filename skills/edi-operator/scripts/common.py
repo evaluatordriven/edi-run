@@ -22,11 +22,15 @@ _SECRET_KEY_NAMES = {"api_key", "apikey", "api-key", "secret", "secret_key",
 
 
 def repo_root():
-    """EDI_REPO env, else the directory containing edi.py relative to this file."""
+    """EDI_REPO env, else the directory containing edi.py relative to this file or ~/Code/edi-run."""
     env = os.environ.get("EDI_REPO")
     if env:
         return pathlib.Path(env)
-    return pathlib.Path(__file__).resolve().parents[3]
+    rel = pathlib.Path(__file__).resolve().parents[3]
+    if (rel / "edi.py").is_file():
+        return rel
+    home_repo = pathlib.Path.home() / "Code" / "edi-run"
+    return home_repo if (home_repo / "edi.py").is_file() else rel
 
 
 def edi_py():

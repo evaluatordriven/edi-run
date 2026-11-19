@@ -68,11 +68,9 @@ def main():
         pred = rec.get("predicate") if isinstance(rec.get("predicate"), dict) else rec
 
     disposition = pred.get("disposition") if isinstance(pred, dict) else None
-    verdict = None
-    if isinstance(pred, dict) and pred.get("verdict"):
-        verdict = pred["verdict"]
-    else:
-        verdict = _VERDICT_BY_EXIT.get(proc.returncode)
+    disp_state = (disposition or {}).get("state") if isinstance(disposition, dict) else disposition
+    disp_by = (disposition or {}).get("by") if isinstance(disposition, dict) else None
+    verdict = pred["verdict"] if isinstance(pred, dict) and pred.get("verdict") else _VERDICT_BY_EXIT.get(proc.returncode)
 
     maker = pred.get("maker") if isinstance(pred, dict) else None
     maker_name = maker.get("name") if isinstance(maker, dict) else None
@@ -80,17 +78,35 @@ def main():
         model = maker.get("model")
         maker_name = model.get("identifier") if isinstance(model, dict) else model
 
+    scores = scores_from_record(pred) if isinstance(pred, dict) else {}
+    gaps = gaps_from_record(pred) if isinstance(pred, dict) else []
+
+    if rec is None and (job_dir / "job.jsonl").is_file():
+        import json
+        events = [json.loads(l) for l in (job_dir / "job.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+        disp_evs = [e for e in events if e.get("type") == "disposition"]
+        if disp_evs:
+            ddata = disp_evs[-1].get("data") or {}
+            disp_state = ddata.get("state")
+            disp_by = disp_evs[-1].get("actor")
+            for dg in ddata.get("disagreements") or []:
+                if isinstance(dg, dict):
+                    gaps.append(f"disagreement:{dg.get('dimension')}")
+        prods = [e for e in events if e.get("type") == "artifact-produced"]
+        if prods:
+            maker_name = prods[-1].get("actor")
+
     emit({
         "job_dir": str(job_dir),
         "verified": verified,
         "verify_exit_code": proc.returncode,  # verbatim
         "verify_message": (proc.stderr or proc.stdout).strip() or None,
         "verdict": verdict,
-        "disposition": (disposition or {}).get("state") if isinstance(disposition, dict) else disposition,
-        "disposition_by": (disposition or {}).get("by") if isinstance(disposition, dict) else None,
-        "scores": scores_from_record(pred) if isinstance(pred, dict) else {},
+        "disposition": disp_state,
+        "disposition_by": disp_by,
+        "scores": scores,
         "maker_of_record": maker_name,
-        "gaps": gaps_from_record(pred) if isinstance(pred, dict) else [],
+        "gaps": gaps,
     }, EXIT_OK if verified else EXIT_REFUSE)
 
 
