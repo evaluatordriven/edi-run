@@ -20,11 +20,11 @@ EDI_AGENT_ID="${EDI_AGENT_ID:-}"
 EDI_HOME="${EDI_HOME:-$HOME/edi-jobs}"
 [ -d "$EDI_HOME" ] || exit 0   # nothing to watch yet; cron-safe no-op
 
-exec python3 - "$EDI_HOME" <<'PY'
-import hashlib, json, pathlib, sys
+exec python3 - "$EDI_HOME" "$EDI_AGENT_ID" <<'PY'
+import hashlib, json, pathlib, re, sys
 
 home = pathlib.Path(sys.argv[1])
-marker = home / ".watched"
+marker = home / (".watched-" + re.sub(r"[^A-Za-z0-9_.-]", "_", sys.argv[2]))
 seen = {}
 if marker.is_file():
     for ln in marker.read_text(encoding="utf-8").splitlines():

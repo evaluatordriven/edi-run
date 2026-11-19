@@ -23,7 +23,7 @@ ordinary tasks; it exists where the Owner wants evidence, not output.
 
 | Variable | Meaning |
 |---|---|
-| `EDI_REPO` | Path to the edi-run repository (default: locate `edi.py`). |
+| `EDI_REPO` | Path to the edi-run repository. Required for an installed skill copy (the locate-`edi.py` fallback only works inside the repo tree); scripts refuse without it when nothing resolves. |
 | `EDI_HOME` | Jobs root; every job lives at `$EDI_HOME/<job-name>/`. Default: `~/edi-jobs/`. |
 | `EDI_AGENT_ID` | **Required.** Your declared identity (e.g. `hermes-vizh`, `grok-bot`). Scripts refuse to run without it. |
 
@@ -79,8 +79,10 @@ A job is a directory: `job.json`, `bar.md` (the bar — what the artifact must s
 (the Maker), `seed/` (the artifact the Maker starts from), and `held_out/`
 (controls the Maker must never see; `rounds/` is created by `run`, never pre-created at
 `init` or `freeze`). `edi.py init <job_dir>` scaffolds the structure;
-**you author all content** — the scaffold is empty by design, and filling it with
-starter text is a defect.
+**you never author bar, rubric, method or seed content** — those come from named
+authors who are not you (the Operator), you copy them in verbatim and record them in
+`AUTHORSHIP.md`; the scaffold is empty by design, and an Operator-authored instrument
+is refused at freeze (CL1-6).
 
 `job.json` essentials (the scaffold from `edi.py init` shows every key):
 `levelClaimed` (`CL1`/`CL2`/`CL3`), `subjectFiles` (must match the files present in
@@ -105,24 +107,33 @@ Each procedure ends in exactly one of: **report-to-Owner**, **execute-ruled-acti
 **halt-and-explain**.
 
 - **P1 New job** — `new_job.py --name <name> [--seed-dir <dir>]` scaffolds under
-  `$EDI_HOME`. You supply bar/rubric/method content; record authorship in
+  `$EDI_HOME`. You do NOT supply bar/rubric/method content: the named authors
+  (never you, the Operator) provide it, you copy it in verbatim and record it in
   `AUTHORSHIP.md` (`Operator:` = your `EDI_AGENT_ID`; add `Sponsor:` if the Owner
-  named one). → report-to-Owner (scaffold ready, awaiting bar content).
+  named one). Never edit an author's file; a defect goes back to its author.
+  → report-to-Owner (scaffold ready, awaiting bar content).
 - **P2 Preflight** — `preflight.py <job_dir>` (thin wrapper over `freeze --dry-run`).
   PASS → proceed to P3. FAIL → fix what you authored, re-run; a failure you cannot fix
   is → report-to-Owner. Never freezes on its own.
 - **P3 Freeze + run** — `edi.py freeze` then `edi.py run`. Exit 0 or 3 → P4.
   Exit 4 → P5. Exit 1 → P6. Exit 2 → correct your own usage.
-- **P4 Close-out (accepted/rejected)** — `record_summary.py <job_dir>` runs
-  verification and reports verdict, per-dimension scores, maker of record, and spend.
-  → report-to-Owner with the summary; finalization happens only on an explicit
-  Owner ruling naming the disposition.
+- **P4 Close-out (accepted/rejected)** — `record_summary.py <job_dir>` runs in
+  two stages. BEFORE finalize (no disposition yet) it chain-verifies the
+  custody log and reports the run outcome, per-dimension scores and spend as
+  `stage: pre-disposition` — never a REFUSED verdict, because nothing was
+  refused. → report-to-Owner with that summary; finalization happens only on
+  an explicit Owner ruling naming the disposition. AFTER the Owner rules and
+  `edi.py finalize` succeeds, run `record_summary.py` again: it now runs full
+  `edi.py verify` and reports the verified record. Never claim a result
+  without the post-finalize summary.
 - **P5 Escalation handling** — `escalation_report.py <job_dir>` + `cost_report.py`
   produce the evidence pack. Run the §6 rubric over it and present the four-line
   contract. After the Owner rules: execute exactly the ruled action
   (finalize disposition / fix-and-new-job / archive) or halt-and-explain if the
   ruling doesn't map to an action.
-- **P6 GateError / integrity failure** — `escalation_report.py`, then a loud report.
+- **P6 GateError / integrity failure** — a freeze-time gate refusal has no
+  state to escalate: report the refusal text itself, loudly. For failures after
+  freeze, run `escalation_report.py`, then a loud report.
   Nothing else. No retry, no workaround, no "harmless" second freeze attempt. The
   Owner decides.
 - **P7 Watch** — `watch_escalations.sh` scans `$EDI_HOME` for new `escalation.json`

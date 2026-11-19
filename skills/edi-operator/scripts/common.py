@@ -15,14 +15,19 @@ EXIT_OK, EXIT_REFUSE, EXIT_USAGE = 0, 1, 2
 
 # key-shaped values and key-named fields are scrubbed before anything is printed
 _SECRET_VALUE_RE = re.compile(
-    r"^(sk-[A-Za-z0-9_-]{8,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}"
-    r"|xox[baprs]-[A-Za-z0-9-]{10,}|Bearer\s+\S+)$")
+    r"(sk-[A-Za-z0-9_-]{8,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}"
+    r"|xox[baprs]-[A-Za-z0-9-]{10,}|Bearer\s+\S+)")
 _SECRET_KEY_NAMES = {"api_key", "apikey", "api-key", "secret", "secret_key",
                      "password", "authorization", "credentials", "access_key"}
 
 
 def repo_root():
-    """EDI_REPO env, else the directory containing edi.py relative to this file or ~/Code/edi-run."""
+    """EDI_REPO env, else the directory containing edi.py relative to this file.
+
+    The relative fallback only holds when this script runs from inside the repo
+    tree (an installed skill copy has no edi.py above it): when nothing resolves,
+    refuse with a clear message instead of guessing.
+    """
     env = os.environ.get("EDI_REPO")
     if env:
         return pathlib.Path(env)
@@ -30,7 +35,11 @@ def repo_root():
     if (rel / "edi.py").is_file():
         return rel
     home_repo = pathlib.Path.home() / "Code" / "edi-run"
-    return home_repo if (home_repo / "edi.py").is_file() else rel
+    if (home_repo / "edi.py").is_file():
+        return home_repo
+    print("refusing: cannot locate edi.py; set EDI_REPO to the edi-run checkout",
+          file=sys.stderr)
+    sys.exit(EXIT_REFUSE)
 
 
 def edi_py():
@@ -74,8 +83,11 @@ def scrub(value):
         return out
     if isinstance(value, list):
         return [scrub(v) for v in value]
-    if isinstance(value, str) and _SECRET_VALUE_RE.match(value):
-        return "[REDACTED]"
+    if isinstance(value, str):
+        m = _SECRET_VALUE_RE.search(value)
+        if m:
+            return value[:m.start()] + "[REDACTED]" + value[m.end():]
+        return value
     return value
 
 

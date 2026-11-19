@@ -162,7 +162,7 @@ class TestNewJob(OperatorScriptTest):
         # scaffold untouched controls content
         self.assertEqual((job_dir / "bar.md").read_text(encoding="utf-8"), "")
 
-    def test_seed_dir_is_recorded_only_never_copied(self):
+    def test_seed_dir_is_copied_verbatim_into_the_job(self):
         seed = self.tmp / "seedsrc"
         seed.mkdir()
         (seed / "control-secret.md").write_text("held-out control content\n", encoding="utf-8")
@@ -171,10 +171,14 @@ class TestNewJob(OperatorScriptTest):
         self.assertEqual(r.returncode, 0, r.stderr)
         out = json.loads(r.stdout)
         self.assertEqual(pathlib.Path(out["seed_dir"]), seed)
-        # nothing under the job mirrors the seed content
-        for p in (self.home / "beta").rglob("*"):
-            if p.is_file() and p.name != "AUTHORSHIP.md":
-                self.assertNotIn("control-secret", p.read_text(errors="ignore"), p)
+        # the seed was copied VERBATIM into the job's seed/ directory
+        self.assertEqual(
+            (self.home / "beta" / "seed" / "control-secret.md").read_text(encoding="utf-8"),
+            "held-out control content\n")
+        self.assertEqual(out["seed_files_copied"], ["control-secret.md"])
+        # the ORIGINAL is untouched and nothing else mirrored the content
+        self.assertEqual((seed / "control-secret.md").read_text(encoding="utf-8"),
+                         "held-out control content\n")
 
     def test_extra_author_recorded(self):
         r = run_script("new_job.py", "--name", "gamma", "--author", "Robin Vale",
@@ -286,7 +290,9 @@ class TestRecordSummary(OperatorScriptTest):
         self.assertEqual(out["verdict"], "OK")
         self.assertEqual(out["disposition"], "given")
         self.assertEqual(out["disposition_by"], "Casey Park")
-        self.assertEqual(out["scores"], {"D1": 5.0, "D2": 5.0})
+        self.assertEqual(out["scores"]["D1"]["max"], 5.0)
+        self.assertEqual(out["scores"]["D1"]["min"], 5.0)
+        self.assertEqual(out["scores"]["D2"]["max"], 5.0)
         self.assertEqual(out["maker_of_record"], "Alex Kim")
         self.assertEqual(out["gaps"], [])
 
@@ -417,7 +423,7 @@ class TestWatchEscalations(OperatorScriptTest):
         self._watch()  # marker exists
         self._escalate("job-b", reason="maker_failed", reco="fix-maker")
         t = 1_700_000_000.0
-        os.utime(self.home / ".watched", (t, t))
+        os.utime(self.home / f".watched-{AGENT}", (t, t))
         os.utime(self.home / "job-b" / "escalation.json", (t, t))
         r = self._watch()
         lines = r.stdout.strip().splitlines()
@@ -431,7 +437,7 @@ class TestWatchEscalations(OperatorScriptTest):
         before = set(p.name for p in self.home.iterdir())
         self._watch()
         after = set(p.name for p in self.home.iterdir())
-        self.assertEqual(after - before, {".watched"})
+        self.assertEqual(after - before, {f".watched-{AGENT}"})
 
     def test_refuses_without_agent_id(self):
         r = self._watch({"EDI_AGENT_ID": None})
@@ -441,6 +447,126 @@ class TestWatchEscalations(OperatorScriptTest):
         r = self._watch({"EDI_HOME": str(self.tmp / "does-not-exist")})
         self.assertEqual(r.returncode, 0)
         self.assertEqual(r.stdout.strip(), "")
+
+
+class TestReviewBriefing2026_11_19(OperatorScriptTest):
+    """Promoted from repro_skill_0_1_0.py (external briefing, 2026-11-19).
+
+    Checks 1-2 are HELD pending the Owner's Ruling A (operator authorship and
+    author-seated-as-Evaluator); RULING_A_PENDING=False activates them red-first.
+    """
+
+    RULING_A_PENDING = False  # Owner ruled 2026-11-19: keep the runtime rule (CL1-6)
+
+    def _job_frozen_run(self, name, max_rounds=None):
+        job = self._make_base_job(name)
+        if max_rounds is not None:
+            cfg = json.loads((job / "job.json").read_text())
+            cfg["bounds"]["max_rounds"] = max_rounds
+            (job / "job.json").write_text(json.dumps(cfg, indent=2))
+        self.assertEqual(run_edi("freeze", job).returncode, 0)
+        r = run_edi("run", job)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return job
+
+    @unittest.skipIf(RULING_A_PENDING, "held for the Owner's Ruling A")
+    def test_r1_operator_authorship(self):
+        # SKILL.md must stop telling the operator to author bar/rubric/method.
+        skill = (ROOT / "skills/edi-operator/SKILL.md").read_text(encoding="utf-8")
+        self.assertNotIn("you author all content", skill)
+        self.assertNotIn("You supply bar/rubric/method content", skill)
+
+    @unittest.skipIf(RULING_A_PENDING, "held for the Owner's Ruling A")
+    def test_r2_author_seated_as_evaluator_is_refused(self):
+        # Spec §2: a rubric/method author may not sit as an Evaluator (gate check).
+        job = self._make_base_job("r2")
+        (job / "AUTHORSHIP.md").write_text(
+            "Operator: someone-else\nBar author: Jordan Blake\nRubric author: Taylor Grant\n"
+            "Method author: Taylor Grant\nSeed author:\nSponsor:\n", encoding="utf-8")
+        r = run_script("preflight.py", job, env_extra=self.env)
+        self.assertEqual(r.returncode, 1, "preflight must refuse an instrument author seated as Evaluator")
+
+    def test_pre_finalize_summary_reports_run_outcome_not_refused(self):
+        job = self._job_frozen_run("pre-finalize")
+        r = run_script("record_summary.py", job, env_extra=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = json.loads(r.stdout)
+        self.assertEqual(out["stage"], "pre-disposition")
+        self.assertFalse(out["finalized"])
+        self.assertNotIn("verdict", out)  # nothing was refused; no verdict exists yet
+        self.assertTrue(out["scores"], out)
+
+    def test_pre_finalize_summary_chain_verifies(self):
+        job = self._job_frozen_run("chain-check")
+        out = json.loads(run_script("record_summary.py", job, env_extra=self.env).stdout)
+        self.assertTrue(out["chain_verified"], out.get("chain_message"))
+
+    def test_readings_summary_reports_outcomes_and_quotations(self):
+        src = ROOT / "examples" / "live-readings-plumbline"
+        job = self.home / "readings"
+        shutil.copytree(src, job)
+        r = run_script("record_summary.py", job, env_extra=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = json.loads(r.stdout)
+        self.assertEqual(out["disposition"], "given")
+        self.assertEqual(out.get("mode"), "readings")
+        self.assertTrue(out.get("readings"), "no per-run readings reported")
+        text = json.dumps(out)
+        self.assertIn("conforms", text)
+        for dim_obs in out["readings"].values():
+            for obs in dim_obs:
+                self.assertIn(obs["outcome"], ("conforms", "does_not_conform", "unobserved"))
+                self.assertTrue(obs["quotation"], obs)
+
+    def test_split_scores_are_never_collapsed_to_max(self):
+        sys.path.insert(0, str(SCRIPTS))
+        try:
+            import record_summary
+        finally:
+            sys.path.pop(0)
+        pred = {"checks": [
+            {"evaluator": "E1", "dimension": "D1", "score": 5.0, "outcome": "conforms", "run": 1},
+            {"evaluator": "E2", "dimension": "D1", "score": 2.0, "outcome": "does_not_conform", "run": 1},
+        ]}
+        got = record_summary.scores_from_record(pred)
+        self.assertEqual(got["D1"]["min"], 2.0)
+        self.assertEqual(got["D1"]["max"], 5.0)
+        self.assertEqual(len(got["D1"]["observations"]), 2)
+
+    def test_escalation_report_lists_artifact_digests_before_finalize(self):
+        job = self._job_frozen_run("escalated", max_rounds=1)
+        # force the escalation shape: cap_reached-style terminal state with an artifact
+        state = json.loads((job / "state.json").read_text())
+        if state.get("terminal_state") != "needs_owner":
+            state["terminal_state"] = "needs_owner"
+            state["reason"] = "cap_reached"
+            (job / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
+        esc = {"terminalState": "needs_owner", "reason": "cap_reached",
+               "options": [{"id": "raise-bounds", "action": "edit bounds"}],
+               "recommendation": "accept-incumbent"}
+        (job / "escalation.json").write_text(json.dumps(esc, indent=2), encoding="utf-8")
+        out = json.loads(run_script("escalation_report.py", job, env_extra=self.env).stdout)
+        self.assertTrue(out["artifact_digests"], "escalation pack carried no artifact digests")
+
+    def test_secret_inside_longer_string_is_scrubbed(self):
+        sys.path.insert(0, str(SCRIPTS))
+        try:
+            import common
+        finally:
+            sys.path.pop(0)
+        leaked = "401 upstream: key sk-or-v1-abcdef1234567890abcd"
+        self.assertNotIn("sk-or-v1-abcdef1234567890", common.scrub({"reason": leaked}))
+
+
+class TestWatchPerOperatorMarker(TestWatchEscalations):
+    def test_marker_is_per_operator(self):
+        (self.home / "job-x").mkdir()
+        (self.home / "job-x" / "escalation.json").write_text(json.dumps({"reason": "r"}))
+        self._watch()  # operator AGENT writes its own marker
+        self.assertTrue((self.home / f".watched-{AGENT}").is_file())
+        # a second operator has no marker of its own and still sees the escalation
+        r2 = self._watch({"EDI_AGENT_ID": "second-operator"})
+        self.assertTrue(any("job-x" in ln for ln in r2.stdout.strip().splitlines()), r2.stdout)
 
 
 if __name__ == "__main__":

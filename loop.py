@@ -156,11 +156,11 @@ def init_job(job_dir):
         (job_dir / name).write_text("", encoding="utf-8")
     (job_dir / "AUTHORSHIP.md").write_text("Operator:\nBar author:\nRubric author:\nMethod author:\nSeed author:\nSponsor:\n", encoding="utf-8")
     job = {"job": None, "levelClaimed": None, "specVersion": None, "bounds": {"max_rounds": None, "max_cost_usd": None, "max_wall_seconds": None},
-           "mode": None, "subjectFiles": [], "bar": {"file": "bar.md", "digest": {"sha256": None}, "frozenAt": None, "author": None, "dimensions": [], "approvals": []},
-           "maker": {"name": None, "kind": None, "version": None, "method": {"file": "method.md"}, "model": None, "sandbox": None, "command": None},
+           "mode": None, "subjectFiles": [], "bar": {"file": "bar.md", "digest": {"sha256": None}, "frozenAt": None, "author": None, "dimensions": [], "approvals": [], "publishedAt": None, "groundTruth": [], "dissent": []},
+           "maker": {"name": None, "kind": None, "version": None, "method": {"file": "method.md"}, "model": None, "sandbox": None},
            "instrument": {"rubric": {"file": "rubric.md"}, "runner": {"file": None}}, "evaluators": [], "controls": {"clean": None, "planted": None},
            "retention": {"location": None, "public": None}, "disposition": {"state": None, "by": None, "acknowledgesUnobserved": []},
-           "pricing": {}, "seed": None, "barDigest": None}
+           "pricing": {}, "seed": None}
     (job_dir / "job.json").write_text(json.dumps(job, indent=2) + "\n", encoding="utf-8")
     return 0
 
@@ -459,6 +459,8 @@ def run_job(job_dir):
 
 def _run_job_held(job_dir):
     job_dir = pathlib.Path(job_dir).resolve()
+    if not (job_dir / "state.json").is_file():
+        raise gates.GateError("no state.json; the job has not been frozen (run follows freeze)")
     cfg, state = _load_job_json(job_dir), json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
     _refuse_after_disposition(job_dir)
     if state.get("open_round"):
