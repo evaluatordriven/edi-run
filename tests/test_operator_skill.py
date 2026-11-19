@@ -600,8 +600,10 @@ class TestReviewBriefing2026_11_19(OperatorScriptTest):
         (job / "job.json").write_text(json.dumps(cfg, indent=2))
         pf = run_script("preflight.py", job, env_extra=self.env)
         self.assertEqual(pf.returncode, 1, "seed author seated as Evaluator must be refused")
-        self.assertIn("seed author", pf.stdout)
-        self.assertIn("may not judge their own draft", pf.stdout)
+        violations = json.loads(pf.stdout)["violations"]
+        seed_violations = [v for v in violations if "seed author" in v and "dana seed" in v.lower()
+                           and "Evaluator E1" in v]
+        self.assertTrue(seed_violations, violations)
 
     def test_freeze_fails_fast_on_empty_model_seat_key(self):
         # P1-4: a model seat whose key env resolves empty must refuse at freeze
