@@ -116,9 +116,13 @@ def gate_authorship(cfg, job_dir):
             if name and _canon(name) == auth:
                 raise GateError(f"AUTHORSHIP.md declares {key} ({auth}) seated as {label}; an instrument's author may not act as Maker or Evaluator (CL1-6)")
     if (seed_auth := a.get("seed author")):
-        for label, name in seats:
+        # Ruling A bars the seed's author only from EVALUATOR seats — the Maker
+        # seat is allowed, because the raise-bounds successor path (loop.py
+        # "re-freeze a successor job carrying the incumbent forward") carries a
+        # prior incumbent forward as seed with its producing Maker named.
+        for label, name in seats[1:]:
             if name and _canon(name) == seed_auth:
-                raise GateError(f"AUTHORSHIP.md declares seed author ({seed_auth}) seated as {label}; the seed's author may not judge or remake their own draft (CL1-6)")
+                raise GateError(f"AUTHORSHIP.md declares seed author ({seed_auth}) seated as {label}; the seed's author may not judge their own draft (CL1-6)")
 
 
 def gate_freeze_pre(cfg, job_dir):

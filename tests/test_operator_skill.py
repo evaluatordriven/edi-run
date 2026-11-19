@@ -548,6 +548,39 @@ class TestReviewBriefing2026_11_19(OperatorScriptTest):
         out = json.loads(run_script("escalation_report.py", job, env_extra=self.env).stdout)
         self.assertTrue(out["artifact_digests"], "escalation pack carried no artifact digests")
 
+    def test_raise_bounds_successor_with_maker_authored_seed_freezes(self):
+        # Ruling A scope: the seed's author is barred only from Evaluator seats.
+        # The raise-bounds successor path carries a prior incumbent forward as
+        # seed with its producing Maker named — an honest AUTHORSHIP.md freezes.
+        pred = self._job_frozen_run("pred", max_rounds=1)
+        state = json.loads((pred / "state.json").read_text())
+        r1 = state["rounds"][str(state["incumbent_round"])]["dir"]
+        incumbent = pathlib.Path(r1) if os.path.isabs(r1) else pred / r1
+        art = incumbent / "artifact" if (incumbent / "artifact").is_dir() else incumbent
+        cfg = json.loads((pred / "job.json").read_text())
+        maker = cfg["maker"]["name"]
+
+        succ = self._make_base_job("succ")
+        shutil.copytree(art, succ / "seed", dirs_exist_ok=True)
+        cfg = json.loads((succ / "job.json").read_text())
+        cfg["seed"] = {"dir": "seed", "author": maker, "origin": "incumbent of predecessor job"}
+        cfg["bounds"]["max_rounds"] = 1
+        (succ / "job.json").write_text(json.dumps(cfg, indent=2))
+        (succ / "AUTHORSHIP.md").write_text(
+            "Operator: someone-else\nBar author: Jordan Blake\nRubric author: Morgan Lee\n"
+            f"Method author: Morgan Lee\nSeed author: {maker}\nSponsor:\n", encoding="utf-8")
+        pf = run_script("preflight.py", succ, env_extra=self.env)
+        self.assertEqual(pf.returncode, 0, pf.stdout)
+        out = json.loads(pf.stdout)
+        self.assertTrue(out["pass"], out["violations"])
+        # and the symmetric negative: seed author seated as an Evaluator is refused
+        cfg["evaluators"][0]["name"] = maker
+        cfg["evaluators"][0]["script"]["author"] = maker
+        cfg["evaluators"][0]["script"]["digest"]["sha256"] = sha256_bytes(b"x")
+        (succ / "job.json").write_text(json.dumps(cfg, indent=2))
+        pf2 = run_script("preflight.py", succ, env_extra=self.env)
+        self.assertEqual(pf2.returncode, 1, "seed author seated as Evaluator must be refused")
+
     def test_secret_inside_longer_string_is_scrubbed(self):
         sys.path.insert(0, str(SCRIPTS))
         try:
