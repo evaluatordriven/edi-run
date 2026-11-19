@@ -641,8 +641,11 @@ def finalize_job(job_dir, state="given", by="Owner", ack_unobserved=None):
         gates.gate_seats(cfg, job_dir, approver_by=by)
         ack = ack_unobserved if ack_unobserved is not None else cfg["disposition"].get("acknowledgesUnobserved", [])
         if not st.get("incumbent_round"):
-            _append(job_dir, "disposition", by, [], {"state": state, "acknowledgesUnobserved": ack})
-            return _emit_gap_record(job_dir, st, cfg)
+            disp_data = {"state": state, "acknowledgesUnobserved": ack}
+            if mode == "readings":
+                disp_data.update(mode="readings", terminalState=st.get("terminal_state"), outcome=st.get("reason"), disagreements=[])
+            _append(job_dir, "disposition", by, [], disp_data)
+            return verify_job(job_dir) if mode == "readings" else _emit_gap_record(job_dir, st, cfg)
         win_r, max_r, art_dst = str(st["incumbent_round"]), str(max(int(k) for k in st["rounds"])), job_dir / "artifact"
         win = st["rounds"][win_r]
         shutil.rmtree(art_dst, ignore_errors=True)

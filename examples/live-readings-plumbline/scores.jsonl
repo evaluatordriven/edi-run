@@ -1,0 +1,12 @@
+{"id": "K-B1-E1-D1-clean", "batch": "B1", "evaluator": "E1", "expected": "conforms", "score": 1.0, "threshold": 4.0}
+{"id": "K-B1-E1-D1-planted", "batch": "B1", "evaluator": "E1", "expected": "does_not_conform", "score": 0.0, "threshold": 4.0}
+{"id": "K-B1-E1-D2-clean", "batch": "B1", "evaluator": "E1", "expected": "conforms", "score": 1.0, "threshold": 4.0}
+{"id": "K-B1-E1-D2-planted", "batch": "B1", "evaluator": "E1", "expected": "does_not_conform", "score": 0.0, "threshold": 4.0}
+{"id": "K-B1-E1-D3-clean", "batch": "B1", "evaluator": "E1", "expected": "conforms", "score": 1.0, "threshold": 4.0}
+{"id": "K-B1-E1-D3-planted", "batch": "B1", "evaluator": "E1", "expected": "does_not_conform", "score": 0.0, "threshold": 4.0}
+{"id": "K-B1-E2-D1-clean", "batch": "B1", "evaluator": "E2", "expected": "conforms", "score": 1.0, "threshold": 4.0}
+{"id": "K-B1-E2-D1-planted", "batch": "B1", "evaluator": "E2", "expected": "does_not_conform", "score": 0.0, "threshold": 4.0}
+{"id": "K-B1-E2-D2-clean", "batch": "B1", "evaluator": "E2", "expected": "conforms", "score": 1.0, "threshold": 4.0}
+{"id": "K-B1-E2-D2-planted", "batch": "B1", "evaluator": "E2", "expected": "does_not_conform", "score": 0.0, "threshold": 4.0}
+{"id": "K-B1-E2-D3-clean", "batch": "B1", "evaluator": "E2", "expected": "conforms", "score": 1.0, "threshold": 4.0}
+{"id": "K-B1-E2-D3-planted", "batch": "B1", "evaluator": "E2", "expected": "does_not_conform", "score": 0.0, "threshold": 4.0}

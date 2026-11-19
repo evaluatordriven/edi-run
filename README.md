@@ -93,4 +93,6 @@ for ex in two-round-job live-llm-job live-cl2-job; do
 done
 (cd examples/live-aider-job11 && python3 ../../vendor/record.py verify job.jsonl --files)
 python3 vendor/check.py examples/live-aider-job11/record.json --files examples/live-aider-job11/artifact --bar examples/live-aider-job11/bar.md --evidence examples/live-aider-job11/evidence
+(cd examples/live-readings-plumbline && python3 ../../vendor/record.py verify job.jsonl --files)
+python3 edi.py verify examples/live-readings-plumbline
 ```

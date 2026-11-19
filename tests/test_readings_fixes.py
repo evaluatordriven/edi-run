@@ -116,6 +116,16 @@ class ReadingsFixesTests(trm.ReadingsModeTests):
         (j_art / "artifact" / "memo.md").write_text("# Tampered after finalize\n")
         self.assertEqual(loop.verify_job(j_art), 1)
 
+        # Mid-batch cap_reached / no incumbent_round on a readings job still finalizes & verifies cleanly
+        j_cap = self._make_readings_job(subdir="rd_no_inc", entry="B", eval_mode="'all_conform'")
+        loop.freeze_job(j_cap)
+        st_c = json.loads((j_cap / "state.json").read_text())
+        st_c.update(terminal_state="needs_owner", reason="cap_reached", incumbent_round=None)
+        (j_cap / "state.json").write_text(json.dumps(st_c))
+        self.assertEqual(loop.finalize_job(j_cap, state="declined", by="Casey Park"), 0)
+        self.assertEqual(loop.verify_job(j_cap), 0)
+        self.assertFalse((j_cap / "record.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

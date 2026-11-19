@@ -1,0 +1,8 @@
+{
+  "dimension": "D3",
+  "evaluator": "E2",
+  "round": 1,
+  "run": 2,
+  "outcome": "conforms",
+  "quotation": "`x-plumbline` is enforced by Plumbline's verifier only; the standard check.py ignores it."
+}

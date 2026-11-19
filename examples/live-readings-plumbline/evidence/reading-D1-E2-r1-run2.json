@@ -1,0 +1,8 @@
+{
+  "dimension": "D1",
+  "evaluator": "E2",
+  "round": 1,
+  "run": 2,
+  "outcome": "conforms",
+  "quotation": "`PLUMBLINE_REQUIRE_CORPUS`: only the exact value `1` turns it on, and then every corpus check that would\n  SKIP is a `FAIL[corpus] <id>` instead and the run exits non-zero."
+}

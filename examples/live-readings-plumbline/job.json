@@ -1,0 +1,139 @@
+{
+  "job": "live-readings-plumbline-v010",
+  "levelClaimed": "baseline",
+  "specVersion": "0.9.8",
+  "mode": "readings",
+  "readsBeforeFreeze": [
+    "README.md",
+    "custody-emission.md"
+  ],
+  "bounds": {
+    "max_rounds": 1,
+    "max_cost_usd": 3.0,
+    "max_wall_seconds": 240,
+    "max_output_tokens": 512
+  },
+  "subjectFiles": [
+    "README.md",
+    "custody-emission.md"
+  ],
+  "bar": {
+    "file": "bar.md",
+    "digest": {
+      "sha256": "5ebb88bfd84ea037d452add3eac6c4bca565ea10a4150d457394e5e4677e0233"
+    },
+    "frozenAt": null,
+    "author": "Jordan Blake",
+    "dimensions": [
+      {
+        "id": "D1",
+        "criterion": "Single-command stranger test runner (tests/run_all.py + PLUMBLINE-TALLY) and explicit EDI_CORPUS, PLUMBLINE_REQUIRE_CORPUS, and CUSTODY_DIR behavior/exit codes."
+      },
+      {
+        "id": "D2",
+        "criterion": "Honest disclosure of known limitations: hand-entered times refused by default (exit 3, hand-time) and flagged under --allow-hand-times, and C37-C40 disclosed as unexercised gaps."
+      },
+      {
+        "id": "D3",
+        "criterion": "Two-layer custody verification boundary (checker/check.py at 3e3ca58 ignoring x- keys + kit/plumbline_verify.py enforcing x-plumbline) and doctrine commit pin f8bfb793."
+      }
+    ],
+    "approvals": [
+      {
+        "role": "buyer",
+        "by": "Steve Moitozo II",
+        "barDigest": {
+          "sha256": "5ebb88bfd84ea037d452add3eac6c4bca565ea10a4150d457394e5e4677e0233"
+        },
+        "at": "2026-11-18T21:40:00Z"
+      }
+    ]
+  },
+  "maker": {
+    "name": "Taylor Reed",
+    "kind": "script",
+    "version": "1.0",
+    "method": {
+      "file": "method.md"
+    },
+    "model": null,
+    "sandbox": null,
+    "command": [
+      "python3",
+      "scripts/noop_maker.py"
+    ]
+  },
+  "seed": {
+    "dir": "seed",
+    "author": "Dana Voss",
+    "origin": "github.com/smoitozo/plumbline@04cd745 (README.md + docs/custody-emission.md)"
+  },
+  "instrument": {
+    "rubric": {
+      "file": "rubric.md"
+    },
+    "runner": {
+      "file": "runner.md"
+    }
+  },
+  "evaluators": [
+    {
+      "id": "E1",
+      "name": "StructPinGate",
+      "kind": "script",
+      "runs": 2,
+      "command": [
+        "python3",
+        "scripts/eval_struct.py"
+      ],
+      "script": {
+        "name": "eval_struct.py",
+        "author": "Morgan Ellis",
+        "digest": {
+          "sha256": "825db5a0ef46b1d6680039cf993a7a35538ad261bbcafd1eaab4871055c24e64"
+        }
+      },
+      "model": null,
+      "sameModelAsMaker": false
+    },
+    {
+      "id": "E2",
+      "name": "OpusReader",
+      "kind": "model",
+      "runs": 2,
+      "url": "https://openrouter.ai/api/v1/chat/completions",
+      "apiKeyEnv": "OPENROUTER_API_KEY",
+      "script": null,
+      "model": {
+        "family": "claude",
+        "identifier": "anthropic/claude-opus-5.5",
+        "endpoint": "openrouter.ai",
+        "readOnly": true
+      },
+      "sameModelAsMaker": false
+    }
+  ],
+  "controls": {
+    "clean": "held_out/controls/clean.md",
+    "planted": "held_out/controls/planted.md"
+  },
+  "retention": {
+    "location": "examples/live-readings-plumbline",
+    "public": false
+  },
+  "disposition": {
+    "state": null,
+    "by": "Steve Moitozo II",
+    "acknowledgesUnobserved": []
+  },
+  "pricing": {
+    "anthropic/claude-opus-5.5": {
+      "input_usd_per_mtok": 5.0,
+      "output_usd_per_mtok": 25.0,
+      "max_output_tokens": 512
+    }
+  },
+  "barDigest": {
+    "sha256": "5ebb88bfd84ea037d452add3eac6c4bca565ea10a4150d457394e5e4677e0233"
+  }
+}

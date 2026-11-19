@@ -1,0 +1,8 @@
+{
+  "dimension": "D1",
+  "evaluator": "E2",
+  "round": 1,
+  "run": 1,
+  "outcome": "conforms",
+  "quotation": "`PLUMBLINE-TALLY pass=7 fail=0 skip=5 skipped=<those ids>`; it exits 0 exactly when `fail=0`."
+}

@@ -1,0 +1,8 @@
+{
+  "dimension": "D1",
+  "evaluator": "E1",
+  "round": 1,
+  "run": 2,
+  "outcome": "conforms",
+  "quotation": "PLUMBLINE-TALLY pass=7 fail=0 skip=5"
+}

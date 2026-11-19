@@ -1,0 +1,8 @@
+{
+  "dimension": "D2",
+  "evaluator": "E2",
+  "round": 1,
+  "run": 1,
+  "outcome": "conforms",
+  "quotation": "`schemas/compliance-checklist.json` lists C37\u2013C40, but no Plumbline check, case or fixture exercises them,\n  and nothing here enforces the roles table or A2/I2. They are disclosed gaps, not covered rules."
+}

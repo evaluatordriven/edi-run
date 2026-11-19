@@ -1,0 +1,592 @@
+{
+  "status": "frozen",
+  "pins": {
+    "bar": "5ebb88bfd84ea037d452add3eac6c4bca565ea10a4150d457394e5e4677e0233",
+    "method": "52a5a92b559928cf2b68b246e8be1bf8b2cc5ba6dc83a9df212efaab0b078e1d",
+    "rubric": "37a8831ac6bda769194e150acc633533635ca4fa3a5bef87a063284ebc40ea22",
+    "runner": "92f5ed7ec7d4420bd7454a1001252988f1ebbd18d7d1dc5290e238cbca9c101f",
+    "job": "c50ca34606c8348d9461bf89c9ce19d6f54340ea20ac4ffb7f7787964686e90a",
+    "tree": {
+      "AUTHORSHIP.md": "1e6d7341b2fdf6b084c27834a3885ee60304c23ecbc2e7bbd6da5624d125be75",
+      "bar.md": "5ebb88bfd84ea037d452add3eac6c4bca565ea10a4150d457394e5e4677e0233",
+      "method.md": "52a5a92b559928cf2b68b246e8be1bf8b2cc5ba6dc83a9df212efaab0b078e1d",
+      "rubric.md": "37a8831ac6bda769194e150acc633533635ca4fa3a5bef87a063284ebc40ea22",
+      "runner.md": "92f5ed7ec7d4420bd7454a1001252988f1ebbd18d7d1dc5290e238cbca9c101f",
+      "held_out/controls/clean.md": "f4b10b8bb6adfc34c0c0bb66787820ed82d03ec2bcd3f3d3424403e4c2d21d3c",
+      "held_out/controls/planted.md": "673c4236dbadc1490db09ea39589448e1dca2991f6f06fe3b4d82281247191cf",
+      "scripts/eval_struct.py": "825db5a0ef46b1d6680039cf993a7a35538ad261bbcafd1eaab4871055c24e64",
+      "scripts/noop_maker.py": "149aecab864ec96d277b791624ab7a14989a9df7c479a8e5bb2c070010a86c85",
+      "seed/README.md": "c2939ad29031769406cb1b6c464fa6a09ba8b33de3bf85039e2335b9a0abefd7",
+      "seed/custody-emission.md": "57ed66de3c652f39a03da952a730a355309caffcace74f8bc624d7f5c8d44e07"
+    }
+  },
+  "startedAt": "2026-11-19T02:45:32.407537Z",
+  "frozenAt": "2026-11-19T02:45:32.431594Z",
+  "demonstrations": [],
+  "incumbent_round": 1,
+  "incumbent_digest": "577768216cb8e718f3fd3b8dfd123ec25a82734ecbaaffb61ce561fe53690d20",
+  "incumbent_scores": {
+    "D1": 0.0,
+    "D2": 0.0,
+    "D3": 0.0
+  },
+  "last_candidate_digest": "577768216cb8e718f3fd3b8dfd123ec25a82734ecbaaffb61ce561fe53690d20",
+  "defects": [],
+  "solutions": [
+    {
+      "dimension": "D1",
+      "evaluator": "E1",
+      "quotation": "PLUMBLINE-TALLY pass=7 fail=0 skip=5",
+      "round": 1
+    },
+    {
+      "dimension": "D1",
+      "evaluator": "E1",
+      "quotation": "PLUMBLINE-TALLY pass=7 fail=0 skip=5",
+      "round": 1
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E1",
+      "quotation": "They are disclosed gaps, not covered rules.",
+      "round": 1
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E1",
+      "quotation": "They are disclosed gaps, not covered rules.",
+      "round": 1
+    },
+    {
+      "dimension": "D3",
+      "evaluator": "E1",
+      "quotation": "kit/plumbline_verify.py",
+      "round": 1
+    },
+    {
+      "dimension": "D3",
+      "evaluator": "E1",
+      "quotation": "kit/plumbline_verify.py",
+      "round": 1
+    },
+    {
+      "dimension": "D1",
+      "evaluator": "E2",
+      "quotation": "`PLUMBLINE-TALLY pass=7 fail=0 skip=5 skipped=<those ids>`; it exits 0 exactly when `fail=0`.",
+      "round": 1
+    },
+    {
+      "dimension": "D1",
+      "evaluator": "E2",
+      "quotation": "`PLUMBLINE_REQUIRE_CORPUS`: only the exact value `1` turns it on, and then every corpus check that would\n  SKIP is a `FAIL[corpus] <id>` instead and the run exits non-zero.",
+      "round": 1
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E2",
+      "quotation": "`schemas/compliance-checklist.json` lists C37\u2013C40, but no Plumbline check, case or fixture exercises them,\n  and nothing here enforces the roles table or A2/I2. They are disclosed gaps, not covered rules.",
+      "round": 1
+    },
+    {
+      "dimension": "D2",
+      "evaluator": "E2",
+      "quotation": "They are disclosed gaps, not covered rules.",
+      "round": 1
+    },
+    {
+      "dimension": "D3",
+      "evaluator": "E2",
+      "quotation": "The **Plumbline layer** is `kit/plumbline_verify.py`: it runs `check.py` first, requires OK, and then enforces the `x-plumbline` block the\nemitter writes. `x-plumbline` is enforced by Plumbline's verifier only; the standard check.py ignores it.",
+      "round": 1
+    },
+    {
+      "dimension": "D3",
+      "evaluator": "E2",
+      "quotation": "`x-plumbline` is enforced by Plumbline's verifier only; the standard check.py ignores it.",
+      "round": 1
+    }
+  ],
+  "rounds": {
+    "1": {
+      "dir": "rounds/round-01",
+      "producedAt": "2026-11-19T02:45:32.492947Z",
+      "digest": "577768216cb8e718f3fd3b8dfd123ec25a82734ecbaaffb61ce561fe53690d20",
+      "checks": [
+        {
+          "dimension": "D1",
+          "evaluator": "E1",
+          "run": 1,
+          "batch": "B1",
+          "at": "2026-11-19T02:45:34.211786Z",
+          "outcome": "conforms",
+          "score": null,
+          "quotation": "PLUMBLINE-TALLY pass=7 fail=0 skip=5",
+          "failureCondition": "Single-command stranger test runner (tests/run_all.py + PLUMBLINE-TALLY) and explicit EDI_CORPUS, PLUMBLINE_REQUIRE_CORPUS, and CUSTODY_DIR behavior/exit codes.",
+          "evidence": {
+            "name": "reading-D1-E1-r1-run1.json",
+            "sha256": "ca156be9cf8fe18bb0cf54d62e6c7890189d083a7c6f049801fc94d28e41f18a"
+          },
+          "unobserved": null
+        },
+        {
+          "dimension": "D1",
+          "evaluator": "E1",
+          "run": 2,
+          "batch": "B1",
+          "at": "2026-11-19T02:45:34.413691Z",
+          "outcome": "conforms",
+          "score": null,
+          "quotation": "PLUMBLINE-TALLY pass=7 fail=0 skip=5",
+          "failureCondition": "Single-command stranger test runner (tests/run_all.py + PLUMBLINE-TALLY) and explicit EDI_CORPUS, PLUMBLINE_REQUIRE_CORPUS, and CUSTODY_DIR behavior/exit codes.",
+          "evidence": {
+            "name": "reading-D1-E1-r1-run2.json",
+            "sha256": "91602d8ed554cec95933605b2801ef89e5ff3f23d5e10ff2d95cf2798ab1e941"
+          },
+          "unobserved": null
+        },
+        {
+          "dimension": "D2",
+          "evaluator": "E1",
+          "run": 1,
+          "batch": "B1",
+          "at": "2026-11-19T02:45:34.616093Z",
+          "outcome": "conforms",
+          "score": null,
+          "quotation": "They are disclosed gaps, not covered rules.",
+          "failureCondition": "Honest disclosure of known limitations: hand-entered times refused by default (exit 3, hand-time) and flagged under --allow-hand-times, and C37-C40 disclosed as unexercised gaps.",
+          "evidence": {
+            "name": "reading-D2-E1-r1-run1.json",
+            "sha256": "899f71eddb2c28f3590246b8bbb34aec95a9fa047734de1095a1dc92bd06d742"
+          },
+          "unobserved": null
+        },
+        {
+          "dimension": "D2",
+          "evaluator": "E1",
+          "run": 2,
+          "batch": "B1",
+          "at": "2026-11-19T02:45:34.818818Z",
+          "outcome": "conforms",
+          "score": null,
+          "quotation": "They are disclosed gaps, not covered rules.",
+          "failureCondition": "Honest disclosure of known limitations: hand-entered times refused by default (exit 3, hand-time) and flagged under --allow-hand-times, and C37-C40 disclosed as unexercised gaps.",
+          "evidence": {
+            "name": "reading-D2-E1-r1-run2.json",
+            "sha256": "37c34745178ebceab5501e23d59be6ad972a8ce58404adf01c70f53bcccce17b"
+          },
+          "unobserved": null
+        },
+        {
+          "dimension": "D3",
+          "evaluator": "E1",
+          "run": 1,
+          "batch": "B1",
+          "at": "2026-11-19T02:45:35.022350Z",
+          "outcome": "conforms",
+          "score": null,
+          "quotation": "kit/plumbline_verify.py",
+          "failureCondition": "Two-layer custody verification boundary (checker/check.py at 3e3ca58 ignoring x- keys + kit/plumbline_verify.py enforcing x-plumbline) and doctrine commit pin f8bfb793.",
+          "evidence": {
+            "name": "reading-D3-E1-r1-run1.json",
+            "sha256": "911755ff35fefdea6cd17e49d4f5dfc084c3a8afde68d7da7fa254a5d1ca407e"
+          },
+          "unobserved": null
+        },
+        {
+          "dimension": "D3",
+          "evaluator": "E1",
+          "run": 2,
+          "batch": "B1",
+          "at": "2026-11-19T02:45:35.229914Z",
+          "outcome": "conforms",
+          "score": null,
+          "quotation": "kit/plumbline_verify.py",
+          "failureCondition": "Two-layer custody verification boundary (checker/check.py at 3e3ca58 ignoring x- keys + kit/plumbline_verify.py enforcing x-plumbline) and doctrine commit pin f8bfb793.",
+          "evidence": {
+            "name": "reading-D3-E1-r1-run2.json",
+            "sha256": "bcb4c1df0eda90578e10235be811f2221349e63b43e2ddf0e6f9080af349c967"
+          },
+          "unobserved": null
+        },
+        {
+          "dimension": "D1",
+          "evaluator": "E2",
+          "run": 1,
+          "batch": "B1",
+          "at": "2026-11-19T02:45:59.661112Z",
+          "outcome": "conforms",
+          "score": null,
+          "quotation": "`PLUMBLINE-TALLY pass=7 fail=0 skip=5 skipped=<those ids>`; it exits 0 exactly when `fail=0`.",
+          "failureCondition": "Single-command stranger test runner (tests/run_all.py + PLUMBLINE-TALLY) and explicit EDI_CORPUS, PLUMBLINE_REQUIRE_CORPUS, and CUSTODY_DIR behavior/exit codes.",
+          "evidence": {
+            "name": "reading-D1-E2-r1-run1.json",
+            "sha256": "c6638446ea5dfe951f672917c2a5bd3af8b1ff07e8d2d9deca74d33801d37275"
+          },
+          "unobserved": null,
+          "endpoint": "openrouter.ai"
+        },
+        {
+          "dimension": "D1",
+          "evaluator": "E2",
+          "run": 2,
+          "batch": "B1",
+          "at": "2026-11-19T02:46:02.155593Z",
+          "outcome": "conforms",
+          "score": null,
+          "quotation": "`PLUMBLINE_REQUIRE_CORPUS`: only the exact value `1` turns it on, and then every corpus check that would\n  SKIP is a `FAIL[corpus] <id>` instead and the run exits non-zero.",
+          "failureCondition": "Single-command stranger test runner (tests/run_all.py + PLUMBLINE-TALLY) and explicit EDI_CORPUS, PLUMBLINE_REQUIRE_CORPUS, and CUSTODY_DIR behavior/exit codes.",
+          "evidence": {
+            "name": "reading-D1-E2-r1-run2.json",
+            "sha256": "41fa10c63887ff22841e546cbc6adccbea111d2a35ee151c9e2ed06c3f8442bb"
+          },
+          "unobserved": null,
+          "endpoint": "openrouter.ai"
+        },
+        {
+          "dimension": "D2",
+          "evaluator": "E2",
+          "run": 1,
+          "batch": "B1",
+          "at": "2026-11-19T02:46:04.978732Z",
+          "outcome": "conforms",
+          "score": null,
+          "quotation": "`schemas/compliance-checklist.json` lists C37\u2013C40, but no Plumbline check, case or fixture exercises them,\n  and nothing here enforces the roles table or A2/I2. They are disclosed gaps, not covered rules.",
+          "failureCondition": "Honest disclosure of known limitations: hand-entered times refused by default (exit 3, hand-time) and flagged under --allow-hand-times, and C37-C40 disclosed as unexercised gaps.",
+          "evidence": {
+            "name": "reading-D2-E2-r1-run1.json",
+            "sha256": "bb013f614042684388a0859542d24b449594fec78aace5e94dd622964db40fbd"
+          },
+          "unobserved": null,
+          "endpoint": "openrouter.ai"
+        },
+        {
+          "dimension": "D2",
+          "evaluator": "E2",
+          "run": 2,
+          "batch": "B1",
+          "at": "2026-11-19T02:46:07.376347Z",
+          "outcome": "conforms",
+          "score": null,
+          "quotation": "They are disclosed gaps, not covered rules.",
+          "failureCondition": "Honest disclosure of known limitations: hand-entered times refused by default (exit 3, hand-time) and flagged under --allow-hand-times, and C37-C40 disclosed as unexercised gaps.",
+          "evidence": {
+            "name": "reading-D2-E2-r1-run2.json",
+            "sha256": "2b15d921d6e5b6e41ddb05fe58636dec5d4f5711f9e6027a719ed29f5949d400"
+          },
+          "unobserved": null,
+          "endpoint": "openrouter.ai"
+        },
+        {
+          "dimension": "D3",
+          "evaluator": "E2",
+          "run": 1,
+          "batch": "B1",
+          "at": "2026-11-19T02:46:10.514902Z",
+          "outcome": "conforms",
+          "score": null,
+          "quotation": "The **Plumbline layer** is `kit/plumbline_verify.py`: it runs `check.py` first, requires OK, and then enforces the `x-plumbline` block the\nemitter writes. `x-plumbline` is enforced by Plumbline's verifier only; the standard check.py ignores it.",
+          "failureCondition": "Two-layer custody verification boundary (checker/check.py at 3e3ca58 ignoring x- keys + kit/plumbline_verify.py enforcing x-plumbline) and doctrine commit pin f8bfb793.",
+          "evidence": {
+            "name": "reading-D3-E2-r1-run1.json",
+            "sha256": "47b187b02f2267377bb207a863fb17df51f8bdd48cf19c7dd6d2e0995ce16b66"
+          },
+          "unobserved": null,
+          "endpoint": "openrouter.ai"
+        },
+        {
+          "dimension": "D3",
+          "evaluator": "E2",
+          "run": 2,
+          "batch": "B1",
+          "at": "2026-11-19T02:46:13.902224Z",
+          "outcome": "conforms",
+          "score": null,
+          "quotation": "`x-plumbline` is enforced by Plumbline's verifier only; the standard check.py ignores it.",
+          "failureCondition": "Two-layer custody verification boundary (checker/check.py at 3e3ca58 ignoring x- keys + kit/plumbline_verify.py enforcing x-plumbline) and doctrine commit pin f8bfb793.",
+          "evidence": {
+            "name": "reading-D3-E2-r1-run2.json",
+            "sha256": "9f9db13140c5fa61cd11c9c2b24fac9a88867a8586baddb4c8a7960fdbef6cb4"
+          },
+          "unobserved": null,
+          "endpoint": "openrouter.ai"
+        }
+      ],
+      "controls": [
+        {
+          "id": "K-B1-E1-D1-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "dimension": "D1",
+          "case": {
+            "sha256": "f4b10b8bb6adfc34c0c0bb66787820ed82d03ec2bcd3f3d3424403e4c2d21d3c"
+          },
+          "expected": "conforms",
+          "outcome": "conforms"
+        },
+        {
+          "id": "K-B1-E1-D1-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "dimension": "D1",
+          "case": {
+            "sha256": "673c4236dbadc1490db09ea39589448e1dca2991f6f06fe3b4d82281247191cf"
+          },
+          "expected": "does_not_conform",
+          "outcome": "does_not_conform"
+        },
+        {
+          "id": "K-B1-E1-D2-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "dimension": "D2",
+          "case": {
+            "sha256": "f4b10b8bb6adfc34c0c0bb66787820ed82d03ec2bcd3f3d3424403e4c2d21d3c"
+          },
+          "expected": "conforms",
+          "outcome": "conforms"
+        },
+        {
+          "id": "K-B1-E1-D2-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "dimension": "D2",
+          "case": {
+            "sha256": "673c4236dbadc1490db09ea39589448e1dca2991f6f06fe3b4d82281247191cf"
+          },
+          "expected": "does_not_conform",
+          "outcome": "does_not_conform"
+        },
+        {
+          "id": "K-B1-E1-D3-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "dimension": "D3",
+          "case": {
+            "sha256": "f4b10b8bb6adfc34c0c0bb66787820ed82d03ec2bcd3f3d3424403e4c2d21d3c"
+          },
+          "expected": "conforms",
+          "outcome": "conforms"
+        },
+        {
+          "id": "K-B1-E1-D3-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "dimension": "D3",
+          "case": {
+            "sha256": "673c4236dbadc1490db09ea39589448e1dca2991f6f06fe3b4d82281247191cf"
+          },
+          "expected": "does_not_conform",
+          "outcome": "does_not_conform"
+        },
+        {
+          "id": "K-B1-E2-D1-clean",
+          "batch": "B1",
+          "evaluator": "E2",
+          "dimension": "D1",
+          "case": {
+            "sha256": "f4b10b8bb6adfc34c0c0bb66787820ed82d03ec2bcd3f3d3424403e4c2d21d3c"
+          },
+          "expected": "conforms",
+          "outcome": "conforms"
+        },
+        {
+          "id": "K-B1-E2-D1-planted",
+          "batch": "B1",
+          "evaluator": "E2",
+          "dimension": "D1",
+          "case": {
+            "sha256": "673c4236dbadc1490db09ea39589448e1dca2991f6f06fe3b4d82281247191cf"
+          },
+          "expected": "does_not_conform",
+          "outcome": "does_not_conform"
+        },
+        {
+          "id": "K-B1-E2-D2-clean",
+          "batch": "B1",
+          "evaluator": "E2",
+          "dimension": "D2",
+          "case": {
+            "sha256": "f4b10b8bb6adfc34c0c0bb66787820ed82d03ec2bcd3f3d3424403e4c2d21d3c"
+          },
+          "expected": "conforms",
+          "outcome": "conforms"
+        },
+        {
+          "id": "K-B1-E2-D2-planted",
+          "batch": "B1",
+          "evaluator": "E2",
+          "dimension": "D2",
+          "case": {
+            "sha256": "673c4236dbadc1490db09ea39589448e1dca2991f6f06fe3b4d82281247191cf"
+          },
+          "expected": "does_not_conform",
+          "outcome": "does_not_conform"
+        },
+        {
+          "id": "K-B1-E2-D3-clean",
+          "batch": "B1",
+          "evaluator": "E2",
+          "dimension": "D3",
+          "case": {
+            "sha256": "f4b10b8bb6adfc34c0c0bb66787820ed82d03ec2bcd3f3d3424403e4c2d21d3c"
+          },
+          "expected": "conforms",
+          "outcome": "conforms"
+        },
+        {
+          "id": "K-B1-E2-D3-planted",
+          "batch": "B1",
+          "evaluator": "E2",
+          "dimension": "D3",
+          "case": {
+            "sha256": "673c4236dbadc1490db09ea39589448e1dca2991f6f06fe3b4d82281247191cf"
+          },
+          "expected": "does_not_conform",
+          "outcome": "does_not_conform"
+        }
+      ],
+      "scores": [
+        {
+          "id": "K-B1-E1-D1-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "conforms",
+          "score": 1.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E1-D1-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "does_not_conform",
+          "score": 0.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E1-D2-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "conforms",
+          "score": 1.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E1-D2-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "does_not_conform",
+          "score": 0.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E1-D3-clean",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "conforms",
+          "score": 1.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E1-D3-planted",
+          "batch": "B1",
+          "evaluator": "E1",
+          "expected": "does_not_conform",
+          "score": 0.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E2-D1-clean",
+          "batch": "B1",
+          "evaluator": "E2",
+          "expected": "conforms",
+          "score": 1.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E2-D1-planted",
+          "batch": "B1",
+          "evaluator": "E2",
+          "expected": "does_not_conform",
+          "score": 0.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E2-D2-clean",
+          "batch": "B1",
+          "evaluator": "E2",
+          "expected": "conforms",
+          "score": 1.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E2-D2-planted",
+          "batch": "B1",
+          "evaluator": "E2",
+          "expected": "does_not_conform",
+          "score": 0.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E2-D3-clean",
+          "batch": "B1",
+          "evaluator": "E2",
+          "expected": "conforms",
+          "score": 1.0,
+          "threshold": 4.0
+        },
+        {
+          "id": "K-B1-E2-D3-planted",
+          "batch": "B1",
+          "evaluator": "E2",
+          "expected": "does_not_conform",
+          "score": 0.0,
+          "threshold": 4.0
+        }
+      ],
+      "external": [
+        {
+          "requirement": "CL1-15",
+          "subject": "E2",
+          "evidence": {
+            "name": "harness-E2-B1.json",
+            "sha256": "256974390af0c59d309354e1b80e674a409aa78ed1f705831ce6c21c8cfc8776"
+          },
+          "readBy": "edi-run"
+        }
+      ],
+      "dim_scores": {
+        "D1": 0.0,
+        "D2": 0.0,
+        "D3": 0.0
+      }
+    }
+  },
+  "terminal_state": "accepted",
+  "reason": "census",
+  "cost_usd": 0.82491,
+  "seed": {
+    "dir": "seed",
+    "author": "Dana Voss",
+    "digests": {
+      "README.md": "c2939ad29031769406cb1b6c464fa6a09ba8b33de3bf85039e2335b9a0abefd7",
+      "custody-emission.md": "57ed66de3c652f39a03da952a730a355309caffcace74f8bc624d7f5c8d44e07"
+    }
+  },
+  "open_round": null,
+  "usage_anchor": [
+    24,
+    "e03cfbb160ec0b2d9bda16a1970db196693c7ff9d026bc9d3c58a2403c95e372",
+    0.82491
+  ],
+  "seed_round": 1,
+  "wall_spent_seconds": 41.44971704483032,
+  "token_usage": {
+    "anthropic/claude-opus-5.5": {
+      "prompt_tokens": 158412,
+      "completion_tokens": 1314,
+      "total_tokens": 159726,
+      "cost": 0.659928,
+      "is_byok": 0
+    }
+  }
+}

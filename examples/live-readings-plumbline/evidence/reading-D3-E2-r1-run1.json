@@ -1,0 +1,8 @@
+{
+  "dimension": "D3",
+  "evaluator": "E2",
+  "round": 1,
+  "run": 1,
+  "outcome": "conforms",
+  "quotation": "The **Plumbline layer** is `kit/plumbline_verify.py`: it runs `check.py` first, requires OK, and then enforces the `x-plumbline` block the\nemitter writes. `x-plumbline` is enforced by Plumbline's verifier only; the standard check.py ignores it."
+}
