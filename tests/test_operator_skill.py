@@ -573,20 +573,34 @@ class TestReviewBriefing2026_11_19(OperatorScriptTest):
         self.assertEqual(pf.returncode, 0, pf.stdout)
         out = json.loads(pf.stdout)
         self.assertTrue(out["pass"], out["violations"])
-        # and the symmetric negative: a seed author (distinct from the Maker, so
-        # gate_seats stays quiet) seated as an Evaluator is refused by gate_authorship
-        cfg["evaluators"][0]["name"] = "Dana Seed"
-        cfg["evaluators"][0]["script"]["author"] = "Dana Seed"
-        cfg["evaluators"][0]["script"]["digest"]["sha256"] = sha256_bytes(b"x")
-        cfg["seed"]["author"] = "Dana Seed"
-        (succ / "job.json").write_text(json.dumps(cfg, indent=2))
-        (succ / "AUTHORSHIP.md").write_text(
+        # a REAL freeze (pins + digests the seed dir), not just the preflight oracle
+        fr = run_edi("freeze", succ)
+        self.assertEqual(fr.returncode, 0, fr.stderr)
+        # the pred job ended needs_owner/cap_reached with NO incumbent branch exercised:
+        # finalize --disposition declined covers the no-incumbent finalize branch too
+        fd = run_edi("finalize", pred, "--disposition", "declined", "--by", "Casey Park")
+        self.assertEqual(fd.returncode, 0, fd.stderr)
+
+    def test_seed_author_seated_as_evaluator_is_refused_clean(self):
+        # symmetric negative on an UNFROZEN job: a seed author distinct from the
+        # Maker (so gate_seats stays quiet) seated as an Evaluator is refused by
+        # gate_authorship, and the refusal names the seed author and the seat.
+        job = self._make_base_job("seed-eval")
+        (job / "AUTHORSHIP.md").write_text(
             "Operator: someone-else\nBar author: Jordan Blake\nRubric author: Morgan Lee\n"
             "Method author: Morgan Lee\nSeed author: Dana Seed\nSponsor:\n", encoding="utf-8")
-        pf2 = run_script("preflight.py", succ, env_extra=self.env)
-        self.assertEqual(pf2.returncode, 1, "seed author seated as Evaluator must be refused")
-        self.assertIn("seed author", pf2.stdout)
-        self.assertIn("Evaluator", pf2.stdout)
+        cfg = json.loads((job / "job.json").read_text())
+        cfg["seed"] = {"dir": "seed", "author": "Dana Seed", "origin": "prior incumbent"}
+        cfg["evaluators"][0]["name"] = "Dana Seed"  # the seat collision under test
+        cfg["evaluators"][0]["script"]["author"] = "Dana Seed"
+        cfg["evaluators"][0]["script"]["digest"]["sha256"] = sha256_bytes(b"x")
+        (job / "seed").mkdir(exist_ok=True)
+        (job / "seed" / "memo.md").write_text("# Header\nFigure: 42% (Source: Q3)\n", encoding="utf-8")
+        (job / "job.json").write_text(json.dumps(cfg, indent=2))
+        pf = run_script("preflight.py", job, env_extra=self.env)
+        self.assertEqual(pf.returncode, 1, "seed author seated as Evaluator must be refused")
+        self.assertIn("seed author", pf.stdout)
+        self.assertIn("Evaluator", pf.stdout)
 
     def test_secret_inside_longer_string_is_scrubbed(self):
         sys.path.insert(0, str(SCRIPTS))
@@ -654,35 +668,34 @@ class TestMaintainerFeedback0_1_1(OperatorScriptTest):
     def test_helper_scripts_accept_relative_job_paths(self):
         job = self._make_base_job("rel")
         self._run_job(job)
-        env = {**os.environ, "EDI_AGENT_ID": AGENT, "EDI_HOME": str(self.home),
-               "EDI_REPO": str(ROOT)}
-        r = subprocess.run([sys.executable, str(SCRIPTS / "record_summary.py"), "rel"],
-                           capture_output=True, text=True, cwd=str(self.tmp), env=env, timeout=120)
-        out = json.loads(r.stdout)
-        self.assertTrue(out["verified"], out)
-        self.assertEqual(out["verdict"], "OK")
+        pre = self._make_base_job("rel2")  # unfrozen: preflight's dry-run oracle
+        esc_job = self._make_base_job("rel3")
+        for cmd in (["freeze", esc_job], ["run", esc_job]):  # needs_owner: escalatable
+            self.assertEqual(run_edi(*cmd).returncode, 0)
+        (esc_job / "escalation.json").write_text(json.dumps(
+            {"reason": "cap_reached", "recommendation": "accept-incumbent"}), encoding="utf-8")
+        for script, target in (("record_summary.py", "rel"), ("preflight.py", "rel2"),
+                               ("escalation_report.py", "rel3"), ("cost_report.py", "rel")):
+            env = {**os.environ, "EDI_AGENT_ID": AGENT, "EDI_HOME": str(self.tmp),
+                   "EDI_REPO": str(ROOT)}
+            r = subprocess.run([sys.executable, str(SCRIPTS / script), target],
+                               capture_output=True, text=True, cwd=str(self.tmp), env=env, timeout=120)
+            self.assertEqual(r.returncode, 0, f"{script}: {r.stderr}")
+            json.loads(r.stdout)  # must parse; a failure above already asserted rc
 
     def test_hermes_env_key_fallback_is_opt_in(self):
         import adapters
+        from unittest import mock
         fake_home = self.tmp / "fakehome"
         (fake_home / ".hermes").mkdir(parents=True)
         (fake_home / ".hermes" / ".env").write_text('OPENROUTER_API_KEY="sk-fake-fallback"\n')
-        orig_home = adapters.pathlib.Path.home
-        adapters.pathlib.Path.home = staticmethod(lambda: fake_home)
-        env_key = os.environ.pop("OPENROUTER_API_KEY", None)
-        fb = os.environ.pop("EDI_KEY_FALLBACK", None)
-        try:
+        with mock.patch.object(adapters.pathlib.Path, "home", staticmethod(lambda: fake_home)), \
+             mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("OPENROUTER_API_KEY", None)
+            os.environ.pop("EDI_KEY_FALLBACK", None)
             self.assertEqual(adapters._load_key(), "")  # opt-in: silent fallback is gone
             os.environ["EDI_KEY_FALLBACK"] = "1"
             self.assertEqual(adapters._load_key(), "sk-fake-fallback")
-        finally:
-            adapters.pathlib.Path.home = orig_home
-            if env_key is not None:
-                os.environ["OPENROUTER_API_KEY"] = env_key
-            if fb is not None:
-                os.environ["EDI_KEY_FALLBACK"] = fb
-            else:
-                os.environ.pop("EDI_KEY_FALLBACK", None)  # never leak the opt-in to later tests
 
 
 if __name__ == "__main__":

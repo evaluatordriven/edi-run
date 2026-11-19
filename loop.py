@@ -1,7 +1,7 @@
 """Deterministic E-DI state machine (I-05 through I-07) wrapping evaluatordriven/custody tools."""
 from collections import Counter
 from contextlib import contextmanager
-import fcntl, hashlib, json, math, os, pathlib, shutil, signal, subprocess, sys, threading, time
+import fcntl, hashlib, json, math, os, pathlib, shutil, signal, subprocess, sys, threading, time, urllib.parse
 import adapters, gates, metering
 from metering import Meter, CapExceeded
 
@@ -180,6 +180,11 @@ def _ok_rate(v):
 
 def freeze_job(job_dir, started_at=None, dry_run=False):
     # G:I-01/I-02/G2/F5 validate all freeze gates before any disk write; hold job_lock on real freeze
+    job_dir = pathlib.Path(job_dir).resolve()
+    if not (job_dir / "job.json").is_file():
+        # refuse BEFORE the lock: job_lock creates job.lock inside the folder, and a
+        # refused freeze must not litter an arbitrary directory
+        raise gates.GateError(f"no job.json in {job_dir}; this is not a job directory (edi.py init scaffolds one)")
     if dry_run:
         return _freeze_job_inner(job_dir, started_at=started_at, dry_run=True)
     with job_lock(job_dir):
@@ -188,13 +193,33 @@ def freeze_job(job_dir, started_at=None, dry_run=False):
 
 def _freeze_job_inner(job_dir, started_at=None, dry_run=False):
     job_dir = pathlib.Path(job_dir).resolve()
-    if not (job_dir / "job.json").is_file():
-        raise gates.GateError(f"no job.json in {job_dir}; this is not a job directory (edi.py init scaffolds one)")
     cfg = _load_job_json(job_dir)
     _preflight_freeze_cfg(cfg)
     pre_snap = _job_snapshot(job_dir) if dry_run else None
     gates.gate_bounds(cfg)
     gates.gate_seats(cfg, job_dir)
+    # Fail fast on keys: a model/agent seat whose key env resolves empty would 401 at
+    # dispatch — AFTER Maker spend. Refuse at freeze and name the opt-in remedy.
+    # Loopback endpoints (test fakes, local relays) can't spend real money: exempt.
+    def _loopback(url):
+        try:
+            host = (urllib.parse.urlparse(str(url)).hostname or "")
+        except ValueError:
+            return False
+        return host in ("127.0.0.1", "localhost", "::1")
+    key_needs = []
+    if cfg["maker"].get("kind") == "model" and not _loopback(cfg["maker"].get("url")):
+        # agent seats are OUT of scope here: their key flows through the runtime's own
+        # relay (read at run time; the proxy 402/403 path already fails fast on empty)
+        key_needs.append(("maker", cfg["maker"].get("apiKeyEnv", "OPENROUTER_API_KEY")))
+    key_needs += [(f"evaluator {e.get('id')}", e.get("apiKeyEnv", "OPENROUTER_API_KEY"))
+                  for e in cfg["evaluators"]
+                  if e.get("kind") == "model" and not _loopback(e.get("url"))]
+    for seat_label, env_name in key_needs:
+        if not adapters._load_key(env_name):
+            raise gates.GateError(
+                f"{seat_label} needs {env_name} but it resolves empty in the environment; "
+                f"export it, or set EDI_KEY_FALLBACK=1 to opt into the ~/.hermes/.env fallback")
     model_ids = []
     if cfg["maker"].get("kind") in ("model", "agent"):
         model_ids.append((cfg["maker"].get("model") or {}).get("identifier") if isinstance(cfg["maker"].get("model"), dict) else cfg["maker"].get("model"))

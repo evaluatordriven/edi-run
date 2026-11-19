@@ -106,13 +106,14 @@ def gate_authorship(cfg, job_dir):
             raise GateError(f"AUTHORSHIP.md declares Operator equal to the {key} ({auth}); the Operator seat cannot author an instrument it operates (CL1-6)")
     # Spec §2: an instrument's author may never sit as Maker or Evaluator — an
     # author judging with (or making against) their own rubric is self-endorsement.
-    seats = [(f"Maker {maker.get('name')}", maker.get("name"))] + [
-        (f"Evaluator {e.get('id') or e.get('name')}", e.get("name"))
+    # Seats carry their ROLE explicitly; never rely on list position.
+    seats = [("maker", f"Maker {maker.get('name')}", maker.get("name"))] + [
+        ("evaluator", f"Evaluator {e.get('id') or e.get('name')}", e.get("name"))
         for e in (cfg.get("evaluators") or [])]
     for key in ("bar author", "rubric author", "method author"):
         if not (auth := a.get(key)):
             continue
-        for label, name in seats:
+        for _role, label, name in seats:
             if name and _canon(name) == auth:
                 raise GateError(f"AUTHORSHIP.md declares {key} ({auth}) seated as {label}; an instrument's author may not act as Maker or Evaluator (CL1-6)")
     if (seed_auth := a.get("seed author")):
@@ -120,8 +121,10 @@ def gate_authorship(cfg, job_dir):
         # seat is allowed, because the raise-bounds successor path (loop.py
         # "re-freeze a successor job carrying the incumbent forward") carries a
         # prior incumbent forward as seed with its producing Maker named.
-        for label, name in seats[1:]:
-            if name and _canon(name) == seed_auth:
+        for role, label, name in seats:
+            if role != "evaluator" or not name:
+                continue
+            if _canon(name) == seed_auth:
                 raise GateError(f"AUTHORSHIP.md declares seed author ({seed_auth}) seated as {label}; the seed's author may not judge their own draft (CL1-6)")
 
 
@@ -136,7 +139,13 @@ def gate_freeze_pre(cfg, job_dir):
     # Note the threshold need NOT sit above the lowest anchor.
     if mode != "readings":
         for d in (bar.get("dimensions") or []):
-            sc = d.get("scale") if isinstance(d, dict) else None
+            if not isinstance(d, dict):
+                continue
+            if "scale" not in d:
+                # scored mode: every dimension will be scored, and check.py refuses a
+                # scored dimension without a scale — after spend. Refuse here instead.
+                raise GateError(f"{d.get('id')}: scored-mode dimension declares no scale (CL1-2; it would fail verify after spend)")
+            sc = d.get("scale")
             if not isinstance(sc, dict):
                 continue
             # anchors must be an object keyed BY score (check.py KIND rejects lists/strings)
