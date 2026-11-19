@@ -1,5 +1,20 @@
 # edi-run DECISIONS.log — newest at TOP
 
+## 2026-11-19 — Ruling A: Authorship and Seats (`Briefing_for_the_edi_run_maintainer_0_1_0_operator_skill_defects.md`, PR #17)
+
+**Ruling (Owner: S2, 2026-11-19).** Confirmed the recommended path: **keep the runtime rule** — the Operator never authors the bar, rubric, method or seed; and the author of bar/rubric/method never sits as Maker or Evaluator (the seed's author never sits as an Evaluator). Defects 1–2 of the 2026-11-19 briefing fixed as written; the alternative (operator authors its own instruments) was rejected — it would drop a separation `gate_authorship` already enforces.
+
+**Implemented (PR #17, commits `f3533be` + `57c32d1`, merged to `main`):**
+- `gates.py gate_authorship`: refuses at freeze when an AUTHORSHIP.md bar/rubric/method author equals `maker.name` or any `evaluators[].name` (canon compare), or the seed author sits as Maker/Evaluator — preflight and real freeze now agree.
+- `SKILL.md` §4/P1 rewritten: the operator scaffolds and transcribes verbatim; "you author all content" removed.
+- `docs/2026-EDI-OPERATOR-SKILL-SPEC.md` §2 carries both rules and names `gate_authorship` as the freeze-time enforcement point.
+- Same PR also fixed briefing defects 3–6, all minor items, and the 2026-11-18f release review `A1`–`A8` (scaffold CR-2 fields, clean run-refusal, per-operator watch marker, `--seed-dir` copies, secret-scrub span redaction, `repo_root` EDI_REPO refusal, README CI section + the fork-PR-on-self-hosted-runner risk flag).
+
+**Gates at merge:** external repro `repro_skill_0_1_0.py` **6/6** (0/6 red before); ADDITIONS-6 **8/8** (1/8 red before); suite **281 OK**; LOC **1,652 ≤ 1,777**; probe gate 14 PASS / 0 FAIL / 1 KNOWN-FAIL / 5 SKIP (baseline); CI all green on both PR heads.
+
+**Still open (tracked):** key→host binding in `adapters.py`; CL1-15 self-vouching `readBy` in `loop.py`; the 1,879 weighted-line count vs the 1,777 cap (18f; `loc.py` counts 1,652 code lines — the two reviews count differently, ruling pending); the undelivered guarantee map; Maker/Evaluator seat-bot disposition (adoption plan D3).
+
+
 ## 2026-11-18 — Five Readings-Mode Fixes (`edi-run-memo-readings-fixes-2026-11-18.pdf` & `NOTE-TO-MAINTAINER-2026-11-18e.md`)
 
 **Source.** Owner memo `edi-run-memo-readings-fixes-2026-11-18.pdf` (Fixes 1–5) and Grok Bot `NOTE-TO-MAINTAINER-2026-11-18e.md` (`RD2`, `RD4`, `RD5`, `F1`/`N21`).
