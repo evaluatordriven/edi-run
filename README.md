@@ -1,6 +1,6 @@
-# edi-run (`v0.1.1`)
+# edi-run (`v0.1.2`)
 
-Minimal Python 3.10+ standard-library reference runtime (`v0.1.1`, released 2026-11-19) for [Evaluator-Driven Iteration (E-DI)](https://github.com/evaluatordriven/doctrine) emitting conforming [`custody/v1` records](https://github.com/evaluatordriven/custody).
+Minimal Python 3.10+ standard-library reference runtime (`v0.1.2`, released 2026-11-19) for [Evaluator-Driven Iteration (E-DI)](https://github.com/evaluatordriven/doctrine) emitting conforming [`custody/v1` records](https://github.com/evaluatordriven/custody).
 
 ## Architecture
 
