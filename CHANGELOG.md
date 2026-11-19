@@ -1,5 +1,9 @@
 # edi-run CHANGELOG
 
+## Unreleased
+
+- Operator skill (Grok Bot 0.1.3 qualification feedback): `check_held_out.py <job_dir> <file>` ships as the one-command held-out filter for anything leaving a job with a `held_out/` folder (P5/§6 instruction added; disclosed limit unchanged — paraphrases/short fragments aren't caught). P6 now says what to do when `escalation_report.py` refuses (a run that died before recording a terminal failure): include the refusal verbatim in the loud report, never write your own stop record. §7.7 now forbids passing the key file to ANY command (`grep -f`, `diff`, `cmp`, `wc`, a hash) and ships `scan_keys.py <dir>` — scan by published key formats, report paths and counts only.
+
 ## v0.1.3 (2026-11-19)
 
 - **Pre-finalize `record_summary.py` reports the full score spread**: the pre-disposition stage rebuilt its scores from `state.incumbent_scores`, which `loop.py` constructs as the **minimum** per dimension — a split between Evaluators reached the Owner as one number in the summary the Owner rules on. It now builds the same `{observations[], min, max, straddles_threshold}` shape from the incumbent round's checks (every evaluator/run observation) and names the round it read (`scores_round`).

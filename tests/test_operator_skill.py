@@ -696,6 +696,34 @@ class TestReviewBriefing2026_11_19(OperatorScriptTest):
         self.assertEqual(f.returncode, 0, f.stderr)
         self.assertEqual(run_edi("verify", job).returncode, 0)
 
+    def test_check_held_out_catches_leak_and_passes_clean(self):
+        # Grok Bot 0.1.3 feedback #1: nothing leaving a job may carry held-out text
+        ex = ROOT / "examples" / "two-round-job"
+        good = self.tmp / "good.md"
+        good.write_text("# Header\nbenign operator summary\n", encoding="utf-8")
+        r = run_script("check_held_out.py", ex, good, env_extra=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        held = next(p for p in (ex / "held_out").rglob("*") if p.is_file())
+        bad = self.tmp / "bad.md"
+        bad.write_text(held.read_text(encoding="utf-8"), encoding="utf-8")
+        r = run_script("check_held_out.py", ex, bad, env_extra=self.env)
+        self.assertEqual(r.returncode, 1, "held-out leak must exit non-zero")
+        self.assertNotIn(held.read_text(encoding="utf-8")[:40], r.stdout)  # never echo the match
+
+    def test_scan_keys_reports_paths_and_counts_only(self):
+        # Grok Bot 0.1.3 feedback #3: scan by published format, never the key file
+        d = self.tmp / "tree"
+        d.mkdir()
+        (d / "a.md").write_text("token sk-or-v1-" + "a" * 64 + " here\n", encoding="utf-8")
+        r = run_script("scan_keys.py", d, env_extra=self.env)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("openrouter", r.stdout)
+        needle = "sk-or-v1-" + "a" * 64
+        self.assertNotIn(needle, r.stdout)  # counts and paths only
+        (d / "a.md").write_text("clean text\n", encoding="utf-8")
+        r = run_script("scan_keys.py", d, env_extra=self.env)
+        self.assertEqual(r.returncode, 0, r.stdout)
+
     def test_secret_inside_longer_string_is_scrubbed(self):
         sys.path.insert(0, str(SCRIPTS))
         try:

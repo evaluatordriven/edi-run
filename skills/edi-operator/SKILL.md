@@ -131,9 +131,17 @@ Each procedure ends in exactly one of: **report-to-Owner**, **execute-ruled-acti
   contract. After the Owner rules: execute exactly the ruled action
   (finalize disposition / fix-and-new-job / archive) or halt-and-explain if the
   ruling doesn't map to an action.
+  **Before ANYTHING leaves a job that has a `held_out/` folder** (escalation
+  pack, report, artifact copy), run `check_held_out.py <job_dir> <file>` over
+  it: it must find nothing. On a match, return the file to its author — never
+  edit it yourself. Disclosed limit: paraphrases and fragments under the needle
+  length aren't caught; this check is necessary, not sufficient.
 - **P6 GateError / integrity failure** — a freeze-time gate refusal has no
   state to escalate: report the refusal text itself, loudly. For failures after
-  freeze, run `escalation_report.py`, then a loud report.
+  freeze, run `escalation_report.py`, then a loud report. If `escalation_report.py`
+  REFUSES (this happens when a run died before it recorded a terminal failure
+  state), do not skip the tool and write your own stop record: include the
+  refusal message, verbatim, in the loud report.
   Nothing else. No retry, no workaround, no "harmless" second freeze attempt. The
   Owner decides.
 - **P7 Watch** — `watch_escalations.sh` scans `$EDI_HOME` for new `escalation.json`
@@ -165,7 +173,15 @@ show — not to echo them. An option list identical to the runtime's is unfinish
 4. Never bypass, weaken, or work around a gate; `GateError` means diagnose.
 5. Never fabricate, hand-enter, or "fix" scores or checks.
 6. Never invent prices: `pricing` carries the provider's real rates (freeze refuses $0, negative or missing rates).
-7. Never send an API key anywhere except through edi-run's own adapters; never print one.
+7. Never send an API key anywhere except through edi-run's own adapters; never
+   print one. **Never pass the key file to any command** (`grep -f`, `diff`,
+   `cmp`, `wc`, a hash) — all of them read the key's contents into another
+   process. To check a tree for leaks before reporting or committing, scan by
+   the provider's PUBLISHED key format: `scan_keys.py <dir>` (ships with this
+   skill; prints paths and counts only, never matching lines), or by hand
+   e.g. `rg -c -e 'sk-or-[a-z0-9]+-[0-9a-f]{32,}' <tree>` for OpenRouter, where
+   no output means clean. Disclosed limit: split, encoded or truncated keys
+   aren't caught.
 8. Never finalize without an explicit Owner ruling naming the disposition.
 9. Never claim a result without `record_summary.py` (which runs verification) having run.
 
