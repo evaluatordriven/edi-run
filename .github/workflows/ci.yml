@@ -41,6 +41,14 @@ jobs:
     # Self-hosted macOS runner (Steve-Moitozo, ARM64): the hosted macOS runner queue
     # repeatedly killed queued jobs at ~15m with zero steps (2026-11-17). A local
     # runner picks up instantly and removes the queue from the critical path.
+    #
+    # SECURITY: self-hosted runners must never execute untrusted code. Gate to
+    # pushes on main and same-repo PRs only; fork PRs run CI on the hosted linux
+    # legs above. (Repo was transferred to the evaluatordriven org and may go
+    # public; a bare pull_request trigger would let fork PRs run on this machine.)
+    if: >-
+      github.event_name == 'push'
+      || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, macOS, ARM64]
     steps:
       - uses: actions/checkout@v4
