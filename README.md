@@ -2,6 +2,16 @@
 
 Minimal Python 3.10+ standard-library reference runtime (`v0.1.4`, released 2026-11-19) for [Evaluator-Driven Iteration (E-DI)](https://github.com/evaluatordriven/doctrine) emitting conforming [`custody/v1` records](https://github.com/evaluatordriven/custody).
 
+
+## Licence
+
+- **Text** (`README.md`, `CHANGELOG.md`, `docs/`, operator skill prose under `skills/`): [CC BY 4.0](LICENSE). © 2026 Steve Moitozo II. More at <https://evaluatordriven.com>.
+- **Code** (`edi.py`, `adapters.py`, `gates.py`, `loop.py`, `metering.py`, `probes/`, `tests/`, `vendor/`, `examples/` runtime scripts, `skills/*/scripts/`): [Apache License 2.0](LICENSE-CODE).
+- Apache-2.0 §3 carries an express patent grant for that code; CC BY 4.0 grants none for the text.
+- Which path takes which licence is stated once in [`NOTICE`](NOTICE).
+
+The split matches `evaluatordriven/doctrine` and `evaluatordriven/custody`: copy the runtime under a software licence; quote the docs under the prose licence.
+
 ## Architecture
 
 See [`docs/2026-EDI-Runtime-Solution-Architecture.md`](docs/2026-EDI-Runtime-Solution-Architecture.md).
