@@ -1,5 +1,12 @@
 # edi-run CHANGELOG
 
+## Unreleased — 2026-11-23
+
+**Licence files for the public repo.** No runtime behaviour change.
+
+- Adds `LICENSE` (CC BY 4.0 for docs/prose), `LICENSE-CODE` (Apache-2.0 for code; same text as custody/doctrine), and `NOTICE` (path split + personal-capacity copyright).
+- README: Licence section matching the doctrine/custody dual-licence pattern.
+
 ## v0.1.4 (2026-11-19)
 
 - Operator skill — Grok Bot's 0.1.3 qualification feedback (no core changes; core LOC unchanged at 1,718):
